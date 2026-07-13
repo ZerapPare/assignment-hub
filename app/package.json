@@ -1,0 +1,7 @@
+{
+  "name": "assignment-hub",
+  "dependencies": {
+    "express": "^4.19.0",
+    "mysql2": "^3.10.0"
+  }
+}
