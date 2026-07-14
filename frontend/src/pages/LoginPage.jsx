@@ -4,14 +4,10 @@ import GoogleIcon from '../icons/GoogleIcon';
 import MicrosoftIcon from '../icons/MicrosoftIcon';
 
 function LoginPage() {
-  // Google = real OAuth (full-page redirect to the backend, which redirects to
-  // Google and back). Microsoft is not wired yet.
+  // Both providers are real OAuth (full-page redirect to the backend, which
+  // redirects to the provider's consent screen and back).
   const handleLogin = (provider) => {
-    if (provider === 'google') {
-      window.location.href = '/api/auth/google';
-    } else {
-      alert('เข้าสู่ระบบด้วย Microsoft ยังไม่รองรับ (เร็วๆ นี้)');
-    }
+    window.location.href = provider === 'google' ? '/api/auth/google' : '/api/auth/microsoft';
   };
 
   return (

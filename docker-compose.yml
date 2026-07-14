@@ -24,6 +24,7 @@ services:
       DB_PASSWORD: root123
       DB_NAME: assignment_hub
       OAUTH_REDIRECT_URL: http://localhost:5173/api/auth/google/callback
+      MS_OAUTH_REDIRECT_URL: http://localhost:5173/api/auth/microsoft/callback
       FRONTEND_URL: http://localhost:5173
     volumes:
       - ./backend:/app          # mount source for hot reload
