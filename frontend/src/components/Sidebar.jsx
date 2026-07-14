@@ -9,8 +9,9 @@ const NAV = [
   { key: 'settings', label: 'ตั้งค่า' },
 ];
 
-// Left navigation rail. `active` = current nav key. `student` powers the profile.
-function Sidebar({ active = 'home', student }) {
+// Left navigation rail. `active` = current nav key. `student` powers the
+// profile. `onLogout` clears the session and returns to /login.
+function Sidebar({ active = 'home', student, onLogout }) {
   const name = student?.student_name || 'ผู้ใช้';
   const university = student?.university_name || 'มหาวิทยาลัย';
 
@@ -48,12 +49,17 @@ function Sidebar({ active = 'home', student }) {
         })}
       </nav>
 
-      <div style={styles.profile}>
-        <div style={styles.avatar} />
-        <div style={{ overflow: 'hidden' }}>
-          <div style={styles.profileName}>{name}</div>
-          <div style={styles.profileUni}>{university}</div>
+      <div style={styles.footer}>
+        <div style={styles.profile}>
+          <div style={styles.avatar} />
+          <div style={{ overflow: 'hidden' }}>
+            <div style={styles.profileName}>{name}</div>
+            <div style={styles.profileUni}>{university}</div>
+          </div>
         </div>
+        <button type="button" onClick={onLogout} style={styles.logout}>
+          ออกจากระบบ
+        </button>
       </div>
     </div>
   );
@@ -94,14 +100,25 @@ const styles = {
     fontSize: 14,
   },
   navDot: { width: 8, height: 8, borderRadius: 2 },
+  footer: { marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 8 },
   profile: {
-    marginTop: 'auto',
     display: 'flex',
     alignItems: 'center',
     gap: 10,
     padding: '10px 8px',
     borderRadius: 12,
     background: 'oklch(96% 0.02 90)',
+  },
+  logout: {
+    padding: '9px 12px',
+    borderRadius: 10,
+    border: '1px solid oklch(90% 0.02 290)',
+    background: 'white',
+    color: 'oklch(50% 0.05 290)',
+    fontFamily: 'inherit',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
   },
   avatar: {
     width: 34,

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import StatCard from '../components/StatCard';
 import TaskRow from '../components/TaskRow';
@@ -28,6 +29,7 @@ const FILTERS = [
 ];
 
 function HomePage() {
+  const navigate = useNavigate();
   const [assignments, setAssignments] = useState([]);
   const [student, setStudent] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -35,20 +37,35 @@ function HomePage() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/assignments').then((r) => {
+    // Gate on the session: /api/me returns 401 when not logged in → go to /login.
+    fetch('/api/me')
+      .then((r) => {
+        if (r.status === 401) {
+          navigate('/login');
+          return null;
+        }
         if (!r.ok) throw new Error('Backend not ready');
         return r.json();
-      }),
-      fetch('/api/student').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ])
-      .then(([a, s]) => {
-        setAssignments(a);
-        setStudent(s);
+      })
+      .then((me) => {
+        if (!me) return null;
+        setStudent(me);
+        return fetch('/api/assignments').then((r) => {
+          if (!r.ok) throw new Error('Backend not ready');
+          return r.json();
+        });
+      })
+      .then((a) => {
+        if (a) setAssignments(a);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [navigate]);
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    navigate('/login');
+  };
 
   // Derive all view data from the assignments list.
   const view = useMemo(() => {
@@ -113,7 +130,7 @@ function HomePage() {
 
   return (
     <div style={styles.page}>
-      <Sidebar active="home" student={student} />
+      <Sidebar active="home" student={student} onLogout={handleLogout} />
 
       <div style={styles.main}>
         {loading && <p style={styles.muted}>กำลังโหลด…</p>}

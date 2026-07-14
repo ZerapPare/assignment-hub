@@ -1,16 +1,17 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import ProviderButton from '../components/ProviderButton';
 import GoogleIcon from '../icons/GoogleIcon';
 import MicrosoftIcon from '../icons/MicrosoftIcon';
 
 function LoginPage() {
-  const navigate = useNavigate();
-
-  // UI-only for now — no real OAuth yet; just go to the dashboard.
+  // Google = real OAuth (full-page redirect to the backend, which redirects to
+  // Google and back). Microsoft is not wired yet.
   const handleLogin = (provider) => {
-    console.log(`TODO: start ${provider} OAuth flow`);
-    navigate('/home');
+    if (provider === 'google') {
+      window.location.href = '/api/auth/google';
+    } else {
+      alert('เข้าสู่ระบบด้วย Microsoft ยังไม่รองรับ (เร็วๆ นี้)');
+    }
   };
 
   return (
