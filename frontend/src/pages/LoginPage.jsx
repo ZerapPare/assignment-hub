@@ -26,7 +26,7 @@ function LoginPage() {
             <span style={styles.brandName}>Assignment Hub</span>
           </div>
 
-          <h1 style={styles.heading}>ยินดีต้อนรับกลับมา 👋</h1>
+          <h1 style={styles.heading}>ยินดีต้อนรับกลับมา </h1>
           <p style={styles.subtext}>
             รวมงาน การบ้าน และกำหนดส่งจาก Google Classroom และ Microsoft Teams
             ไว้ในที่เดียว

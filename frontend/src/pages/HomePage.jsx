@@ -143,11 +143,11 @@ function HomePage() {
             {/* Header */}
             <div style={styles.header}>
               <div>
-                <h1 style={styles.greeting}>สวัสดี {firstName} 👋</h1>
+                <h1 style={styles.greeting}>สวัสดี {firstName} </h1>
                 <p style={styles.subtitle}>
                   {view.urgentCount > 0
                     ? `วันนี้มีงาน ${view.urgentCount} ชิ้นที่ใกล้กำหนดส่ง อย่าลืมเช็คนะ`
-                    : 'ไม่มีงานด่วนใน 48 ชม. สบายไปเลย 🎉'}
+                    : 'ไม่มีงานด่วนใน 48 ชม. สบายไปเลย '}
                 </p>
               </div>
               <button style={styles.addBtn}>+ เพิ่มงานใหม่</button>
@@ -173,7 +173,7 @@ function HomePage() {
                   </div>
                   <div style={styles.urgentList}>
                     {view.urgentList.length === 0 && (
-                      <p style={styles.muted}>ไม่มีงานค้าง 🎉</p>
+                      <p style={styles.muted}>ไม่มีงานค้าง </p>
                     )}
                     {view.urgentList.map((a) => {
                       const r = remain(a.due);
