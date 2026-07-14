@@ -9,8 +9,8 @@ services:
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
-  app:
-    build: ./app
+  backend:
+    build: ./backend
     ports:
       - "3000:3000"
     depends_on:
@@ -20,3 +20,16 @@ services:
       DB_USER: root
       DB_PASSWORD: root123
       DB_NAME: assignment_hub
+    volumes:
+      - ./backend:/app          # mount source for hot reload
+      - /app/node_modules       # keep container's installed modules
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app         # mount source for hot reload
+      - /app/node_modules       # keep container's installed modules

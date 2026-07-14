@@ -1,0 +1,12 @@
+{
+  "name": "assignment-hub-backend",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "mysql2": "^3.10.0"
+  }
+}

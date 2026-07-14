@@ -1,15 +1,15 @@
 {
-  "name": "assignment-hub",
+  "name": "assignment-hub-frontend",
   "version": "1.0.0",
   "scripts": {
+    "dev": "vite",
     "build": "vite build",
-    "start": "node server.js"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "express": "^4.19.0",
-    "mysql2": "^3.10.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.4"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
