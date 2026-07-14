@@ -11,6 +11,7 @@
 |---|---|
 | Frontend | React 18 + Vite + react-router-dom (ฟอนต์ Inter + Poppins) |
 | Backend | Node.js 20 + Express |
+| Auth | Google + Microsoft OAuth 2.0 (`google-auth-library`, `jose`, `express-session`) |
 | Database | MySQL 8.0 |
 | Container | Docker + Docker Compose |
 
@@ -36,7 +37,25 @@ git clone https://github.com/ZerapPare/assignment-hub.git
 cd assignment-hub
 ```
 
-### 2. รันด้วย Docker Compose
+### 2. ตั้งค่า OAuth (สร้างไฟล์ `.env.local`)
+
+Login เป็น OAuth จริง ต้องมี client id/secret ก่อน — สร้างไฟล์ `.env.local` ที่ root ของโปรเจกต์ (ถูก git-ignore ไว้แล้ว):
+
+```env
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+MS_CLIENT_ID=...
+MS_CLIENT_SECRET=...
+SESSION_SECRET=<สุ่มข้อความยาวๆ>
+```
+
+วิธีเอา client id/secret:
+- **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External + ใส่อีเมลตัวเองเป็น Test user) → Credentials → OAuth client ID (Web) → redirect URI: `http://localhost:5173/api/auth/google/callback`
+- **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration → เพิ่ม Web redirect URI: `http://localhost:5173/api/auth/microsoft/callback` แล้วสร้าง client secret
+
+> ยังไม่ใส่ก็รันได้ แต่กดปุ่ม login แล้วจะ error จนกว่าจะมี `.env.local`
+
+### 3. รันด้วย Docker Compose
 
 ```bash
 docker compose up --build
@@ -50,13 +69,15 @@ frontend-1  | ➜  Local:   http://localhost:5173/
 db-1        | ... ready for connections
 ```
 
-### 3. เปิดใช้งาน
+### 4. เปิดใช้งาน
 
 เปิดเบราว์เซอร์ไปที่ **http://localhost:5173**
 
-จะเจอหน้า **login** ก่อน → กดปุ่ม "เข้าสู่ระบบด้วย Google/Microsoft" (ตอนนี้เป็น UI ยังไม่ต่อ OAuth จริง — กดแล้วเข้า **หน้า dashboard** เลย)
+จะเจอหน้า **login** ก่อน → กด "เข้าสู่ระบบด้วย Google/Microsoft" → ไปหน้า consent ของ provider → กลับมาที่ **dashboard** (ระบบสร้าง user ในตาราง `Student` + เก็บ token ให้อัตโนมัติ) กด "ออกจากระบบ" ที่ sidebar เพื่อออก
 
 > ⏳ ครั้งแรก MySQL start ช้ากว่าแอป ถ้าหน้า dashboard ขึ้น "รอ database พร้อม..." ให้รอ 10–20 วิ แล้ว refresh
+>
+> 💡 dev ใช้ session แบบ in-memory — backend restart (เช่นตอนแก้โค้ด) จะ logout เอง เป็นเรื่องปกติ
 
 ## 🖥 หน้าจอ
 
@@ -87,19 +108,25 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES; SE
 
 ## 🔌 API (backend)
 
-| Method | Path | คืนอะไร |
-|---|---|---|
-| GET | `/api/health` | สถานะการต่อ DB |
-| GET | `/api/assignments` | งานทั้งหมด (JOIN course + detail) |
-| GET | `/api/student` | นักเรียน (ใช้เป็น user ที่ login อยู่ชั่วคราว) |
+| Method | Path | ต้อง login? | คืนอะไร |
+|---|---|---|---|
+| GET | `/api/health` | — | สถานะการต่อ DB |
+| GET | `/api/auth/google` · `/microsoft` | — | ส่งไปหน้า consent ของ provider |
+| GET | `/api/auth/{provider}/callback` | — | แลก code → สร้าง/อัปเดต user + token → เริ่ม session |
+| GET | `/api/me` | ✅ | ข้อมูล user ที่ login อยู่ |
+| POST | `/api/auth/logout` | — | ออกจากระบบ (ลบ session) |
+| GET | `/api/assignments` | ✅ | งานทั้งหมด (JOIN course + detail) |
+
+`✅` = ต้องมี session ไม่งั้นได้ `401`
 
 ## 📁 Project Structure (ย่อ)
 
 ```
 assignment-hub/
 ├── docker-compose.yml   # 3 services: frontend + backend + db
+├── .env.local           # secret OAuth (git-ignored — สร้างเอง)
 ├── init.sql             # schema + ข้อมูลตัวอย่าง (รันครั้งแรก)
-├── backend/             # Express API + mysql2
+├── backend/             # Express API + mysql2 + OAuth
 │   └── server.js
 └── frontend/            # React + Vite + react-router
     └── src/
