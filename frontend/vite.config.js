@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: true,   // listen on 0.0.0.0 so it's reachable from outside the container
+    host: "0.0.0.0",   // listen on 0.0.0.0 so it's reachable from outside the container
     port: 5173,
     watch: {
       usePolling: true, // needed for hot reload to detect file changes in Docker on Windows
