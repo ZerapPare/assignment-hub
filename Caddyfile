@@ -1,0 +1,15 @@
+# TLS reverse proxy for the deployed host. Caddy obtains and renews a Let's
+# Encrypt certificate on its own — the only requirements are that SITE_HOST
+# resolves to this machine and that ports 80 and 443 are reachable from the
+# internet (80 is what the ACME HTTP-01 challenge uses).
+#
+# Only used by the `tls` compose profile; local dev never starts this.
+
+{$SITE_HOST} {
+	encode zstd gzip
+
+	# Vite serves the app and proxies /api to backend:3000 itself, so one
+	# upstream is enough. reverse_proxy passes WebSocket upgrades through,
+	# which is what HMR needs.
+	reverse_proxy frontend:5173
+}

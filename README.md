@@ -162,31 +162,65 @@ assignment-hub/
 
 > สี/ฟอนต์/ระยะทั้งหมดอ่านจาก `theme.js` ที่เดียว ถ้าจะปรับธีมให้แก้ที่นั่น อย่าฮาร์ดโค้ด hex ในคอมโพเนนต์
 
-## Deploy บนเซิร์ฟเวอร์ (เปิดผ่านโดเมน)
+## Deploy บนเซิร์ฟเวอร์ (HTTPS ผ่านโดเมน)
 
-ค่า default ทั้งหมดตั้งไว้สำหรับ `localhost:5173` ถ้าจะเปิดผ่านโดเมนจริง ให้ทำ 3 อย่างนี้บนเครื่องเซิร์ฟเวอร์:
+ค่า default ทั้งหมดตั้งไว้สำหรับ `localhost:5173` — local dev ไม่ต้องแตะอะไรเลย
+ส่วนบนเซิร์ฟเวอร์จะใช้ **Caddy** เป็น TLS reverse proxy ออก cert Let's Encrypt ให้อัตโนมัติและต่ออายุเอง
 
-**1. สร้างไฟล์ `.env` ที่ root** (คนละไฟล์กับ `.env.local` — อันนี้ Docker Compose อ่านเอง, git-ignored เหมือนกัน)
+**ทำไมต้อง HTTPS:** Google ไม่รับ OAuth redirect URI ที่เป็น `http://` กับโดเมนจริง (อนุญาตเฉพาะ `localhost`)
+ลงทะเบียนใน Console ไม่ได้ตั้งแต่แรก ดังนั้น login จะใช้งานไม่ได้เลยถ้าไม่มี TLS
 
-```env
-FRONTEND_PORT=80
-PUBLIC_URL=http://assignment-hubb.duckdns.org
+### 1. DNS
+
+โดเมนต้อง resolve มาที่ IP ของเซิร์ฟเวอร์ **ก่อน** ขอ cert (Let's Encrypt ตรวจผ่าน HTTP-01 challenge บนพอร์ต 80)
+
+```bash
+dig +short assignment-hubb.duckdns.org      # ต้องได้ IP ของ VM
 ```
 
-`FRONTEND_PORT=80` ทำให้เปิดได้โดยไม่ต้องพิมพ์ `:5173` ต่อท้าย · `PUBLIC_URL` ใช้ประกอบ OAuth redirect URI
+### 2. เปิด firewall TCP 80 + 443
 
-**2. เพิ่มโดเมนใน [`frontend/vite.config.js`](frontend/vite.config.js)** ที่ `server.allowedHosts` ไม่งั้น Vite จะตอบ `Blocked request`
+```bash
+gcloud compute firewall-rules create allow-web --allow=tcp:80,tcp:443 --source-ranges=0.0.0.0/0
+```
 
-**3. เปิด firewall ให้พอร์ตนั้น** — บน GCP: VPC network → Firewall → allow ingress TCP:80
+พอร์ต 80 จำเป็นแม้จะใช้ https เพราะ ACME challenge วิ่งผ่านมันและ Caddy ใช้ redirect ไป https
 
-จากนั้น `docker compose up -d --force-recreate` (เปลี่ยน port mapping ต้อง recreate ไม่ใช่แค่ restart)
+### 3. สร้างไฟล์ `.env` ที่ root
 
-> **Redirect URI ต้องตรงเป๊ะ** — ต้องเพิ่ม `http://<โดเมน>/api/auth/google/callback` ใน Google Cloud Console
-> และ `.../microsoft/callback` ใน Azure Portal ด้วย ไม่งั้นได้ `redirect_uri_mismatch`
->
-> **Google ไม่รับ `http://` สำหรับโดเมนจริง** (ยกเว้น `localhost`) — ถ้าจะให้ login ใช้งานได้จริงต้องมี HTTPS
-> คือต้องเอา reverse proxy (Caddy / nginx + Let's Encrypt) มาครอบแล้วตั้ง `PUBLIC_URL=https://...`
-> ตอนใช้ `http://` หน้าเว็บเปิดได้ปกติ แต่ปุ่ม login จะยังไม่ผ่าน
+(คนละไฟล์กับ `.env.local` — อันนี้ Docker Compose อ่านเอง, git-ignored เหมือนกัน)
+
+```env
+SITE_HOST=assignment-hubb.duckdns.org
+PUBLIC_URL=https://assignment-hubb.duckdns.org
+BIND=127.0.0.1
+HMR_CLIENT_PORT=443
+```
+
+`BIND=127.0.0.1` ทำให้พอร์ต frontend/backend/db ไม่โผล่ออกอินเทอร์เน็ต เหลือแค่ Caddy ที่ 80/443
+
+### 4. เพิ่มโดเมนใน `allowedHosts`
+
+ที่ [`frontend/vite.config.js`](frontend/vite.config.js) ไม่งั้น Vite ตอบ `403 Blocked request`
+
+### 5. รันด้วย TLS profile
+
+```bash
+docker compose --profile tls up -d --force-recreate
+docker compose logs -f caddy          # ดูว่าออก cert สำเร็จ
+```
+
+Caddy ออก cert ภายในไม่กี่วินาที ถ้าเห็น `certificate obtained successfully` แปลว่าเรียบร้อย
+
+### 6. ลงทะเบียน redirect URI
+
+- **Google Cloud Console** → Credentials → OAuth client → `https://<โดเมน>/api/auth/google/callback`
+- **Azure Portal** → App registrations → Authentication → `https://<โดเมน>/api/auth/microsoft/callback`
+
+ต้องตรงเป๊ะทุกตัวอักษร ไม่งั้นได้ `redirect_uri_mismatch`
+
+> **cert เก็บใน named volume `caddy_data`** อย่าลบด้วย `docker compose down -v` โดยไม่จำเป็น
+> เพราะ Let's Encrypt จำกัด 5 cert ต่อโดเมนต่อสัปดาห์ ถ้าขอใหม่ทุกครั้งที่ recreate จะโดน rate limit
 
 ## คำสั่งที่ใช้บ่อย
 
