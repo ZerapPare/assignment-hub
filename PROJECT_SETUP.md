@@ -108,7 +108,11 @@ rather than declared in `index.html`.
 
 ## Authentication (OAuth)
 
-Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on the `localhost:5173` origin via the Vite `/api` proxy, so the session cookie is same-host. On callback the backend upserts the user into `Student` (keyed on the unique email; university matched by email domain), stores the provider's access/refresh tokens (`gg_*` for Google, `ms_*` for Microsoft), and starts an `express-session` cookie. The dashboard reads `/api/me`; a `401` bounces you to `/login`.
+Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on the `localhost:5173` origin via the Vite `/api` proxy, so the session cookie is same-host. Each flow sends a random `state` held in the session and rejects a callback that doesn't match it (`/login?error=state`). On callback the backend upserts the user into `Student` (keyed on the unique email), stores the provider's access/refresh tokens (`gg_*` for Google, `ms_*` for Microsoft), and starts an `express-session` cookie. The dashboard reads `/api/me`; a `401` bounces you to `/login`.
+
+**Identity.** The email domain resolves to a `University` row that is *created on first sight*, so a new institution needs no seed data or code change (UR02). `student_id` is taken from the email's local part when it is all digits — the common `67050115@…` format — and is otherwise left unset for the user to fill in; it is unique per university, not globally (UR03).
+
+**Linking the other platform.** `/api/auth/{google,microsoft}?link=1` connects a provider to the account already in the session instead of signing in as a new one. This matters because a personal Google address rarely matches a university Microsoft address — a plain second login would create a second `Student` row. Link mode finds the row by session, leaves `student_name` alone, and returns to `/settings?linked=<provider>`. Signing in with Microsoft and then linking Google is what makes `/api/classroom/sync` usable.
 
 **Prerequisites — create OAuth apps and a `.env.local`:**
 
@@ -147,7 +151,8 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | GET    | `/api/auth/google/callback`   | —    | Exchanges code, upserts user + tokens, starts session |
 | GET    | `/api/auth/microsoft`         | —    | Redirects to Microsoft's consent screen              |
 | GET    | `/api/auth/microsoft/callback`| —    | Exchanges code, upserts user + tokens, starts session |
-| GET    | `/api/me`                     | Yes  | The logged-in student (sidebar profile)              |
+| GET    | `/api/me`                     | Yes  | The logged-in student + `google_connected` / `microsoft_connected` |
+| PATCH  | `/api/me`                     | Yes  | Sets `student_id`; `409` if taken at the same university |
 | POST   | `/api/auth/logout`            | —    | Destroys the session                                 |
 | GET    | `/api/assignments`            | Yes  | All assignments joined with course + detail info     |
 | POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework into the DB      |
@@ -209,10 +214,14 @@ Auto-created on first DB start. Tables:
 `University` · `Student` · `Course` · `Assignment` · `Assignment_Detail` · `Schedule` · `Notification`
 
 `init.sql` creates the schema and **inserts nothing** — the database starts empty, so a
-new account sees an empty dashboard until it runs a Classroom sync. Two consequences worth
-knowing: `University` has no rows, so `Student.university_id` stays `NULL` and the sidebar
-falls back to showing the user's email; and `Schedule` / `Notification` are defined but
-never read or written outside the sync's cascade delete.
+new account sees an empty dashboard until it runs a Classroom sync. `University` rows are
+created on demand by the first login from each email domain, so that table fills itself.
+`Schedule` and `Notification` are defined but never read or written outside the sync's
+cascade delete.
+
+Two constraints carry requirements rather than just shape: `University.email_domain` is
+unique (so the find-or-create is safe), and `Student (student_id, university_id)` is unique
+(UR03 — the same number may recur at a different university, and unset ids stay `NULL`).
 
 Inspect data:
 
@@ -224,6 +233,23 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e \
 ```
 
 > `init.sql` only runs when the database is first created. After editing it, run `docker compose down -v` then `up --build` to recreate the schema.
+
+### Migrations
+
+Because of that, an existing database never picks up schema changes. `migrations/` holds
+the equivalent `ALTER`s, applied by hand and safe to skip on a database built from the
+current `init.sql`:
+
+```bash
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/001_identity.sql
+```
+
+Verify:
+
+```bash
+docker compose exec db mysql -uroot -proot123 assignment_hub \
+  -e "SHOW INDEX FROM University; SHOW INDEX FROM Student;"
+```
 
 ## Common Commands
 

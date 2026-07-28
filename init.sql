@@ -14,10 +14,15 @@ DROP TABLE IF EXISTS University;
 -- =========================================================
 -- TABLE: University
 -- =========================================================
+-- Rows are created on demand: the first student to log in from a domain
+-- creates its University row (see findOrCreateUniversity in
+-- backend/server.js), so supporting a new institution needs no code change.
+-- The unique key is what makes that find-or-create safe.
 CREATE TABLE University (
     university_id   INT AUTO_INCREMENT PRIMARY KEY,
     university_name VARCHAR(255) NOT NULL,
-    email_domain    VARCHAR(100) NOT NULL
+    email_domain    VARCHAR(100) NOT NULL,
+    CONSTRAINT uq_university_domain UNIQUE (email_domain)
 );
 
 -- =========================================================
@@ -36,7 +41,11 @@ CREATE TABLE Student (
     ms_access_token   TEXT,
     ms_refresh_token  TEXT,
     CONSTRAINT fk_student_university
-        FOREIGN KEY (university_id) REFERENCES University(university_id)
+        FOREIGN KEY (university_id) REFERENCES University(university_id),
+    -- A student id must be unique within its own university, but the same
+    -- number may exist at a different one. MySQL allows repeated NULLs in a
+    -- unique key, so students whose id isn't known yet coexist fine.
+    CONSTRAINT uq_student_per_university UNIQUE (student_id, university_id)
 );
 
 -- =========================================================
