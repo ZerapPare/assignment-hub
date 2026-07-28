@@ -29,7 +29,10 @@ router.get('/api/auth/google', (req, res) => {
     scope: [
       'openid', 'email', 'profile',
       'https://www.googleapis.com/auth/classroom.courses.readonly',
-      'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
+      // read/write variant: the readonly scope can't be declared on the
+      // consent screen (console rejects it), and Google drops undeclared
+      // scopes from grants — the app itself never writes coursework
+      'https://www.googleapis.com/auth/classroom.coursework.me',
       'https://www.googleapis.com/auth/classroom.student-submissions.me.readonly',
     ],
   });
