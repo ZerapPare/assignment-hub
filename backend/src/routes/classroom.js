@@ -11,9 +11,13 @@ const router = express.Router();
 // --- Google Classroom sync ---
 
 // Pull the logged-in student's Classroom courses + coursework and upsert
-// them into Course / Assignment / Assignment_Detail, keyed on Classroom's
-// own ids (external_course_id / external_assignment_id) so re-syncing
-// doesn't create duplicates.
+// them into Course / Assignment / Assignment_Detail so re-syncing doesn't
+// create duplicates. Both upsert keys pair Classroom's own id with the row's
+// owner — Course on (external_course_id, student_id), Assignment on
+// (external_assignment_id, course_id) — because Classroom hands every student
+// in a class the *same* coursework id. Matching on the external id alone would
+// make one classmate's sync find (and update) a row belonging to another, and
+// never insert that student's own copy.
 router.post('/api/classroom/sync', requireAuth, async (req, res) => {
   try {
     // Optional: only bring in assignments due on/after this date. Skips old
@@ -124,9 +128,12 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
 
         const dueDateTime = toMysqlDateTime(work.dueDate, work.dueTime);
 
+        // Scoped to this student's own course row — `courseId` was resolved
+        // above from (external_course_id, student_id), so a classmate's copy
+        // of the same coursework can never match here.
         const [existingAssignment] = await pool.query(
-          'SELECT assignment_id FROM Assignment WHERE external_assignment_id = ? LIMIT 1',
-          [work.id]
+          'SELECT assignment_id FROM Assignment WHERE external_assignment_id = ? AND course_id = ? LIMIT 1',
+          [work.id, courseId]
         );
 
         if (existingAssignment.length) {
