@@ -293,12 +293,52 @@ function toMysqlDateTime(dueDate, dueTime) {
   return `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:00`;
 }
 
+// Fetch a course's coursework newest-due-date-first, and stop paging the
+// moment we pass the cutoff. Classroom's list API has no server-side date
+// filter, but it does support ordering — so instead of fetching everything
+// and filtering after the fact, we stop calling the API entirely once
+// results are older than the cutoff. That's what actually cuts sync time,
+// since each item also costs a follow-up submission-status API call.
+// Coursework with no due date at all is always kept (there's no date to
+// judge it by), and non-PUBLISHED items are dropped here too.
+async function listCourseWorkSince(classroom, courseId, cutoffDate) {
+  const results = [];
+  let pageToken;
+  do {
+    const { data } = await classroom.courses.courseWork.list({
+      courseId,
+      orderBy: 'dueDate desc',
+      pageSize: 50,
+      pageToken,
+    });
+    const items = data.courseWork || [];
+
+    for (const work of items) {
+      if (work.state !== 'PUBLISHED') continue;
+      if (cutoffDate && work.dueDate) {
+        const due = new Date(work.dueDate.year, work.dueDate.month - 1, work.dueDate.day);
+        if (due < cutoffDate) return results; // everything after this is even older — stop paging
+      }
+      results.push(work);
+    }
+
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return results;
+}
+
 // Pull the logged-in student's Classroom courses + coursework and upsert
 // them into Course / Assignment / Assignment_Detail, keyed on Classroom's
 // own ids (external_course_id / external_assignment_id) so re-syncing
 // doesn't create duplicates.
 app.post('/api/classroom/sync', requireAuth, async (req, res) => {
   try {
+    // Optional: only bring in assignments due on/after this date. Skips old
+    // finished semesters instead of importing everything, and (via
+    // listCourseWorkSince) cuts the Classroom API calls short too.
+    const cutoffDate = req.body?.cutoffDate ? new Date(req.body.cutoffDate) : null;
+
     const [rows] = await pool.query(
       'SELECT gg_refresh_token FROM Student WHERE user_id = ? LIMIT 1',
       [req.session.userId]
@@ -313,6 +353,32 @@ app.post('/api/classroom/sync', requireAuth, async (req, res) => {
     const client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET);
     client.setCredentials({ refresh_token: refreshToken });
     const classroom = google.classroom({ version: 'v1', auth: client });
+
+    // Remove previously-synced Classroom assignments that now fall before
+    // the cutoff (e.g. you moved the cutoff forward, or old semesters were
+    // synced before this feature existed). Scoped to this student's own
+    // Google Classroom courses only — manual entries and Microsoft Teams
+    // assignments are never touched here.
+    let deletedCount = 0;
+    if (cutoffDate) {
+      const [toDelete] = await pool.query(
+        `SELECT a.assignment_id
+         FROM Assignment a
+         JOIN Course c            ON a.course_id = c.course_id
+         JOIN Assignment_Detail d ON a.assignment_id = d.assignment_id
+         WHERE c.student_id = ? AND c.platform_source = 'Google Classroom' AND d.due_date < ?`,
+        [req.session.userId, cutoffDate]
+      );
+      const ids = toDelete.map((r) => r.assignment_id);
+      if (ids.length) {
+        // Child tables first to satisfy the foreign key constraints.
+        await pool.query('DELETE FROM Notification WHERE assignment_id IN (?)', [ids]);
+        await pool.query('DELETE FROM Schedule WHERE assignment_id IN (?)', [ids]);
+        await pool.query('DELETE FROM Assignment_Detail WHERE assignment_id IN (?)', [ids]);
+        await pool.query('DELETE FROM Assignment WHERE assignment_id IN (?)', [ids]);
+        deletedCount = ids.length;
+      }
+    }
 
     const { data: { courses = [] } } = await classroom.courses.list({ courseStates: ['ACTIVE'] });
 
@@ -341,11 +407,9 @@ app.post('/api/classroom/sync', requireAuth, async (req, res) => {
       }
       coursesSynced++;
 
-      const { data: { courseWork = [] } } = await classroom.courses.courseWork.list({ courseId: course.id });
+      const courseWork = await listCourseWorkSince(classroom, course.id, cutoffDate);
 
       for (const work of courseWork) {
-        if (work.state !== 'PUBLISHED') continue; // skip drafts/deleted coursework
-
         // Look up whether *this student* has already turned this in.
         // 'me' works because the request is authenticated as the student.
         let submissionState = null;
@@ -409,7 +473,7 @@ app.post('/api/classroom/sync', requireAuth, async (req, res) => {
       }
     }
 
-    res.json({ ok: true, coursesSynced, assignmentsSynced });
+    res.json({ ok: true, coursesSynced, assignmentsSynced, deletedCount });
   } catch (err) {
     // Google API errors carry the real reason in err.response.data — log
     // and surface that instead of just err.message, which is often just "Bad Request".

@@ -36,6 +36,9 @@ function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [cutoffDate, setCutoffDate] = useState(
+    () => localStorage.getItem('classroomSyncCutoff') || '2026-06-28'
+  );
 
   useEffect(() => {
     // Gate on the session: /api/me returns 401 when not logged in → go to /login.
@@ -68,13 +71,23 @@ function HomePage() {
     navigate('/login');
   };
 
+  const handleCutoffChange = (e) => {
+    const val = e.target.value;
+    setCutoffDate(val);
+    localStorage.setItem('classroomSyncCutoff', val);
+  };
+
   const handleSync = async () => {
     setSyncing(true);
     setError(null);
     try {
-      const r = await fetch('/api/classroom/sync', { method: 'POST' });
+      const r = await fetch('/api/classroom/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cutoffDate: cutoffDate || null }),
+      });
       const data = await r.json();
-      if (!r.ok) throw new Error(data.error || 'Sync failed');
+      if (!r.ok) throw new Error(data.message || data.error || 'Sync failed');
       const a = await fetch('/api/assignments').then((res) => res.json());
       setAssignments(a);
     } catch (e) {
@@ -152,7 +165,7 @@ function HomePage() {
       <div style={styles.main}>
         {loading && <p style={styles.muted}>กำลังโหลด…</p>}
         {error && (
-          <p style={styles.error}>{error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>
+          <p style={styles.error}>⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>
         )}
 
         {!loading && !error && (
@@ -167,7 +180,16 @@ function HomePage() {
                     : 'ไม่มีงานด่วนใน 48 ชม. สบายไปเลย '}
                 </p>
               </div>
-              <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <label style={styles.cutoffLabel}>
+                  งานตั้งแต่วันที่
+                  <input
+                    type="date"
+                    value={cutoffDate}
+                    onChange={handleCutoffChange}
+                    style={styles.cutoffInput}
+                  />
+                </label>
                 <button style={styles.syncBtn} onClick={handleSync} disabled={syncing}>
                   {syncing ? 'กำลังซิงก์…' : '⟳ ซิงก์ Classroom'}
                 </button>
@@ -341,6 +363,22 @@ const styles = {
     fontWeight: 600,
     fontSize: 14,
     cursor: 'pointer',
+  },
+  cutoffLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 12.5,
+    fontWeight: 600,
+    color: 'oklch(50% 0.02 290)',
+  },
+  cutoffInput: {
+    padding: '9px 10px',
+    borderRadius: 10,
+    border: '1px solid oklch(85% 0.02 290)',
+    fontFamily: inter,
+    fontSize: 13,
+    color: 'oklch(30% 0.02 290)',
   },
 
   statGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 },
