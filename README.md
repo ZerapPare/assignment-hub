@@ -170,7 +170,7 @@ assignment-hub/
 
 ```env
 FRONTEND_PORT=80
-PUBLIC_URL=http://assignment-hub.mooo.com
+PUBLIC_URL=http://assignment-hubb.duckdns.org
 ```
 
 `FRONTEND_PORT=80` ทำให้เปิดได้โดยไม่ต้องพิมพ์ `:5173` ต่อท้าย · `PUBLIC_URL` ใช้ประกอบ OAuth redirect URI
