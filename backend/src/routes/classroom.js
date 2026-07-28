@@ -62,7 +62,28 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
       }
     }
 
-    const { data: { courses = [] } } = await classroom.courses.list({ courseStates: ['ACTIVE'] });
+    // [DBG-a4f2] temporary — confirm the actual granted scopes on this
+    // student's token before the first live Classroom call.
+    try {
+      const { token: accessToken } = await client.getAccessToken();
+      const tokenInfoRes = await fetch(
+        `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${accessToken}`
+      );
+      const tokenInfo = await tokenInfoRes.json();
+      console.log('[DBG-a4f2] user_id=%s scope=%s aud_ok=%s expires_in=%s',
+        req.session.userId, tokenInfo.scope, tokenInfo.aud === CLIENT_ID, tokenInfo.expires_in);
+    } catch (dbgErr) {
+      console.log('[DBG-a4f2] user_id=%s token fetch/tokeninfo failed: %s', req.session.userId, dbgErr.message);
+    }
+
+    let courses;
+    try {
+      ({ data: { courses = [] } } = await classroom.courses.list({ courseStates: ['ACTIVE'] }));
+      console.log('[DBG-a4f2] user_id=%s courses.list ok, count=%s', req.session.userId, courses.length);
+    } catch (listErr) {
+      console.log('[DBG-a4f2] user_id=%s courses.list FAILED: %s', req.session.userId, listErr.message);
+      throw listErr;
+    }
 
     let coursesSynced = 0;
     let assignmentsSynced = 0;
