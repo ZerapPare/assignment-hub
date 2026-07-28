@@ -2,6 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const mysql = require('mysql2/promise');
 const { OAuth2Client } = require('google-auth-library');
+const { google } = require('googleapis');
 const { createRemoteJWKSet, jwtVerify } = require('jose');
 
 const app = express();
@@ -88,7 +89,12 @@ app.get('/api/auth/google', (req, res) => {
   const url = oauth2.generateAuthUrl({
     access_type: 'offline',      // ask for a refresh token (stored for future Classroom sync)
     prompt: 'consent',
-    scope: ['openid', 'email', 'profile'],
+    scope: [
+      'openid', 'email', 'profile',
+      'https://www.googleapis.com/auth/classroom.courses.readonly',
+      'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
+      'https://www.googleapis.com/auth/classroom.student-submissions.me.readonly',
+    ],
   });
   res.redirect(url);
 });
@@ -270,6 +276,150 @@ app.get('/api/assignments', requireAuth, async (req, res) => {
     res.json(rows);
   } catch (err) {
     res.status(503).json({ error: 'Database not ready', message: err.message });
+  }
+});
+
+// --- Google Classroom sync ---
+
+// Classroom's dueDate/dueTime are split objects like {year,month,day} and
+// {hours,minutes} — combine into a MySQL DATETIME string (defaults to
+// 23:59 if Classroom didn't set a specific time).
+function toMysqlDateTime(dueDate, dueTime) {
+  if (!dueDate) return null;
+  const { year, month, day } = dueDate;
+  const hours = dueTime?.hours ?? 23;
+  const minutes = dueTime?.minutes ?? 59;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:00`;
+}
+
+// Pull the logged-in student's Classroom courses + coursework and upsert
+// them into Course / Assignment / Assignment_Detail, keyed on Classroom's
+// own ids (external_course_id / external_assignment_id) so re-syncing
+// doesn't create duplicates.
+app.post('/api/classroom/sync', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT gg_refresh_token FROM Student WHERE user_id = ? LIMIT 1',
+      [req.session.userId]
+    );
+    const refreshToken = rows[0]?.gg_refresh_token;
+    if (!refreshToken) {
+      return res.status(400).json({
+        error: 'No Google Classroom access — log out and log back in with Google to grant it.',
+      });
+    }
+
+    const client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET);
+    client.setCredentials({ refresh_token: refreshToken });
+    const classroom = google.classroom({ version: 'v1', auth: client });
+
+    const { data: { courses = [] } } = await classroom.courses.list({ courseStates: ['ACTIVE'] });
+
+    let coursesSynced = 0;
+    let assignmentsSynced = 0;
+
+    for (const course of courses) {
+      // Course rows in this schema belong to one student, so match on
+      // (external_course_id, student_id) rather than external id alone.
+      const [existingCourse] = await pool.query(
+        'SELECT course_id FROM Course WHERE external_course_id = ? AND student_id = ? LIMIT 1',
+        [course.id, req.session.userId]
+      );
+
+      let courseId;
+      if (existingCourse.length) {
+        courseId = existingCourse[0].course_id;
+        await pool.query('UPDATE Course SET course_name = ? WHERE course_id = ?', [course.name, courseId]);
+      } else {
+        const [ins] = await pool.query(
+          `INSERT INTO Course (course_name, external_course_id, platform_source, student_id)
+           VALUES (?, ?, 'Google Classroom', ?)`,
+          [course.name, course.id, req.session.userId]
+        );
+        courseId = ins.insertId;
+      }
+      coursesSynced++;
+
+      const { data: { courseWork = [] } } = await classroom.courses.courseWork.list({ courseId: course.id });
+
+      for (const work of courseWork) {
+        if (work.state !== 'PUBLISHED') continue; // skip drafts/deleted coursework
+
+        // Look up whether *this student* has already turned this in.
+        // 'me' works because the request is authenticated as the student.
+        let submissionState = null;
+        try {
+          const { data: { studentSubmissions = [] } } = await classroom.courses.courseWork.studentSubmissions.list({
+            courseId: course.id,
+            courseWorkId: work.id,
+            userId: 'me',
+          });
+          submissionState = studentSubmissions[0]?.state || null;
+        } catch (subErr) {
+          console.warn('[classroom] could not read submission state for', work.id, subErr.message);
+        }
+        const isFinished = submissionState === 'TURNED_IN' || submissionState === 'RETURNED';
+
+        const dueDateTime = toMysqlDateTime(work.dueDate, work.dueTime);
+
+        const [existingAssignment] = await pool.query(
+          'SELECT assignment_id FROM Assignment WHERE external_assignment_id = ? LIMIT 1',
+          [work.id]
+        );
+
+        if (existingAssignment.length) {
+          const assignmentId = existingAssignment[0].assignment_id;
+          await pool.query(
+            'UPDATE Assignment SET title = ?, origin_link = ? WHERE assignment_id = ?',
+            [work.title, work.alternateLink || null, assignmentId]
+          );
+          if (isFinished) {
+            // Now turned in/returned — mark it done, overriding any manual status.
+            await pool.query(
+              'UPDATE Assignment_Detail SET description = ?, due_date = ?, status = ? WHERE assignment_id = ?',
+              [work.description || null, dueDateTime, 'completed', assignmentId]
+            );
+          } else {
+            // Still unfinished — refresh details but leave the student's own
+            // status/priority (not_started / in_progress) alone.
+            await pool.query(
+              'UPDATE Assignment_Detail SET description = ?, due_date = ? WHERE assignment_id = ?',
+              [work.description || null, dueDateTime, assignmentId]
+            );
+          }
+        } else {
+          // Brand new coursework: bring it in either way, just start it at
+          // the right status so already-turned-in work shows as ส่งแล้ว
+          // instead of never appearing at all.
+          const initialStatus = isFinished ? 'completed' : 'not_started';
+
+          const [ins] = await pool.query(
+            `INSERT INTO Assignment (external_assignment_id, title, origin_link, course_id)
+             VALUES (?, ?, ?, ?)`,
+            [work.id, work.title, work.alternateLink || null, courseId]
+          );
+          await pool.query(
+            `INSERT INTO Assignment_Detail (assignment_id, description, due_date, status, priority_score)
+             VALUES (?, ?, ?, ?, 0)`,
+            [ins.insertId, work.description || null, dueDateTime, initialStatus]
+          );
+        }
+        assignmentsSynced++;
+      }
+    }
+
+    res.json({ ok: true, coursesSynced, assignmentsSynced });
+  } catch (err) {
+    // Google API errors carry the real reason in err.response.data — log
+    // and surface that instead of just err.message, which is often just "Bad Request".
+    const googleDetail = err.response?.data?.error || err.errors || null;
+    console.error('[classroom] sync error:', err.message, googleDetail ? JSON.stringify(googleDetail) : '');
+    res.status(500).json({
+      error: 'Classroom sync failed',
+      message: err.message,
+      detail: googleDetail,
+    });
   }
 });
 

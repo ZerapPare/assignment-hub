@@ -35,6 +35,7 @@ function HomePage() {
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     // Gate on the session: /api/me returns 401 when not logged in → go to /login.
@@ -65,6 +66,22 @@ function HomePage() {
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     navigate('/login');
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const r = await fetch('/api/classroom/sync', { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Sync failed');
+      const a = await fetch('/api/assignments').then((res) => res.json());
+      setAssignments(a);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   // Derive all view data from the assignments list.
@@ -150,7 +167,12 @@ function HomePage() {
                     : 'ไม่มีงานด่วนใน 48 ชม. สบายไปเลย '}
                 </p>
               </div>
-              <button style={styles.addBtn}>+ เพิ่มงานใหม่</button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button style={styles.syncBtn} onClick={handleSync} disabled={syncing}>
+                  {syncing ? 'กำลังซิงก์…' : '⟳ ซิงก์ Classroom'}
+                </button>
+                <button style={styles.addBtn}>+ เพิ่มงานใหม่</button>
+              </div>
             </div>
 
             {/* Stat cards */}
@@ -304,6 +326,21 @@ const styles = {
     fontSize: 14,
     cursor: 'pointer',
     boxShadow: '0 8px 20px -6px oklch(55% 0.18 290 / 0.5)',
+  },
+
+  syncBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '12px 20px',
+    borderRadius: 12,
+    border: '1px solid oklch(85% 0.02 290)',
+    background: 'white',
+    color: 'oklch(40% 0.05 290)',
+    fontFamily: inter,
+    fontWeight: 600,
+    fontSize: 14,
+    cursor: 'pointer',
   },
 
   statGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 },
