@@ -14,7 +14,7 @@ frontend  (Vite dev server, React, hot reload)
 backend   (Express + mysql2 REST API)
   │  DB_HOST=db
   ▼
-db        (MySQL 8.0, seeded from init.sql)
+db        (MySQL 8.0, schema created from init.sql)
 ```
 
 The frontend never talks to MySQL directly — it calls `/api/*`, which Vite proxies to the backend over the internal Docker network. No CORS setup needed.
@@ -24,7 +24,8 @@ The frontend never talks to MySQL directly — it calls `/api/*`, which Vite pro
 | Layer     | Technology                                          |
 |-----------|-----------------------------------------------------|
 | Frontend  | React 18 + Vite 5 (dev server) + react-router-dom 6 |
-| Fonts     | Inter + Poppins (Google Fonts)                      |
+| Fonts     | Maitree (Google Fonts) — covers Thai + Latin        |
+| Styling   | Inline style objects + shared tokens in `src/theme.js` (no CSS framework) |
 | Backend   | Node.js 20 + Express 4                              |
 | Auth      | Google + Microsoft OAuth 2.0 — `google-auth-library`, `jose`, `express-session` |
 | DB Driver | mysql2                                              |
@@ -89,8 +90,21 @@ Non-secret config lives in `docker-compose.yml`; **secrets** live in a git-ignor
 | Path     | Page          | Notes                                                        |
 |----------|---------------|-------------------------------------------------------------|
 | `/login` | Login screen  | Real Google / Microsoft OAuth (buttons redirect to the backend) |
-| `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Stat cards, urgent + all tasks, progress donut, trend, calendar (from the API) |
+| `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, the task table, a month calendar, upcoming deadlines, and a 48h checklist |
 | `*`      | →             | Redirects to `/login`                                       |
+
+Every figure on the dashboard is derived in a single `useMemo` over the `/api/assignments`
+response — there is no seeded or placeholder data anywhere in the UI. A freshly
+logged-in account (before its first sync) renders zeros and empty states.
+
+Three controls are intentionally inert because no endpoint backs them yet:
+
+- **`+ เพิ่มงานใหม่`** is `disabled` — there is no create-assignment endpoint.
+- The **48h checklist** is read-only — nothing can write `Assignment_Detail.status` back.
+- **Sidebar nav items** other than `หน้าแรก` have no route, so they carry no pointer cursor.
+
+Fonts and base CSS are injected by `src/GlobalStyles.jsx` (mounted once in `App.jsx`)
+rather than declared in `index.html`.
 
 ## Authentication (OAuth)
 
@@ -98,7 +112,7 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 
 **Prerequisites — create OAuth apps and a `.env.local`:**
 
-1. **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External, add yourself as a Test user) → Credentials → OAuth client ID (Web application). Authorized redirect URI: `http://localhost:5173/api/auth/google/callback`.
+1. **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External, add yourself as a Test user) → Credentials → OAuth client ID (Web application). Authorized redirect URI: `http://localhost:5173/api/auth/google/callback`. Enable the **Google Classroom API** and add the three `classroom.*.readonly` scopes below, or `/api/classroom/sync` will fail.
 2. **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration (accounts: *organizations* / work-school). Add a Web redirect URI: `http://localhost:5173/api/auth/microsoft/callback`, and create a client secret.
 3. Create **`.env.local`** at the repo root (git-ignored via `.env*`):
 
@@ -112,7 +126,15 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 
 4. Recreate the backend so it picks up the env: `docker compose up -d backend`.
 
-> Scope is **login only** (email + profile) for now, so Google stays in "Testing" (no verification needed). Tokens are stored ready for a future Google Classroom / Microsoft Teams sync.
+> **Google scopes:** `openid email profile` plus `classroom.courses.readonly`,
+> `classroom.coursework.me.readonly`, and `classroom.student-submissions.me.readonly`.
+> The consent request uses `access_type=offline` + `prompt=consent` so a refresh token
+> always comes back — `/api/classroom/sync` runs on that stored refresh token, not on
+> the session. If a user granted access before the Classroom scopes were added, they
+> must log out and back in to re-consent.
+>
+> **Microsoft** only requests `openid email profile offline_access User.Read`. Its tokens
+> are stored, but there is no Teams sync yet — nothing writes `platform_source = 'Microsoft Teams'`.
 >
 > Dev sessions use an in-memory store, so a backend restart (including `node --watch` reloads on save) logs you out. Fine for development.
 
@@ -125,11 +147,21 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | GET    | `/api/auth/google/callback`   | —    | Exchanges code, upserts user + tokens, starts session |
 | GET    | `/api/auth/microsoft`         | —    | Redirects to Microsoft's consent screen              |
 | GET    | `/api/auth/microsoft/callback`| —    | Exchanges code, upserts user + tokens, starts session |
-| GET    | `/api/me`                     | Yes  | The logged-in student (greeting + sidebar profile)   |
+| GET    | `/api/me`                     | Yes  | The logged-in student (sidebar profile)              |
 | POST   | `/api/auth/logout`            | —    | Destroys the session                                 |
 | GET    | `/api/assignments`            | Yes  | All assignments joined with course + detail info     |
+| POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework into the DB      |
 
-`Yes` = requires a logged-in session (returns `401` otherwise). Quick check:
+`Yes` = requires a logged-in session (returns `401` otherwise).
+
+`POST /api/classroom/sync` takes `{ "cutoffDate": "YYYY-MM-DD" | null }` and returns
+`{ ok, coursesSynced, assignmentsSynced, deletedCount }`. The cutoff both limits what
+is imported and deletes previously-synced rows that now fall before it, so moving the
+date forward prunes old semesters. Courses upsert on `(external_course_id, student_id)`
+and assignments on `external_assignment_id`; a re-sync updates rather than duplicates,
+and keeps a status the user set manually unless Classroom reports the work as turned in.
+
+Quick check:
 
 ```bash
 curl http://localhost:3000/api/health
@@ -142,27 +174,33 @@ curl -i http://localhost:3000/api/auth/google  # 302 to accounts.google.com
 ```
 assignment-hub/
 ├── docker-compose.yml        # defines frontend + backend + db
-├── init.sql                  # schema + seed data (runs on first DB start)
+├── init.sql                  # schema only, no seed data (runs on first DB start)
 ├── .env.local                # OAuth secrets (git-ignored) — you create this
 ├── backend/
 │   ├── Dockerfile
-│   ├── package.json          # express, mysql2, express-session, google-auth-library, jose
-│   └── server.js             # Express API + MySQL pool + OAuth routes
+│   ├── package.json          # express, mysql2, express-session, google-auth-library, googleapis, jose
+│   └── server.js             # Express API + MySQL pool + OAuth routes + Classroom sync
 └── frontend/
     ├── Dockerfile
     ├── package.json          # react, react-router-dom, vite
     ├── vite.config.js        # dev server + /api proxy to backend
-    ├── index.html            # loads Inter + Poppins fonts
+    ├── index.html            # bare Vite entry (fonts are injected from GlobalStyles.jsx)
     └── src/
         ├── main.jsx          # React entry
         ├── App.jsx           # router: /login, /home
+        ├── theme.js          # design tokens: colours, font, radii, shadows, Thai day/month names
+        ├── GlobalStyles.jsx  # injects the Maitree webfont + base CSS, sets lang="th"
         ├── pages/
         │   ├── LoginPage.jsx # two-panel login screen (Google/Microsoft OAuth)
-        │   └── HomePage.jsx  # dashboard (fetches /api/me + /api/assignments)
-        ├── components/       # Sidebar, StatCard, TaskRow, DonutChart, TrendChart, MiniCalendar, ProviderButton
-        ├── icons/            # GoogleIcon, MicrosoftIcon (inline SVG)
-        └── Dashboard.jsx     # early assignment-list view (kept, not routed)
+        │   └── HomePage.jsx  # dashboard (fetches /api/me + /api/assignments, POSTs the sync)
+        ├── components/       # Sidebar, StatCard, TaskRow, BarChart, DonutChart, MiniCalendar,
+        │                     # DeadlineList, UrgentChecklist, ProviderButton, BrandMark
+        └── icons/            # GoogleIcon, MicrosoftIcon + index.jsx (UI icon set, inline SVG)
 ```
+
+Components hold their styles in a local `const styles = {...}` object and pull every
+colour, radius, and shadow from `theme.js`. Add new values there instead of hard-coding
+hex in a component, so both screens keep one palette.
 
 ## Database Schema (init.sql)
 
@@ -170,13 +208,22 @@ Auto-created on first DB start. Tables:
 
 `University` · `Student` · `Course` · `Assignment` · `Assignment_Detail` · `Schedule` · `Notification`
 
+`init.sql` creates the schema and **inserts nothing** — the database starts empty, so a
+new account sees an empty dashboard until it runs a Classroom sync. Two consequences worth
+knowing: `University` has no rows, so `Student.university_id` stays `NULL` and the sidebar
+falls back to showing the user's email; and `Schedule` / `Notification` are defined but
+never read or written outside the sync's cascade delete.
+
 Inspect data:
 
 ```bash
 docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES;"
+docker compose exec db mysql -uroot -proot123 assignment_hub -e \
+  "SELECT c.platform_source, a.title, d.due_date, d.status FROM Assignment a \
+   JOIN Course c USING(course_id) JOIN Assignment_Detail d USING(assignment_id) ORDER BY d.due_date;"
 ```
 
-> `init.sql` only runs when the database is first created. After editing it, run `docker compose down -v` then `up --build` to re-seed.
+> `init.sql` only runs when the database is first created. After editing it, run `docker compose down -v` then `up --build` to recreate the schema.
 
 ## Common Commands
 

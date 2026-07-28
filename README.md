@@ -9,7 +9,7 @@
 
 | ส่วน | เทคโนโลยี |
 |---|---|
-| Frontend | React 18 + Vite + react-router-dom (ฟอนต์ Inter + Poppins) |
+| Frontend | React 18 + Vite + react-router-dom (ฟอนต์ Maitree — มี glyph ไทย) |
 | Backend | Node.js 20 + Express |
 | Auth | Google + Microsoft OAuth 2.0 (`google-auth-library`, `jose`, `express-session`) |
 | Database | MySQL 8.0 |
@@ -51,6 +51,7 @@ SESSION_SECRET=<สุ่มข้อความยาวๆ>
 
 วิธีเอา client id/secret:
 - **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External + ใส่อีเมลตัวเองเป็น Test user) → Credentials → OAuth client ID (Web) → redirect URI: `http://localhost:5173/api/auth/google/callback`
+  - ต้องเปิด **Google Classroom API** และเพิ่ม scope `classroom.courses.readonly`, `classroom.coursework.me.readonly`, `classroom.student-submissions.me.readonly` ด้วย ไม่งั้นปุ่มซิงก์จะไม่ทำงาน
 - **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration → เพิ่ม Web redirect URI: `http://localhost:5173/api/auth/microsoft/callback` แล้วสร้าง client secret
 
 > ยังไม่ใส่ก็รันได้ แต่กดปุ่ม login แล้วจะ error จนกว่าจะมี `.env.local`
@@ -75,6 +76,9 @@ db-1        | ... ready for connections
 
 จะเจอหน้า **login** ก่อน → กด "เข้าสู่ระบบด้วย Google/Microsoft" → ไปหน้า consent ของ provider → กลับมาที่ **dashboard** (ระบบสร้าง user ในตาราง `Student` + เก็บ token ให้อัตโนมัติ) กด "ออกจากระบบ" ที่ sidebar เพื่อออก
 
+**ครั้งแรก dashboard จะว่างเปล่า** เพราะ database ไม่มีข้อมูลตัวอย่าง — ตั้งวันที่ในช่อง "งานตั้งแต่วันที่"
+แล้วกด **"ซิงก์ Classroom"** เพื่อดึงงานจริงจากบัญชี Google ของคุณเข้ามา
+
 > ครั้งแรก MySQL start ช้ากว่าแอป ถ้าหน้า dashboard ขึ้น "รอ database พร้อม..." ให้รอ 10–20 วิ แล้ว refresh
 >
 > dev ใช้ session แบบ in-memory — backend restart (เช่นตอนแก้โค้ด) จะ logout เอง เป็นเรื่องปกติ
@@ -84,7 +88,16 @@ db-1        | ... ready for connections
 | Path | หน้า |
 |---|---|
 | `/login` | หน้าเข้าสู่ระบบ (Google / Microsoft) |
-| `/home` | Dashboard — การ์ดสถิติ, งานด่วน, งานทั้งหมด, กราฟความคืบหน้า, ปฏิทิน (ดึงข้อมูลจริงจาก API) |
+| `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ตารางงานทั้งหมด, ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน |
+
+ทุกตัวเลขบนหน้า dashboard คำนวณจาก response ของ `/api/assignments` จริง ไม่มีข้อมูลตัวอย่างฝังในโค้ด
+(บัญชีที่ยังไม่ซิงก์จะเห็น `0` และ empty state ทุกการ์ด)
+
+หมายเหตุปุ่มที่ยังไม่พร้อมใช้:
+
+- **`+ เพิ่มงานใหม่`** — `disabled` ไว้ เพราะ backend ยังไม่มี endpoint สร้างงาน
+- **checklist "งานด่วน"** — แสดงอย่างเดียว กดติ๊กไม่ได้ เพราะยังไม่มี endpoint เปลี่ยนสถานะงาน
+- **เมนูใน sidebar** (การบ้านทั้งหมด / สถิติ / ตั้งค่า) — ยังไม่มี route รองรับ
 
 ## Database
 
@@ -116,8 +129,15 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES; SE
 | GET | `/api/me` | ต้อง | ข้อมูล user ที่ login อยู่ |
 | POST | `/api/auth/logout` | — | ออกจากระบบ (ลบ session) |
 | GET | `/api/assignments` | ต้อง | งานทั้งหมด (JOIN course + detail) |
+| POST | `/api/classroom/sync` | ต้อง | ดึงงานจาก Google Classroom มาลง DB |
 
 `ต้อง` = ต้องมี session ไม่งั้นได้ `401`
+
+`/api/classroom/sync` รับ body `{ "cutoffDate": "YYYY-MM-DD" | null }` (เอาเฉพาะงานที่กำหนดส่งตั้งแต่วันนั้น
+งานเก่ากว่านั้นที่เคยซิงก์ไว้จะถูกลบ) แล้วคืน `{ ok, coursesSynced, assignmentsSynced, deletedCount }`
+ปุ่ม "ซิงก์ Classroom" บน dashboard เรียก endpoint นี้ และจำค่า cutoff ไว้ใน `localStorage`
+
+> Microsoft ยังเป็นแค่ login — ยังไม่มี sync ของ Teams
 
 ## Project Structure (ย่อ)
 
@@ -125,16 +145,22 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES; SE
 assignment-hub/
 ├── docker-compose.yml   # 3 services: frontend + backend + db
 ├── .env.local           # secret OAuth (git-ignored — สร้างเอง)
-├── init.sql             # schema + ข้อมูลตัวอย่าง (รันครั้งแรก)
-├── backend/             # Express API + mysql2 + OAuth
+├── init.sql             # schema เปล่า ไม่มีข้อมูลตัวอย่าง (รันครั้งแรก)
+├── backend/             # Express API + mysql2 + OAuth + Classroom sync
 │   └── server.js
 └── frontend/            # React + Vite + react-router
     └── src/
-        ├── App.jsx      # router: /login, /home
-        ├── pages/       # LoginPage, HomePage
-        ├── components/  # Sidebar, StatCard, กราฟ ฯลฯ
-        └── icons/       # Google/Microsoft SVG
+        ├── App.jsx          # router: /login, /home
+        ├── theme.js         # design token (สี, ฟอนต์, radius, ชื่อวัน/เดือนไทย)
+        ├── GlobalStyles.jsx # โหลดฟอนต์ Maitree + base CSS
+        ├── pages/           # LoginPage, HomePage
+        ├── components/      # Sidebar, StatCard, TaskRow, BarChart, DonutChart,
+        │                    # MiniCalendar, DeadlineList, UrgentChecklist,
+        │                    # ProviderButton, BrandMark
+        └── icons/           # Google/Microsoft SVG + ไอคอน UI (index.jsx)
 ```
+
+> สี/ฟอนต์/ระยะทั้งหมดอ่านจาก `theme.js` ที่เดียว ถ้าจะปรับธีมให้แก้ที่นั่น อย่าฮาร์ดโค้ด hex ในคอมโพเนนต์
 
 ## คำสั่งที่ใช้บ่อย
 
