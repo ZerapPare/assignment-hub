@@ -97,9 +97,13 @@ Every figure on the dashboard is derived in a single `useMemo` over the `/api/as
 response — there is no seeded or placeholder data anywhere in the UI. A freshly
 logged-in account (before its first sync) renders zeros and empty states.
 
-Three controls are intentionally inert because no endpoint backs them yet:
+**`+ เพิ่มงานใหม่`** opens `AddTaskModal` and `POST`s to `/api/assignments`. The created
+row is appended to the same `assignments` state the `useMemo` reads, so every stat card,
+chart, calendar dot and list updates without a refetch. Manual work is stored under a
+`Course` with `platform_source IS NULL`, which is what the `เพิ่มเอง` filter tab matches.
 
-- **`+ เพิ่มงานใหม่`** is `disabled` — there is no create-assignment endpoint.
+Two controls are still inert because no endpoint backs them yet:
+
 - The **48h checklist** is read-only — nothing can write `Assignment_Detail.status` back.
 - **Sidebar nav items** other than `หน้าแรก` have no route, so they carry no pointer cursor.
 
@@ -154,10 +158,23 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | GET    | `/api/me`                     | Yes  | The logged-in student + `google_connected` / `microsoft_connected` |
 | PATCH  | `/api/me`                     | Yes  | Sets `student_id`; `409` if taken at the same university |
 | POST   | `/api/auth/logout`            | —    | Destroys the session                                 |
-| GET    | `/api/assignments`            | Yes  | All assignments joined with course + detail info     |
+| GET    | `/api/assignments`            | Yes  | The **session user's** assignments + course/detail info |
+| POST   | `/api/assignments`            | Yes  | Creates a manual task; `201` with the created row    |
+| PATCH  | `/api/assignments/:id`        | Yes  | Edits a **manual** task; `404` for synced or other users' rows |
 | POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework into the DB      |
 
 `Yes` = requires a logged-in session (returns `401` otherwise).
+
+`POST /api/assignments` takes `{ title, task_type, course_name, description, due_date }`.
+Only `title` is required; `task_type` is one of `homework | project | quiz | exam | reading | other`;
+`due_date` is a `datetime-local` string treated as wall-clock time. A blank `course_name`
+files the task under `งานที่เพิ่มเอง`. `PATCH /api/assignments/:id` accepts any subset of
+`title`, `task_type`, `description`, `due_date` — most often to move a deadline (UR07).
+Synced coursework is deliberately not editable: the platforms stay the source of truth (UR05).
+
+> `PATCH /api/assignments/:id` has **no caller yet** — the dashboard can create tasks but
+> has no edit affordance. The endpoint is the one a future edit UI will use; until then it
+> is reachable only by hand.
 
 `POST /api/classroom/sync` takes `{ "cutoffDate": "YYYY-MM-DD" | null }` and returns
 `{ ok, coursesSynced, assignmentsSynced, deletedCount }`. The cutoff both limits what
@@ -219,9 +236,10 @@ created on demand by the first login from each email domain, so that table fills
 `Schedule` and `Notification` are defined but never read or written outside the sync's
 cascade delete.
 
-Two constraints carry requirements rather than just shape: `University.email_domain` is
-unique (so the find-or-create is safe), and `Student (student_id, university_id)` is unique
-(UR03 — the same number may recur at a different university, and unset ids stay `NULL`).
+Three constraints carry requirements rather than just shape: `University.email_domain` is
+unique (so the find-or-create is safe), `Student (student_id, university_id)` is unique
+(UR03 — the same number may recur at a different university, and unset ids stay `NULL`),
+and `Course.platform_source IS NULL` is what marks a course as manually created.
 
 Inspect data:
 
@@ -242,13 +260,14 @@ current `init.sql`:
 
 ```bash
 docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/001_identity.sql
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/002_task_type.sql
 ```
 
 Verify:
 
 ```bash
 docker compose exec db mysql -uroot -proot123 assignment_hub \
-  -e "SHOW INDEX FROM University; SHOW INDEX FROM Student;"
+  -e "DESCRIBE Assignment; SHOW INDEX FROM University; SHOW INDEX FROM Student;"
 ```
 
 ## Common Commands
