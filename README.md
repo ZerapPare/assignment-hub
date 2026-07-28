@@ -101,15 +101,19 @@ db-1        | ... ready for connections
 |---|---|
 | `/login` | หน้าเข้าสู่ระบบ (Google / Microsoft) |
 | `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ตารางงานทั้งหมด, ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน |
+| `/settings` | ตั้งค่า — โปรไฟล์, แก้รหัสนักศึกษา, สถานะเชื่อมต่อ Google/Microsoft |
 
 ทุกตัวเลขบนหน้า dashboard คำนวณจาก response ของ `/api/assignments` จริง ไม่มีข้อมูลตัวอย่างฝังในโค้ด
 (บัญชีที่ยังไม่ซิงก์จะเห็น `0` และ empty state ทุกการ์ด)
 
-หมายเหตุปุ่มที่ยังไม่พร้อมใช้:
+**`+ เพิ่มงานใหม่`** เปิด `AddTaskModal` แล้ว `POST` ไป `/api/assignments` — แถวที่สร้างถูกใส่กลับเข้า
+state ตัวเดียวกับที่ `useMemo` อ่าน ทุกการ์ด กราฟ จุดบนปฏิทิน และรายการจึงอัปเดตพร้อมกันโดยไม่ต้อง refetch
+งานที่เพิ่มเองเก็บใต้ `Course` ที่ `platform_source IS NULL` ซึ่งตรงกับแท็บ `เพิ่มเอง`
 
-- **`+ เพิ่มงานใหม่`** — `disabled` ไว้ เพราะ backend ยังไม่มี endpoint สร้างงาน
-- **checklist "งานด่วน"** — แสดงอย่างเดียว กดติ๊กไม่ได้ เพราะยังไม่มี endpoint เปลี่ยนสถานะงาน
-- **เมนูใน sidebar** (การบ้านทั้งหมด / สถิติ / ตั้งค่า) — ยังไม่มี route รองรับ
+ส่วนที่ยังไม่พร้อมใช้:
+
+- **checklist "งานด่วน"** — แสดงอย่างเดียว กดติ๊กไม่ได้ (`PATCH /api/assignments/:id` แก้ได้เฉพาะงานที่เพิ่มเอง ยังไม่มี UI เรียก)
+- **เมนู sidebar** `การบ้านทั้งหมด` / `สถิติ` — ยังไม่มี route รองรับ
 
 ## Database
 
@@ -138,16 +142,29 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES; SE
 | GET | `/api/health` | — | สถานะการต่อ DB |
 | GET | `/api/auth/google` · `/microsoft` | — | ส่งไปหน้า consent ของ provider |
 | GET | `/api/auth/{provider}/callback` | — | แลก code → สร้าง/อัปเดต user + token → เริ่ม session |
-| GET | `/api/me` | ต้อง | ข้อมูล user ที่ login อยู่ |
+| GET | `/api/me` | ต้อง | ข้อมูล user ที่ login อยู่ + สถานะเชื่อมต่อ Google/Microsoft |
+| PATCH | `/api/me` | ต้อง | แก้รหัสนักศึกษา (`409` ถ้าซ้ำในมหาลัยเดียวกัน) |
 | POST | `/api/auth/logout` | — | ออกจากระบบ (ลบ session) |
-| GET | `/api/assignments` | ต้อง | งานทั้งหมด (JOIN course + detail) |
+| GET | `/api/assignments` | ต้อง | งาน**ของผู้ใช้ที่ login อยู่** (JOIN course + detail) |
+| POST | `/api/assignments` | ต้อง | เพิ่มงานเอง คืน `201` พร้อมแถวที่สร้าง |
+| PATCH | `/api/assignments/:id` | ต้อง | แก้งานที่เพิ่มเอง (งานที่ซิงก์มาแก้ไม่ได้) |
 | POST | `/api/classroom/sync` | ต้อง | ดึงงานจาก Google Classroom มาลง DB |
 
-`ต้อง` = ต้องมี session ไม่งั้นได้ `401`
+`ต้อง` = ต้องมี session ไม่งั้นได้ `401` — และทุก query ผูกกับ `student_id` จาก session
+ไม่ได้รับ id มาจาก client ผู้ใช้จึงเห็นเฉพาะข้อมูลของตัวเอง
 
 `/api/classroom/sync` รับ body `{ "cutoffDate": "YYYY-MM-DD" | null }` (เอาเฉพาะงานที่กำหนดส่งตั้งแต่วันนั้น
-งานเก่ากว่านั้นที่เคยซิงก์ไว้จะถูกลบ) แล้วคืน `{ ok, coursesSynced, assignmentsSynced, deletedCount }`
+งานเก่ากว่านั้นที่เคยซิงก์ไว้จะถูกลบ) แล้วคืน `{ ok, coursesSynced, assignmentsSynced, deletedCount, skippedCourses }`
 ปุ่ม "ซิงก์ Classroom" บน dashboard เรียก endpoint นี้ และจำค่า cutoff ไว้ใน `localStorage`
+(แยกตาม origin — `localhost` กับโดเมนจริงจำคนละค่า)
+
+> **สำคัญสำหรับคนแก้โค้ด sync:** Google Classroom แจก course id และ coursework id
+> **ตัวเดียวกันให้นักศึกษาทุกคนในวิชานั้น** แต่ schema เราให้แต่ละคนมีแถวของตัวเอง
+> upsert จึงต้องใช้ key คู่กับเจ้าของเสมอ — `Course` ใช้ `(external_course_id, student_id)`
+> และ `Assignment` ใช้ `(external_assignment_id, course_id)`
+> ถ้าลืมครึ่งหลัง คนที่ซิงก์ทีหลังจะไปเจอแถวของเพื่อนแล้ว `UPDATE` ทับ **แทนที่จะ `INSERT` ของตัวเอง**
+> — ซิงก์สำเร็จแต่งานไม่ขึ้น และ**จะไม่มีวันเจอบั๊กนี้ตอน dev คนเดียว**
+> รายละเอียดที่ [PROJECT_SETUP.md](PROJECT_SETUP.md#both-upsert-keys-must-include-the-owner)
 
 > Microsoft ยังเป็นแค่ login — ยังไม่มี sync ของ Teams
 
@@ -159,16 +176,22 @@ assignment-hub/
 ├── .env.local           # secret OAuth (git-ignored — สร้างเอง)
 ├── init.sql             # schema เปล่า ไม่มีข้อมูลตัวอย่าง (รันครั้งแรก)
 ├── backend/             # Express API + mysql2 + OAuth + Classroom sync
-│   └── server.js
+│   ├── server.js        # entry บาง ๆ — ตั้ง session แล้ว mount router
+│   └── src/
+│       ├── config.js    # รวม env var ไว้ที่เดียว
+│       ├── db.js        # mysql2 pool ตัวเดียวที่ทุก route ใช้ร่วมกัน
+│       ├── routes/      # health, auth, me, assignments, classroom
+│       ├── services/    # classroomSync, identity, oauthSession
+│       └── middleware/  # requireAuth
 └── frontend/            # React + Vite + react-router
     └── src/
-        ├── App.jsx          # router: /login, /home
+        ├── App.jsx          # router: /login, /home, /settings
         ├── theme.js         # design token (สี, ฟอนต์, radius, ชื่อวัน/เดือนไทย)
         ├── GlobalStyles.jsx # โหลดฟอนต์ Maitree + base CSS
-        ├── pages/           # LoginPage, HomePage
+        ├── pages/           # LoginPage, HomePage, SettingsPage
         ├── components/      # Sidebar, StatCard, TaskRow, BarChart, DonutChart,
         │                    # MiniCalendar, DeadlineList, UrgentChecklist,
-        │                    # ProviderButton, BrandMark
+        │                    # AddTaskModal, ProviderButton, BrandMark
         └── icons/           # Google/Microsoft SVG + ไอคอน UI (index.jsx)
 ```
 
@@ -275,6 +298,8 @@ Vite HMR กับ `node --watch` โหลดใหม่ให้เอง แ
 | `ERR_CONNECTION_REFUSED` | ไม่มีอะไรฟังพอร์ตนั้น เช็ค `docker compose ps` · **refused = firewall ผ่านแต่ไม่มีคนฟัง / timeout = โดน firewall บล็อก** |
 | `/api/*` เป็น `500` ทุกเส้น | request ไปไม่ถึง Express — `/api/health` คืนได้แค่ `200`/`503` ถ้าได้ `500` แปลว่า Vite proxy ต่อ `backend:3000` ไม่ติด ดู `docker compose logs backend` |
 | `Cannot find module '<pkg>'` | anonymous volume บัง `node_modules` ใหม่ → `docker compose rm -fsv backend` แล้ว `up -d --build` |
+| แก้โค้ดแล้ว backend ยังรันของเก่า | `node --watch` มักไม่เห็นไฟล์ที่เปลี่ยนผ่าน bind mount ของ Docker → `docker compose restart backend` หลัง `git pull` |
+| ซิงก์สำเร็จแต่งานไม่ขึ้น (และ localhost ได้เยอะกว่า) | upsert key ขาดเงื่อนไขเจ้าของ → คนที่ซิงก์ทีหลังไปเจอแถวของเพื่อน ดู [หมายเหตุใต้ตาราง API](#api-backend) |
 | `Error 400: redirect_uri_mismatch` | URI ไม่ตรงกับที่ลงทะเบียนใน OAuth client **ตัวนั้น** — เช็คว่าเซิร์ฟเวอร์ส่ง client ไหนก่อน (ดูด้านล่าง) |
 
 **เช็คว่าเซิร์ฟเวอร์ใช้ OAuth client ตัวไหนอยู่:**

@@ -196,11 +196,34 @@ Synced coursework is deliberately not editable: the platforms stay the source of
 > is reachable only by hand.
 
 `POST /api/classroom/sync` takes `{ "cutoffDate": "YYYY-MM-DD" | null }` and returns
-`{ ok, coursesSynced, assignmentsSynced, deletedCount }`. The cutoff both limits what
-is imported and deletes previously-synced rows that now fall before it, so moving the
-date forward prunes old semesters. Courses upsert on `(external_course_id, student_id)`
-and assignments on `external_assignment_id`; a re-sync updates rather than duplicates,
+`{ ok, coursesSynced, assignmentsSynced, deletedCount, skippedCourses }`. The cutoff both
+limits what is imported and deletes previously-synced rows that now fall before it, so
+moving the date forward prunes old semesters. A re-sync updates rather than duplicates,
 and keeps a status the user set manually unless Classroom reports the work as turned in.
+A course whose coursework can't be read is pushed onto `skippedCourses` instead of
+aborting the whole run.
+
+### Both upsert keys must include the owner
+
+Classroom hands **every student in a class the same course id and the same coursework
+id**. This schema, on the other hand, gives each student their own `Course` and
+`Assignment` rows. So a Classroom id alone never identifies one row here:
+
+| Table | Upsert key |
+|---|---|
+| `Course` | `(external_course_id, student_id)` |
+| `Assignment` | `(external_assignment_id, course_id)` — and `course_id` is already scoped to the student |
+
+Dropping the owner half of either key breaks quietly and only in multi-user data: the
+second classmate to sync *finds* the first one's row, takes the `UPDATE` branch, and
+never inserts their own copy. Their sync reports success while their assignments simply
+never appear, because the read path filters on `c.student_id`. On a single-user dev
+database both key forms behave identically, so this cannot be caught locally — see the
+matching entry under [Troubleshooting](#troubleshooting).
+
+Neither key is enforced by a database constraint (`external_assignment_id` is
+deliberately **not** unique — several students legitimately hold the same one), so
+correctness here rests entirely on the queries in `routes/classroom.js`.
 
 Quick check:
 
@@ -222,7 +245,17 @@ assignment-hub/
 ├── backend/
 │   ├── Dockerfile
 │   ├── package.json          # express, mysql2, express-session, google-auth-library, googleapis, jose
-│   └── server.js             # Express API + MySQL pool + OAuth routes + Classroom sync
+│   ├── server.js             # thin entry: session middleware, then mounts the routers
+│   └── src/
+│       ├── config.js         # env vars in one place (PORT, SESSION_SECRET, OAuth ids)
+│       ├── db.js             # the shared mysql2 pool
+│       ├── middleware/auth.js    # requireAuth — 401 without a session
+│       ├── routes/           # health, auth, me, assignments, classroom — one file per area
+│       ├── services/
+│       │   ├── classroomSync.js  # Classroom paging + date conversion
+│       │   ├── identity.js       # find-or-create University / upsert Student
+│       │   └── oauthSession.js   # `state` handling and the link-mode flow
+│       └── utils/dueDate.js
 └── frontend/
     ├── Dockerfile
     ├── package.json          # react, react-router-dom, vite
@@ -230,16 +263,21 @@ assignment-hub/
     ├── index.html            # bare Vite entry (fonts are injected from GlobalStyles.jsx)
     └── src/
         ├── main.jsx          # React entry
-        ├── App.jsx           # router: /login, /home
+        ├── App.jsx           # router: /login, /home, /settings
         ├── theme.js          # design tokens: colours, font, radii, shadows, Thai day/month names
         ├── GlobalStyles.jsx  # injects the Maitree webfont + base CSS, sets lang="th"
         ├── pages/
-        │   ├── LoginPage.jsx # two-panel login screen (Google/Microsoft OAuth)
-        │   └── HomePage.jsx  # dashboard (fetches /api/me + /api/assignments, POSTs the sync)
+        │   ├── LoginPage.jsx    # two-panel login screen (Google/Microsoft OAuth)
+        │   ├── HomePage.jsx     # dashboard (fetches /api/me + /api/assignments, POSTs the sync)
+        │   └── SettingsPage.jsx # profile, รหัสนักศึกษา, provider link state
         ├── components/       # Sidebar, StatCard, TaskRow, BarChart, DonutChart, MiniCalendar,
-        │                     # DeadlineList, UrgentChecklist, ProviderButton, BrandMark
+        │                     # DeadlineList, UrgentChecklist, AddTaskModal, ProviderButton, BrandMark
         └── icons/            # GoogleIcon, MicrosoftIcon + index.jsx (UI icon set, inline SVG)
 ```
+
+The backend is split by area rather than kept in one file: `routes/` holds the HTTP layer
+and `services/` the logic worth testing on its own. `db.js` exports a single pool that every
+route imports — don't create a second one.
 
 Components hold their styles in a local `const styles = {...}` object and pull every
 colour, radius, and shadow from `theme.js`. Add new values there instead of hard-coding
@@ -261,6 +299,12 @@ Three constraints carry requirements rather than just shape: `University.email_d
 unique (so the find-or-create is safe), `Student (student_id, university_id)` is unique
 (UR03 — the same number may recur at a different university, and unset ids stay `NULL`),
 and `Course.platform_source IS NULL` is what marks a course as manually created.
+
+Two *absent* constraints are just as deliberate: `Course.external_course_id` and
+`Assignment.external_assignment_id` carry no unique index, because classmates share those
+Classroom ids and each needs their own row. That makes the composite upsert keys in
+`routes/classroom.js` the only thing keeping one student's sync out of another's data —
+see [Both upsert keys must include the owner](#both-upsert-keys-must-include-the-owner).
 
 Inspect data:
 
@@ -358,6 +402,14 @@ certificates per domain per week.
   ```
 
   The `client_id` prefix is the **Google Cloud project number** (`123456789-abc….apps.googleusercontent.com` lives in project `123456789`), so `https://console.cloud.google.com/apis/credentials?project=<that number>` opens the right project directly. Editing a client in a different project — easy to do when several exist — changes nothing and looks identical from the outside. Also check `http` vs `https`, a stray trailing slash, and that the URI went in *Authorized redirect URIs*, not *Authorized JavaScript origins*.
+- **A sync reports success but the assignments never show up — and the same account gets more of them on a single-user database** — the row exists, it just belongs to a classmate. Compare what is stored against what the API returns:
+
+  ```bash
+  docker compose exec db mysql -uroot -proot123 assignment_hub -e "SELECT s.user_id, s.university_email, COUNT(a.assignment_id) AS cnt FROM Student s LEFT JOIN Course c ON c.student_id = s.user_id LEFT JOIN Assignment a ON a.course_id = c.course_id GROUP BY s.user_id, s.university_email;"
+  ```
+
+  A lopsided split (one student holding nearly everything while later ones hold almost nothing) means an upsert lookup lost its owner condition and the first student to sync claimed the shared rows — see [Both upsert keys must include the owner](#both-upsert-keys-must-include-the-owner). No migration is needed after fixing the query: the next sync stops matching other people's rows and inserts the missing ones. Far more `Course` rows than `Assignment` rows is the same symptom seen from the other side, since the course upsert is scoped and the assignment one was not.
+- **Code changed on disk but the backend still runs the old version** — `node --watch` uses `fs.watch`, which frequently misses writes arriving through a Docker bind mount (the same reason Vite needs `usePolling`). `docker compose exec backend grep …` will show the new source while the running process still holds the old one in memory. `docker compose restart backend` after a `git pull` on a deployed host.
 - **`redirect_uri` is correct but login still fails on a deployed host while localhost works** — the two hosts are probably using different OAuth clients. Compare `GOOGLE_CLIENT_ID` in each machine's `.env.local`; `.env.local` is git-ignored, so a deployed checkout never inherits the one you use locally. Copy the ID **and** secret together — a mixed pair fails with `invalid_client`.
 - **`getaddrinfo ENOTFOUND db`** — the stack started in a bad state. `docker compose down` then `docker compose up -d --force-recreate`.
 - **Frontend loads but shows "waiting for database"** — MySQL is still initializing on first run; wait ~15s and refresh.
