@@ -109,24 +109,33 @@ This trips people up, so be precise about which file a variable belongs in:
 |----------|---------------|-------------------------------------------------------------|
 | `/login` | Login screen  | Real Google / Microsoft OAuth (buttons redirect to the backend) |
 | `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, the task table, a month calendar, upcoming deadlines, and a 48h checklist |
+| `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, and connect state for Google and Microsoft |
 | `*`      | →             | Redirects to `/login`                                       |
 
 Every figure on the dashboard is derived in a single `useMemo` over the `/api/assignments`
 response — there is no seeded or placeholder data anywhere in the UI. A freshly
 logged-in account (before its first sync) renders zeros and empty states.
 
-Three controls are intentionally inert because no endpoint backs them yet:
+**`+ เพิ่มงานใหม่`** opens `AddTaskModal` and `POST`s to `/api/assignments`. The created
+row is appended to the same `assignments` state the `useMemo` reads, so every stat card,
+chart, calendar dot and list updates without a refetch. Manual work is stored under a
+`Course` with `platform_source IS NULL`, which is what the `เพิ่มเอง` filter tab matches.
 
-- **`+ เพิ่มงานใหม่`** is `disabled` — there is no create-assignment endpoint.
+Two controls are still inert because no endpoint backs them yet:
+
 - The **48h checklist** is read-only — nothing can write `Assignment_Detail.status` back.
-- **Sidebar nav items** other than `หน้าแรก` have no route, so they carry no pointer cursor.
+- **Sidebar nav items** other than `หน้าแรก` and `ตั้งค่า` have no route, so they carry no pointer cursor.
 
 Fonts and base CSS are injected by `src/GlobalStyles.jsx` (mounted once in `App.jsx`)
 rather than declared in `index.html`.
 
 ## Authentication (OAuth)
 
-Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on a single origin (`localhost:5173` locally, `PUBLIC_URL` when deployed) via the Vite `/api` proxy, so the session cookie is same-host. On callback the backend upserts the user into `Student` (keyed on the unique email; university matched by email domain), stores the provider's access/refresh tokens (`gg_*` for Google, `ms_*` for Microsoft), and starts an `express-session` cookie. The dashboard reads `/api/me`; a `401` bounces you to `/login`.
+Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on a single origin (`localhost:5173` locally, `PUBLIC_URL` when deployed) via the Vite `/api` proxy, so the session cookie is same-host. Each flow sends a random `state` held in the session and rejects a callback that doesn't match it (`/login?error=state`). On callback the backend upserts the user into `Student` (keyed on the unique email), stores the provider's access/refresh tokens (`gg_*` for Google, `ms_*` for Microsoft), and starts an `express-session` cookie. The dashboard reads `/api/me`; a `401` bounces you to `/login`.
+
+**Identity.** The email domain resolves to a `University` row that is *created on first sight*, so a new institution needs no seed data or code change (UR02). `student_id` is taken from the email's local part when it is all digits — the common `67050115@…` format — and is otherwise left unset for the user to fill in; it is unique per university, not globally (UR03).
+
+**Linking the other platform.** `/api/auth/{google,microsoft}?link=1` connects a provider to the account already in the session instead of signing in as a new one. This matters because a personal Google address rarely matches a university Microsoft address — a plain second login would create a second `Student` row. Link mode finds the row by session, leaves `student_name` alone, and returns to `/settings?linked=<provider>`. Signing in with Microsoft and then linking Google is what makes `/api/classroom/sync` usable.
 
 **Prerequisites — create OAuth apps and a `.env.local`:**
 
@@ -165,12 +174,26 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | GET    | `/api/auth/google/callback`   | —    | Exchanges code, upserts user + tokens, starts session |
 | GET    | `/api/auth/microsoft`         | —    | Redirects to Microsoft's consent screen              |
 | GET    | `/api/auth/microsoft/callback`| —    | Exchanges code, upserts user + tokens, starts session |
-| GET    | `/api/me`                     | Yes  | The logged-in student (sidebar profile)              |
+| GET    | `/api/me`                     | Yes  | The logged-in student + `google_connected` / `microsoft_connected` |
+| PATCH  | `/api/me`                     | Yes  | Sets `student_id`; `409` if taken at the same university |
 | POST   | `/api/auth/logout`            | —    | Destroys the session                                 |
-| GET    | `/api/assignments`            | Yes  | All assignments joined with course + detail info     |
+| GET    | `/api/assignments`            | Yes  | The **session user's** assignments + course/detail info |
+| POST   | `/api/assignments`            | Yes  | Creates a manual task; `201` with the created row    |
+| PATCH  | `/api/assignments/:id`        | Yes  | Edits a **manual** task; `404` for synced or other users' rows |
 | POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework into the DB      |
 
 `Yes` = requires a logged-in session (returns `401` otherwise).
+
+`POST /api/assignments` takes `{ title, task_type, course_name, description, due_date }`.
+Only `title` is required; `task_type` is one of `homework | project | quiz | exam | reading | other`;
+`due_date` is a `datetime-local` string treated as wall-clock time. A blank `course_name`
+files the task under `งานที่เพิ่มเอง`. `PATCH /api/assignments/:id` accepts any subset of
+`title`, `task_type`, `description`, `due_date` — most often to move a deadline (UR07).
+Synced coursework is deliberately not editable: the platforms stay the source of truth (UR05).
+
+> `PATCH /api/assignments/:id` has **no caller yet** — the dashboard can create tasks but
+> has no edit affordance. The endpoint is the one a future edit UI will use; until then it
+> is reachable only by hand.
 
 `POST /api/classroom/sync` takes `{ "cutoffDate": "YYYY-MM-DD" | null }` and returns
 `{ ok, coursesSynced, assignmentsSynced, deletedCount }`. The cutoff both limits what
@@ -229,10 +252,15 @@ Auto-created on first DB start. Tables:
 `University` · `Student` · `Course` · `Assignment` · `Assignment_Detail` · `Schedule` · `Notification`
 
 `init.sql` creates the schema and **inserts nothing** — the database starts empty, so a
-new account sees an empty dashboard until it runs a Classroom sync. Two consequences worth
-knowing: `University` has no rows, so `Student.university_id` stays `NULL` and the sidebar
-falls back to showing the user's email; and `Schedule` / `Notification` are defined but
-never read or written outside the sync's cascade delete.
+new account sees an empty dashboard until it runs a Classroom sync. `University` rows are
+created on demand by the first login from each email domain, so that table fills itself.
+`Schedule` and `Notification` are defined but never read or written outside the sync's
+cascade delete.
+
+Three constraints carry requirements rather than just shape: `University.email_domain` is
+unique (so the find-or-create is safe), `Student (student_id, university_id)` is unique
+(UR03 — the same number may recur at a different university, and unset ids stay `NULL`),
+and `Course.platform_source IS NULL` is what marks a course as manually created.
 
 Inspect data:
 
@@ -244,6 +272,24 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e \
 ```
 
 > `init.sql` only runs when the database is first created. After editing it, run `docker compose down -v` then `up --build` to recreate the schema — but on a host already serving HTTPS, remove just the database instead (`docker compose rm -fsv db`), since `down -v` would take `caddy_data` with it.
+
+### Migrations
+
+Because `init.sql` only runs on a fresh database, an existing one never picks up schema
+changes. `migrations/` holds the equivalent `ALTER`s, applied by hand and safe to skip on
+a database built from the current `init.sql`:
+
+```bash
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/001_identity.sql
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/002_task_type.sql
+```
+
+Verify:
+
+```bash
+docker compose exec db mysql -uroot -proot123 assignment_hub \
+  -e "DESCRIBE Assignment; SHOW INDEX FROM University; SHOW INDEX FROM Student;"
+```
 
 ## Deploying over HTTPS
 
