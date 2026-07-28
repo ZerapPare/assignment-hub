@@ -4,7 +4,6 @@ const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-// The logged-in student (greeting + sidebar profile + settings page).
 router.get('/api/me', requireAuth, async (req, res) => {
   try {
     // Connection state comes from the *refresh* tokens: those are what make

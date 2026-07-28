@@ -1,7 +1,3 @@
-// Shared design tokens. Everything visual should read from here so the two
-// pages stay in one design language (before this, Login used hex and Home
-// used oklch, which drifted apart).
-
 export const C = {
   navy: '#1e3a5f',
   navyDark: '#14283f',
@@ -59,8 +55,6 @@ export const SHADOW = {
   ssoHover: '0 4px 14px -4px rgba(30,58,95,0.18)',
 };
 
-// Sunday-first, matching Date#getDay(). The old MiniCalendar had พ/พฤ
-// swapped here, which shifted every weekday label by one.
 export const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
 export const TH_MONTHS = [

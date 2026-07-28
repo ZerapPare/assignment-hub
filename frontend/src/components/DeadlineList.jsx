@@ -1,11 +1,8 @@
 import React from 'react';
 import { C } from '../theme';
 
-// Left-bar colour runs from most to least urgent.
 const BARS = [C.pink, C.blueMid, C.navy];
 
-// Upcoming deadlines. `items` = [{ id, dateText, timeText, title, source }],
-// already sorted soonest-first by the caller.
 function DeadlineList({ items = [] }) {
   if (items.length === 0) {
     return <p style={styles.empty}>ไม่มีงานค้าง</p>;

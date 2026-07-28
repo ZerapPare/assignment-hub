@@ -1,11 +1,8 @@
 import React from 'react';
 import { C, FONT, WEEKDAYS, TH_MONTHS } from '../theme';
 
-// Month calendar on the light-blue card. `busyDays` = Set of day numbers in
-// the displayed month that have a due date. `today` is null unless the
-// displayed month is the current one.
 function MiniCalendar({ year, month, today, busyDays, onPrev, onNext }) {
-  const firstWeekday = new Date(year, month, 1).getDay(); // 0 = Sunday
+  const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const cells = [];
@@ -15,7 +12,6 @@ function MiniCalendar({ year, month, today, busyDays, onPrev, onNext }) {
   return (
     <div>
       <div style={styles.header}>
-        {/* Buddhist Era, matching how Thai students read dates. */}
         <span style={styles.title}>
           {TH_MONTHS[month]} {year + 543}
         </span>

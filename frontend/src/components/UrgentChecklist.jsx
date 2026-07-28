@@ -2,9 +2,6 @@ import React from 'react';
 import { C } from '../theme';
 import { CheckIcon } from '../icons';
 
-// Read-only checklist of work due within 48h. The boxes reflect the status
-// stored in Assignment_Detail — there is no endpoint to write status back,
-// so nothing here is clickable and no pointer cursor is shown.
 function UrgentChecklist({ items = [] }) {
   if (items.length === 0) {
     return <p style={styles.empty}>ไม่มีงานด่วนใน 48 ชม.</p>;

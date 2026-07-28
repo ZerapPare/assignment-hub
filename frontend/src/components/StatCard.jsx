@@ -1,7 +1,6 @@
 import React from 'react';
 import { C, R } from '../theme';
 
-// A single metric tile: icon swatch on top, then label + count.
 function StatCard({ icon, iconBg, label, value }) {
   return (
     <div style={styles.card}>

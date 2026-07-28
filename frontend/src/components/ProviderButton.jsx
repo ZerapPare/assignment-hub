@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { C, FONT, R, SHADOW } from '../theme';
 
-// Reusable OAuth-provider sign-in button (Google / Microsoft / ...)
 function ProviderButton({ icon, label, onClick }) {
   const [hover, setHover] = useState(false);
   return (

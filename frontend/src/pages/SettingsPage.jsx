@@ -80,9 +80,6 @@ function SettingsPage() {
     }
   };
 
-  // A full page load is the point — this hands the browser to the provider's
-  // consent screen, and ?link=1 attaches it to the account already signed in
-  // instead of starting a second one.
   const connect = (key) => {
     window.location.href = `/api/auth/${key}?link=1`;
   };
@@ -162,8 +159,6 @@ function SettingsPage() {
               <div style={styles.platformList}>
                 {PLATFORMS.map(({ key, name, Icon, field }) => (
                   <div key={key} style={styles.platformRow}>
-                    {/* The two brand marks are 20px and 18px wide; the box
-                        keeps both rows aligned. */}
                     <span style={styles.platformIcon}>
                       <Icon />
                     </span>

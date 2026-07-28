@@ -1,7 +1,5 @@
 const pool = require('../db');
 
-// --- Identity: university + student id ---
-
 // A student's university is derived from their email domain, and its row is
 // created the first time anyone from that domain signs in — so supporting a
 // new institution needs no seed data or code change. The name starts as the

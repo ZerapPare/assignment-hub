@@ -8,8 +8,6 @@ const { toMysqlDateTime, listCourseWorkSince } = require('../services/classroomS
 
 const router = express.Router();
 
-// --- Google Classroom sync ---
-
 // Pull the logged-in student's Classroom courses + coursework and upsert
 // them into Course / Assignment / Assignment_Detail so re-syncing doesn't
 // create duplicates. Both upsert keys pair Classroom's own id with the row's
@@ -20,9 +18,6 @@ const router = express.Router();
 // never insert that student's own copy.
 router.post('/api/classroom/sync', requireAuth, async (req, res) => {
   try {
-    // Optional: only bring in assignments due on/after this date. Skips old
-    // finished semesters instead of importing everything, and (via
-    // listCourseWorkSince) cuts the Classroom API calls short too.
     const cutoffDate = req.body?.cutoffDate ? new Date(req.body.cutoffDate) : null;
 
     const [rows] = await pool.query(
@@ -40,11 +35,9 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
     client.setCredentials({ refresh_token: refreshToken });
     const classroom = google.classroom({ version: 'v1', auth: client });
 
-    // Remove previously-synced Classroom assignments that now fall before
-    // the cutoff (e.g. you moved the cutoff forward, or old semesters were
-    // synced before this feature existed). Scoped to this student's own
-    // Google Classroom courses only — manual entries and Microsoft Teams
-    // assignments are never touched here.
+    // Moving the cutoff forward prunes what was synced under an older one.
+    // Scoped to this student's Google Classroom courses — manual entries and
+    // Teams assignments are never touched here.
     let deletedCount = 0;
     if (cutoffDate) {
       const [toDelete] = await pool.query(
@@ -111,8 +104,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
       }
 
       for (const work of courseWork) {
-        // Look up whether *this student* has already turned this in.
-        // 'me' works because the request is authenticated as the student.
         let submissionState = null;
         try {
           const { data: { studentSubmissions = [] } } = await classroom.courses.courseWork.studentSubmissions.list({
@@ -143,23 +134,19 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
             [work.title, work.alternateLink || null, assignmentId]
           );
           if (isFinished) {
-            // Now turned in/returned — mark it done, overriding any manual status.
             await pool.query(
               'UPDATE Assignment_Detail SET description = ?, due_date = ?, status = ? WHERE assignment_id = ?',
               [work.description || null, dueDateTime, 'completed', assignmentId]
             );
           } else {
-            // Still unfinished — refresh details but leave the student's own
-            // status/priority (not_started / in_progress) alone.
+            // Status is left out on purpose: the student's own not_started /
+            // in_progress must survive a re-sync.
             await pool.query(
               'UPDATE Assignment_Detail SET description = ?, due_date = ? WHERE assignment_id = ?',
               [work.description || null, dueDateTime, assignmentId]
             );
           }
         } else {
-          // Brand new coursework: bring it in either way, just start it at
-          // the right status so already-turned-in work shows as ส่งแล้ว
-          // instead of never appearing at all.
           const initialStatus = isFinished ? 'completed' : 'not_started';
 
           const [ins] = await pool.query(

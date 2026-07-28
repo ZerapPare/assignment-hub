@@ -19,8 +19,6 @@ const fmtDate = (d) => `${d.getDate()} ${TH_MONTHS_SHORT[d.getMonth()]}`;
 const fmtTime = (d) =>
   `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
-// Anything the sync didn't classify falls back to "not started", the same way
-// the previous UI treated an unknown status.
 const normalizeStatus = (s) => (s === 'completed' || s === 'in_progress' ? s : 'not_started');
 
 const STATUS = {
@@ -55,7 +53,6 @@ function HomePage() {
   });
 
   useEffect(() => {
-    // Gate on the session: /api/me returns 401 when not logged in → go to /login.
     fetch('/api/me')
       .then((r) => {
         if (r.status === 401) {
@@ -117,7 +114,6 @@ function HomePage() {
       return { year: d.getFullYear(), month: d.getMonth() };
     });
 
-  // Every number on this page is derived from the /api/assignments response.
   const view = useMemo(() => {
     const now = new Date();
     const withDate = assignments.map((a) => ({
@@ -137,14 +133,11 @@ function HomePage() {
     ).length;
     const urgentList = [...notDone].sort((a, b) => a.due - b.due).slice(0, 3);
 
-    // Checklist: everything due in the next 48h, completed ones included so
-    // the struck-through rows mean something.
     const checklist = withDate
       .filter((a) => a.due && a.due - now >= 0 && a.due - now <= URGENT_H * HOUR)
       .sort((a, b) => a.due - b.due)
       .slice(0, 5);
 
-    // Workload for the next 7 days, one bar per day starting today.
     const dayStart = new Date(now);
     dayStart.setHours(0, 0, 0, 0);
     const week7 = Array.from({ length: 7 }, (_, i) => {
@@ -173,7 +166,6 @@ function HomePage() {
     };
   }, [assignments]);
 
-  // Recomputed as the user pages through months.
   const busyDays = useMemo(
     () =>
       new Set(
@@ -209,7 +201,6 @@ function HomePage() {
 
         {!loading && !error && (
           <>
-            {/* Header */}
             <div style={styles.header}>
               <h1 style={styles.title}>แดชบอร์ด</h1>
               <div style={styles.toolbar}>
@@ -238,7 +229,6 @@ function HomePage() {
             </div>
 
             <div style={styles.body}>
-              {/* Left column */}
               <div style={styles.leftCol}>
                 <div style={styles.statGrid}>
                   <StatCard
@@ -267,7 +257,6 @@ function HomePage() {
                   />
                 </div>
 
-                {/* Charts */}
                 <div style={styles.chartGrid}>
                   <div style={styles.card}>
                     <div style={styles.cardHead}>
@@ -291,7 +280,6 @@ function HomePage() {
                   </div>
                 </div>
 
-                {/* Task table */}
                 <div style={{ ...styles.card, padding: 22 }}>
                   <div style={styles.cardHead}>
                     <span style={{ ...styles.cardTitle, fontSize: 15 }}>งานทั้งหมด</span>
@@ -340,7 +328,6 @@ function HomePage() {
                 </div>
               </div>
 
-              {/* Right column */}
               <div style={styles.rightCol}>
                 <div style={{ ...styles.card, background: C.blue }}>
                   <MiniCalendar
@@ -391,8 +378,6 @@ function HomePage() {
           </>
         )}
 
-        {/* Appending is enough: every stat, chart, calendar dot and list on
-            this page derives from `assignments` through the view useMemo. */}
         <AddTaskModal
           open={addOpen}
           onClose={() => setAddOpen(false)}

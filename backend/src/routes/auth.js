@@ -16,9 +16,6 @@ const { beginOAuth, checkState, completeLogin, finishOAuth } = require('../servi
 
 const router = express.Router();
 
-// --- Google OAuth (Authorization Code flow) ---
-
-// Step 1: send the user to Google's consent screen.
 // ?link=1 connects Google to the account already in the session instead of
 // signing in as a (possibly different) Google identity.
 router.get('/api/auth/google', (req, res) => {
@@ -39,8 +36,6 @@ router.get('/api/auth/google', (req, res) => {
   res.redirect(url);
 });
 
-// Step 2: Google redirects back here with a code → exchange it, upsert the
-// student + tokens, start a session, then bounce to the dashboard.
 router.get('/api/auth/google/callback', async (req, res) => {
   const { code, error } = req.query;
   if (error || !code) return res.redirect(`${FRONTEND_URL}/login?error=oauth`);
@@ -66,9 +61,6 @@ router.get('/api/auth/google/callback', async (req, res) => {
   }
 });
 
-// --- Microsoft OAuth (Authorization Code flow) ---
-
-// Step 1: send the user to Microsoft's consent screen.
 // ?link=1 connects Microsoft to the account already in the session instead
 // of signing in as a (possibly different) Microsoft identity.
 router.get('/api/auth/microsoft', (req, res) => {
@@ -83,8 +75,6 @@ router.get('/api/auth/microsoft', (req, res) => {
   res.redirect(url.toString());
 });
 
-// Step 2: Microsoft redirects back here with a code → exchange it, upsert the
-// student + tokens, start a session, then bounce to the dashboard.
 router.get('/api/auth/microsoft/callback', async (req, res) => {
   const { code, error } = req.query;
   if (error || !code) return res.redirect(`${FRONTEND_URL}/login?error=oauth`);

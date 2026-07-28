@@ -1,9 +1,6 @@
 import { useEffect } from 'react';
 import { C, FONT } from './theme';
 
-// index.html only loads Inter + Poppins, neither of which has Thai glyphs, so
-// every Thai string silently fell back to an OS font. Rather than editing
-// index.html we inject Maitree (Thai + Latin) and the page baseline from here.
 const FONT_HREF =
   'https://fonts.googleapis.com/css2?family=Maitree:wght@400;500;600;700&display=swap';
 
@@ -28,7 +25,6 @@ function ensureLink(id, attrs) {
   document.head.appendChild(el);
 }
 
-// Renders nothing — mounted once at the app root purely for its side effects.
 function GlobalStyles() {
   useEffect(() => {
     ensureLink('ah-font-pre1', { rel: 'preconnect', href: 'https://fonts.googleapis.com' });

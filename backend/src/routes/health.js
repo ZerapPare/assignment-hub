@@ -3,7 +3,6 @@ const pool = require('../db');
 
 const router = express.Router();
 
-// Health check — also verifies the DB connection is up
 router.get('/api/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');

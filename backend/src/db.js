@@ -1,6 +1,5 @@
 const mysql = require('mysql2/promise');
 
-// MySQL connection pool (reads config from docker-compose env vars)
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',

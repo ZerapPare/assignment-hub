@@ -1,6 +1,5 @@
 import React from 'react';
 
-// Microsoft four-square mark
 function MicrosoftIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true">

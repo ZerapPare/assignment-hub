@@ -3,8 +3,6 @@ import { C } from '../theme';
 
 export const GRID = '2fr 1fr 1fr 1fr';
 
-// Deterministic avatar gradient so a course keeps the same colour between
-// renders (a random pick would flicker on every re-render).
 const PALETTE = [
   [C.blueMid, C.navy],
   [C.pinkSoft, C.pink],
@@ -22,7 +20,6 @@ function gradientFor(seed) {
   return `linear-gradient(135deg, ${from}, ${to})`;
 }
 
-// One row of the task table: avatar + title/course, platform, due, status pill.
 function TaskRow({ title, course, platform, due, badgeText, badgeColor, badgeBg, last }) {
   return (
     <div
