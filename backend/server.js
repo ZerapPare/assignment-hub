@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const mysql = require('mysql2/promise');
@@ -72,6 +73,139 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// --- Identity: university + student id ---
+
+// A student's university is derived from their email domain, and its row is
+// created the first time anyone from that domain signs in — so supporting a
+// new institution needs no seed data or code change. The name starts as the
+// domain itself; there's nothing more accurate to call it until someone says.
+async function findOrCreateUniversity(email) {
+  const domain = (email.split('@')[1] || '').toLowerCase();
+  if (!domain) return null;
+  // ON DUPLICATE KEY ... LAST_INSERT_ID keeps two simultaneous first-logins
+  // from one domain creating two rows, and yields the existing id either way.
+  const [res] = await pool.query(
+    `INSERT INTO University (university_name, email_domain) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE university_id = LAST_INSERT_ID(university_id)`,
+    [domain, domain]
+  );
+  return res.insertId || null;
+}
+
+// Thai universities commonly issue <student id>@<domain> addresses, so an
+// all-digit local part is the student id. Anything else — name-based
+// addresses, personal Google accounts — is left for the student to fill in
+// on the settings page rather than guessed at.
+function studentIdFromEmail(email) {
+  const local = (email.split('@')[0] || '').trim();
+  return /^\d+$/.test(local) ? local : null;
+}
+
+// Writes an auto-derived student id, but only into an empty column and only
+// if it's free. The unique (student_id, university_id) set means a derived id
+// can collide with someone already registered — that's a data problem to sort
+// out in settings, not a reason to refuse someone entry.
+async function trySetStudentId(userId, studentId) {
+  if (!studentId) return;
+  try {
+    await pool.query(
+      'UPDATE Student SET student_id = ? WHERE user_id = ? AND student_id IS NULL',
+      [studentId, userId]
+    );
+  } catch (err) {
+    if (err.code !== 'ER_DUP_ENTRY') throw err;
+    console.warn(`[auth] student_id ${studentId} already taken at this university — leaving NULL`);
+  }
+}
+
+// --- OAuth plumbing shared by both providers ---
+
+const PROVIDERS = {
+  google: { accessCol: 'gg_access_token', refreshCol: 'gg_refresh_token' },
+  microsoft: { accessCol: 'ms_access_token', refreshCol: 'ms_refresh_token' },
+};
+
+// `state` ties a callback to the browser session that started the flow.
+// Without it anyone can feed a victim a crafted callback URL — which under
+// ?link=1 would bind the attacker's platform account to the victim's.
+function beginOAuth(req) {
+  const state = crypto.randomBytes(16).toString('hex');
+  req.session.oauthState = state;
+  // Link mode only means anything for someone already logged in.
+  req.session.linkMode = Boolean(req.query.link && req.session.userId);
+  return state;
+}
+
+function checkState(req) {
+  const expected = req.session.oauthState;
+  delete req.session.oauthState;
+  return Boolean(expected) && req.query.state === expected;
+}
+
+// Where both OAuth callbacks land. Two modes:
+//   link  — an already-logged-in student connecting their *other* platform.
+//           Their row is found by session, never by email (a personal Google
+//           address rarely matches a university Microsoft one), and their
+//           existing name is left alone.
+//   login — ordinary sign-in, keyed on the unique university_email.
+// Returns the user_id to put in the session.
+async function completeLogin({ req, provider, email, name, tokens }) {
+  const { accessCol, refreshCol } = PROVIDERS[provider];
+  const access = tokens.access_token || null;
+
+  if (req.session.linkMode && req.session.userId) {
+    const userId = req.session.userId;
+    const [[existing = {}]] = await pool.query(
+      `SELECT ${refreshCol} AS refresh FROM Student WHERE user_id = ? LIMIT 1`,
+      [userId]
+    );
+    await pool.query(
+      `UPDATE Student SET ${accessCol} = ?, ${refreshCol} = ? WHERE user_id = ?`,
+      [access, tokens.refresh_token || existing.refresh || null, userId]
+    );
+    return userId;
+  }
+
+  const universityId = await findOrCreateUniversity(email);
+
+  const [rows] = await pool.query(
+    `SELECT user_id, ${refreshCol} AS refresh FROM Student WHERE university_email = ? LIMIT 1`,
+    [email]
+  );
+
+  let userId;
+  if (rows.length) {
+    userId = rows[0].user_id;
+    // university_id is refreshed on every login so accounts created before
+    // their University row existed get backfilled instead of staying NULL.
+    // The refresh token is kept when the provider doesn't return a new one.
+    await pool.query(
+      `UPDATE Student SET student_name = ?, university_id = ?, ${accessCol} = ?, ${refreshCol} = ?
+       WHERE user_id = ?`,
+      [name, universityId, access, tokens.refresh_token || rows[0].refresh || null, userId]
+    );
+  } else {
+    const [ins] = await pool.query(
+      `INSERT INTO Student (student_name, university_email, university_id, ${accessCol}, ${refreshCol})
+       VALUES (?, ?, ?, ?, ?)`,
+      [name, email, universityId, access, tokens.refresh_token || null]
+    );
+    userId = ins.insertId;
+  }
+
+  // Separate from the insert above so a taken id can't fail the whole login.
+  await trySetStudentId(userId, studentIdFromEmail(email));
+  return userId;
+}
+
+// Ends both callbacks: link mode returns to settings with a confirmation,
+// ordinary login goes to the dashboard.
+function finishOAuth(req, res, provider) {
+  const wasLink = Boolean(req.session.linkMode);
+  delete req.session.linkMode;
+  res.redirect(wasLink ? `${FRONTEND_URL}/settings?linked=${provider}` : `${FRONTEND_URL}/home`);
+}
+
 // Health check — also verifies the DB connection is up
 app.get('/api/health', async (req, res) => {
   try {
@@ -85,10 +219,13 @@ app.get('/api/health', async (req, res) => {
 // --- Google OAuth (Authorization Code flow) ---
 
 // Step 1: send the user to Google's consent screen.
+// ?link=1 connects Google to the account already in the session instead of
+// signing in as a (possibly different) Google identity.
 app.get('/api/auth/google', (req, res) => {
   const url = oauth2.generateAuthUrl({
     access_type: 'offline',      // ask for a refresh token (stored for future Classroom sync)
     prompt: 'consent',
+    state: beginOAuth(req),
     scope: [
       'openid', 'email', 'profile',
       'https://www.googleapis.com/auth/classroom.courses.readonly',
@@ -104,48 +241,22 @@ app.get('/api/auth/google', (req, res) => {
 app.get('/api/auth/google/callback', async (req, res) => {
   const { code, error } = req.query;
   if (error || !code) return res.redirect(`${FRONTEND_URL}/login?error=oauth`);
+  if (!checkState(req)) return res.redirect(`${FRONTEND_URL}/login?error=state`);
 
   try {
     const { tokens } = await oauth2.getToken(code);
     const ticket = await oauth2.verifyIdToken({ idToken: tokens.id_token, audience: CLIENT_ID });
     const payload = ticket.getPayload();
     const email = payload.email;
-    const name = payload.name || email;
 
-    // Match the university by the email domain (nullable if unknown).
-    const domain = (email.split('@')[1] || '').toLowerCase();
-    const [unis] = await pool.query(
-      'SELECT university_id FROM University WHERE email_domain = ? LIMIT 1',
-      [domain]
-    );
-    const universityId = unis.length ? unis[0].university_id : null;
-
-    // Upsert the student keyed on the unique email; keep the old refresh
-    // token if Google doesn't return a new one this time.
-    const [existing] = await pool.query(
-      'SELECT user_id, gg_refresh_token FROM Student WHERE university_email = ? LIMIT 1',
-      [email]
-    );
-
-    let userId;
-    if (existing.length) {
-      userId = existing[0].user_id;
-      const refresh = tokens.refresh_token || existing[0].gg_refresh_token || null;
-      await pool.query(
-        'UPDATE Student SET student_name = ?, gg_access_token = ?, gg_refresh_token = ? WHERE user_id = ?',
-        [name, tokens.access_token || null, refresh, userId]
-      );
-    } else {
-      const [ins] = await pool.query(
-        `INSERT INTO Student (student_name, university_email, university_id, gg_access_token, gg_refresh_token)
-         VALUES (?, ?, ?, ?, ?)`,
-        [name, email, universityId, tokens.access_token || null, tokens.refresh_token || null]
-      );
-      userId = ins.insertId;
-    }
-
-    req.session.userId = userId;
-    res.redirect(`${FRONTEND_URL}/home`);
+    req.session.userId = await completeLogin({
+      req,
+      provider: 'google',
+      email,
+      name: payload.name || email,
+      tokens,
+    });
+    finishOAuth(req, res, 'google');
   } catch (err) {
     console.error('[auth] callback error:', err.message);
     res.redirect(`${FRONTEND_URL}/login?error=oauth`);
@@ -155,12 +266,15 @@ app.get('/api/auth/google/callback', async (req, res) => {
 // --- Microsoft OAuth (Authorization Code flow) ---
 
 // Step 1: send the user to Microsoft's consent screen.
+// ?link=1 connects Microsoft to the account already in the session instead
+// of signing in as a (possibly different) Microsoft identity.
 app.get('/api/auth/microsoft', (req, res) => {
   const url = new URL(MS_AUTHORIZE_URL);
   url.searchParams.set('client_id', MS_CLIENT_ID);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('redirect_uri', MS_REDIRECT_URL);
   url.searchParams.set('response_mode', 'query');
+  url.searchParams.set('state', beginOAuth(req));
   // offline_access is what gets Microsoft to return a refresh_token (like Google's access_type: 'offline').
   url.searchParams.set('scope', 'openid email profile offline_access User.Read');
   res.redirect(url.toString());
@@ -171,6 +285,7 @@ app.get('/api/auth/microsoft', (req, res) => {
 app.get('/api/auth/microsoft/callback', async (req, res) => {
   const { code, error } = req.query;
   if (error || !code) return res.redirect(`${FRONTEND_URL}/login?error=oauth`);
+  if (!checkState(req)) return res.redirect(`${FRONTEND_URL}/login?error=state`);
 
   try {
     const tokenRes = await fetch(MS_TOKEN_URL, {
@@ -192,61 +307,63 @@ app.get('/api/auth/microsoft/callback', async (req, res) => {
 
     const { payload } = await jwtVerify(tokens.id_token, msJwks, { audience: MS_CLIENT_ID });
     const email = payload.email || payload.preferred_username;
-    const name = payload.name || email;
 
-    // Match the university by the email domain (nullable if unknown).
-    const domain = (email.split('@')[1] || '').toLowerCase();
-    const [unis] = await pool.query(
-      'SELECT university_id FROM University WHERE email_domain = ? LIMIT 1',
-      [domain]
-    );
-    const universityId = unis.length ? unis[0].university_id : null;
-
-    // Upsert the student keyed on the unique email; keep the old refresh
-    // token if Microsoft doesn't return a new one this time.
-    const [existing] = await pool.query(
-      'SELECT user_id, ms_refresh_token FROM Student WHERE university_email = ? LIMIT 1',
-      [email]
-    );
-
-    let userId;
-    if (existing.length) {
-      userId = existing[0].user_id;
-      const refresh = tokens.refresh_token || existing[0].ms_refresh_token || null;
-      await pool.query(
-        'UPDATE Student SET student_name = ?, ms_access_token = ?, ms_refresh_token = ? WHERE user_id = ?',
-        [name, tokens.access_token || null, refresh, userId]
-      );
-    } else {
-      const [ins] = await pool.query(
-        `INSERT INTO Student (student_name, university_email, university_id, ms_access_token, ms_refresh_token)
-         VALUES (?, ?, ?, ?, ?)`,
-        [name, email, universityId, tokens.access_token || null, tokens.refresh_token || null]
-      );
-      userId = ins.insertId;
-    }
-
-    req.session.userId = userId;
-    res.redirect(`${FRONTEND_URL}/home`);
+    req.session.userId = await completeLogin({
+      req,
+      provider: 'microsoft',
+      email,
+      name: payload.name || email,
+      tokens,
+    });
+    finishOAuth(req, res, 'microsoft');
   } catch (err) {
     console.error('[auth] microsoft callback error:', err.message);
     res.redirect(`${FRONTEND_URL}/login?error=oauth`);
   }
 });
 
-// The logged-in student (greeting + sidebar profile).
+// The logged-in student (greeting + sidebar profile + settings page).
 app.get('/api/me', requireAuth, async (req, res) => {
   try {
+    // Connection state comes from the *refresh* tokens: those are what make
+    // future syncing possible. The token values themselves never leave here.
     const [rows] = await pool.query(
-      `SELECT s.user_id, s.student_name, s.university_email, u.university_name
+      `SELECT s.user_id, s.student_id, s.student_name, s.university_email,
+              u.university_name,
+              s.gg_refresh_token IS NOT NULL AS google_connected,
+              s.ms_refresh_token IS NOT NULL AS microsoft_connected
        FROM Student s
        LEFT JOIN University u ON s.university_id = u.university_id
        WHERE s.user_id = ? LIMIT 1`,
       [req.session.userId]
     );
     if (!rows.length) return res.status(401).json({ error: 'not authenticated' });
-    res.json(rows[0]);
+    res.json({
+      ...rows[0],
+      google_connected: Boolean(rows[0].google_connected),
+      microsoft_connected: Boolean(rows[0].microsoft_connected),
+    });
   } catch (err) {
+    res.status(503).json({ error: 'Database not ready', message: err.message });
+  }
+});
+
+// Set the student id when it couldn't be derived from the email address.
+app.patch('/api/me', requireAuth, async (req, res) => {
+  const studentId = String(req.body?.student_id ?? '').trim();
+  if (!studentId) return res.status(400).json({ error: 'ต้องระบุรหัสนักศึกษา' });
+
+  try {
+    await pool.query('UPDATE Student SET student_id = ? WHERE user_id = ?', [
+      studentId,
+      req.session.userId,
+    ]);
+    res.json({ ok: true, student_id: studentId });
+  } catch (err) {
+    // Enforcing this is the whole point of UNIQUE (student_id, university_id).
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'รหัสนักศึกษานี้ถูกใช้แล้วในมหาวิทยาลัยเดียวกัน' });
+    }
     res.status(503).json({ error: 'Database not ready', message: err.message });
   }
 });
@@ -255,26 +372,197 @@ app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-// List all assignments joined with their course + detail info (login required).
+// --- Assignments ---
+
+const TASK_TYPES = ['homework', 'project', 'quiz', 'exam', 'reading', 'other'];
+
+// Where manually added work goes when the student doesn't name a subject.
+const MANUAL_COURSE_NAME = 'งานที่เพิ่มเอง';
+
+// One row shape for every assignment response, so a task created by POST can
+// be appended client-side without refetching the whole list.
+const ASSIGNMENT_SELECT = `
+  SELECT a.assignment_id,
+         a.title,
+         a.task_type,
+         a.origin_link,
+         c.course_name,
+         c.platform_source,
+         d.description,
+         d.due_date,
+         d.status,
+         d.priority_score
+  FROM Assignment a
+  JOIN Course c                 ON a.course_id = c.course_id
+  LEFT JOIN Assignment_Detail d ON a.assignment_id = d.assignment_id
+`;
+
+// A datetime-local input sends 'YYYY-MM-DDTHH:mm' with no timezone. Parsing
+// and reformatting both in server-local time round-trips the wall clock the
+// student actually typed, whatever the container's TZ is.
+// Returns a DATETIME string, null for "no due date", or false if unparseable.
+function parseDueDate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:00`
+  );
+}
+
+// Course rows carry the owning student, so that join is what scopes the list
+// to whoever is logged in.
 app.get('/api/assignments', requireAuth, async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT a.assignment_id,
-             a.title,
-             a.origin_link,
-             c.course_name,
-             c.platform_source,
-             d.description,
-             d.due_date,
-             d.status,
-             d.priority_score
-      FROM Assignment a
-      JOIN Course c            ON a.course_id = c.course_id
-      LEFT JOIN Assignment_Detail d ON a.assignment_id = d.assignment_id
-      ORDER BY d.due_date
-    `);
+    const [rows] = await pool.query(`${ASSIGNMENT_SELECT} WHERE c.student_id = ? ORDER BY d.due_date`, [
+      req.session.userId,
+    ]);
     res.json(rows);
   } catch (err) {
+    res.status(503).json({ error: 'Database not ready', message: err.message });
+  }
+});
+
+// Add a task by hand (UR05/UR06) — work that never came from Classroom or Teams.
+app.post('/api/assignments', requireAuth, async (req, res) => {
+  const title = String(req.body?.title ?? '').trim();
+  if (!title) return res.status(400).json({ error: 'ต้องระบุชื่องาน' });
+
+  const taskType = req.body?.task_type ? String(req.body.task_type) : null;
+  if (taskType && !TASK_TYPES.includes(taskType)) {
+    return res.status(400).json({ error: 'ประเภทงานไม่ถูกต้อง' });
+  }
+
+  const dueDate = parseDueDate(req.body?.due_date);
+  if (dueDate === false) {
+    return res.status(400).json({ error: 'รูปแบบวันเวลากำหนดส่งไม่ถูกต้อง' });
+  }
+
+  const courseName = String(req.body?.course_name ?? '').trim() || MANUAL_COURSE_NAME;
+  const description = String(req.body?.description ?? '').trim() || null;
+
+  // The two inserts go together: the schema has no ON DELETE actions, so an
+  // Assignment left without its Detail would have to be cleaned up by hand.
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // A manual course is one with no platform_source — exactly what the
+    // "เพิ่มเอง" filter and the sync's platform checks key on.
+    const [courses] = await conn.query(
+      `SELECT course_id FROM Course
+       WHERE student_id = ? AND course_name = ? AND platform_source IS NULL LIMIT 1`,
+      [req.session.userId, courseName]
+    );
+    let courseId = courses[0]?.course_id;
+    if (!courseId) {
+      const [ins] = await conn.query(
+        'INSERT INTO Course (course_name, platform_source, student_id) VALUES (?, NULL, ?)',
+        [courseName, req.session.userId]
+      );
+      courseId = ins.insertId;
+    }
+
+    const [created] = await conn.query(
+      'INSERT INTO Assignment (title, task_type, course_id) VALUES (?, ?, ?)',
+      [title, taskType, courseId]
+    );
+    await conn.query(
+      `INSERT INTO Assignment_Detail (assignment_id, description, due_date, status)
+       VALUES (?, ?, ?, 'not_started')`,
+      [created.insertId, description, dueDate]
+    );
+
+    await conn.commit();
+
+    const [rows] = await conn.query(`${ASSIGNMENT_SELECT} WHERE a.assignment_id = ?`, [
+      created.insertId,
+    ]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    await conn.rollback();
+    console.error('[assignments] create failed:', err.message);
+    res.status(500).json({ error: 'เพิ่มงานไม่สำเร็จ', message: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// Edit a manually added task (UR07) — most often to move its deadline.
+//
+// Nothing in the frontend calls this yet: the dashboard can create tasks but
+// has no edit affordance. Kept deliberately, not by oversight — UR07 is a
+// real requirement and this is the endpoint the edit UI will use.
+app.patch('/api/assignments/:id', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(404).json({ error: 'not found' });
+
+  const assignmentSet = [];
+  const assignmentVals = [];
+  const detailSet = [];
+  const detailVals = [];
+
+  if (req.body?.title !== undefined) {
+    const title = String(req.body.title).trim();
+    if (!title) return res.status(400).json({ error: 'ต้องระบุชื่องาน' });
+    assignmentSet.push('title = ?');
+    assignmentVals.push(title);
+  }
+  if (req.body?.task_type !== undefined) {
+    const taskType = req.body.task_type || null;
+    if (taskType && !TASK_TYPES.includes(taskType)) {
+      return res.status(400).json({ error: 'ประเภทงานไม่ถูกต้อง' });
+    }
+    assignmentSet.push('task_type = ?');
+    assignmentVals.push(taskType);
+  }
+  if (req.body?.description !== undefined) {
+    detailSet.push('description = ?');
+    detailVals.push(String(req.body.description).trim() || null);
+  }
+  if (req.body?.due_date !== undefined) {
+    const dueDate = parseDueDate(req.body.due_date);
+    if (dueDate === false) {
+      return res.status(400).json({ error: 'รูปแบบวันเวลากำหนดส่งไม่ถูกต้อง' });
+    }
+    detailSet.push('due_date = ?');
+    detailVals.push(dueDate);
+  }
+  if (!assignmentSet.length && !detailSet.length) {
+    return res.status(400).json({ error: 'ไม่มีข้อมูลที่จะแก้ไข' });
+  }
+
+  try {
+    // Ownership and "is this manual?" in one check. Synced coursework is
+    // read-only here — Classroom and Teams stay the source of truth (UR05).
+    const [owned] = await pool.query(
+      `SELECT a.assignment_id FROM Assignment a
+       JOIN Course c ON a.course_id = c.course_id
+       WHERE a.assignment_id = ? AND c.student_id = ? AND c.platform_source IS NULL
+       LIMIT 1`,
+      [id, req.session.userId]
+    );
+    if (!owned.length) return res.status(404).json({ error: 'not found' });
+
+    if (assignmentSet.length) {
+      await pool.query(
+        `UPDATE Assignment SET ${assignmentSet.join(', ')} WHERE assignment_id = ?`,
+        [...assignmentVals, id]
+      );
+    }
+    if (detailSet.length) {
+      await pool.query(
+        `UPDATE Assignment_Detail SET ${detailSet.join(', ')} WHERE assignment_id = ?`,
+        [...detailVals, id]
+      );
+    }
+
+    const [rows] = await pool.query(`${ASSIGNMENT_SELECT} WHERE a.assignment_id = ?`, [id]);
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('[assignments] update failed:', err.message);
     res.status(503).json({ error: 'Database not ready', message: err.message });
   }
 });

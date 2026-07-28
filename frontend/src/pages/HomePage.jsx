@@ -8,6 +8,7 @@ import DonutChart from '../components/DonutChart';
 import MiniCalendar from '../components/MiniCalendar';
 import DeadlineList from '../components/DeadlineList';
 import UrgentChecklist from '../components/UrgentChecklist';
+import AddTaskModal from '../components/AddTaskModal';
 import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } from '../icons';
 import { C, FONT, R, SHADOW, WEEKDAYS, TH_MONTHS_SHORT } from '../theme';
 
@@ -44,6 +45,7 @@ function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [cutoffDate, setCutoffDate] = useState(
     () => localStorage.getItem('classroomSyncCutoff') || '2026-06-28'
   );
@@ -229,14 +231,7 @@ function HomePage() {
                   <RefreshIcon size={14} color={C.muted} />
                   {syncing ? 'กำลังซิงก์…' : 'ซิงก์ Classroom'}
                 </button>
-                {/* No create endpoint exists yet, so this stays disabled rather
-                    than looking clickable and doing nothing. */}
-                <button
-                  type="button"
-                  style={styles.primaryBtn}
-                  disabled
-                  title="ยังไม่เปิดใช้งาน"
-                >
+                <button type="button" style={styles.primaryBtn} onClick={() => setAddOpen(true)}>
                   + เพิ่มงานใหม่
                 </button>
               </div>
@@ -395,6 +390,14 @@ function HomePage() {
             </div>
           </>
         )}
+
+        {/* Appending is enough: every stat, chart, calendar dot and list on
+            this page derives from `assignments` through the view useMemo. */}
+        <AddTaskModal
+          open={addOpen}
+          onClose={() => setAddOpen(false)}
+          onCreated={(a) => setAssignments((prev) => [...prev, a])}
+        />
       </div>
     </div>
   );
@@ -457,8 +460,7 @@ const styles = {
     fontFamily: FONT,
     fontWeight: 600,
     fontSize: 13,
-    cursor: 'not-allowed',
-    opacity: 0.55,
+    cursor: 'pointer',
     whiteSpace: 'nowrap',
     boxShadow: SHADOW.primaryBtn,
   },
