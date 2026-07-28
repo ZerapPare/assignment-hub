@@ -6,9 +6,6 @@ import MicrosoftIcon from '../icons/MicrosoftIcon';
 import { RefreshIcon, SortIcon, BellIcon } from '../icons';
 import { C, FONT, R, SHADOW } from '../theme';
 
-// The panel card explains what the product does. It deliberately shows no
-// task list: there is no session before sign-in, so any task shown here
-// would have to be invented.
 const FEATURES = [
   { Icon: RefreshIcon, text: 'ซิงก์งานจาก Google Classroom อัตโนมัติ' },
   { Icon: SortIcon, text: 'เรียงทุกงานตามกำหนดส่งในที่เดียว' },
@@ -16,8 +13,6 @@ const FEATURES = [
 ];
 
 function LoginPage() {
-  // Both providers are real OAuth (full-page redirect to the backend, which
-  // redirects to the provider's consent screen and back).
   const handleLogin = (provider) => {
     window.location.href = provider === 'google' ? '/api/auth/google' : '/api/auth/microsoft';
   };
@@ -28,7 +23,6 @@ function LoginPage() {
       <div style={{ ...styles.blob, ...styles.blobBottom }} />
 
       <div style={styles.card}>
-        {/* Left column */}
         <div style={styles.left}>
           <BrandMark size={26} fontSize={23} weight={800} hubColor={C.pinkSoft} />
 
@@ -64,7 +58,6 @@ function LoginPage() {
           </p>
         </div>
 
-        {/* Right column */}
         <div style={styles.right}>
           <div style={{ ...styles.circle, ...styles.circleTop }} />
           <div style={{ ...styles.circle, ...styles.circleBottom }} />
@@ -119,7 +112,6 @@ const styles = {
     zIndex: 1,
   },
 
-  // Left column
   left: {
     padding: '56px 48px',
     display: 'flex',
@@ -148,7 +140,6 @@ const styles = {
   buttons: { display: 'flex', flexDirection: 'column', gap: 12 },
   fine: { fontSize: 12.5, color: C.mutedFaint, lineHeight: 1.6, margin: 0 },
 
-  // Right column
   right: {
     background: `linear-gradient(160deg, ${C.navy} 0%, ${C.navyMid} 55%, ${C.pinkSoft} 100%)`,
     position: 'relative',

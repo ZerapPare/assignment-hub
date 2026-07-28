@@ -1,9 +1,6 @@
 import React from 'react';
 import { C } from '../theme';
 
-// Workload bars for the next 7 days. `data` = [{ label, value, isToday }].
-// Bar colour is data-driven: today is pink, days with work are navy, empty
-// days keep the faint track colour.
 const W = 260;
 const H = 120;
 const BAR_W = 22;
@@ -18,7 +15,6 @@ function BarChart({ data = [] }) {
     <div>
       <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
         {data.map((d, i) => {
-          // max === 0 → every bar sits at the minimum instead of dividing by zero.
           const h = max === 0 ? MIN_H : MIN_H + (d.value / max) * (H - MIN_H - 6);
           const fill = d.isToday ? C.pink : d.value > 0 ? C.navy : '#e0e7ff';
           return (

@@ -1,8 +1,6 @@
 import React from 'react';
 import { C } from '../theme';
 
-// Status breakdown donut. r = 15.9 makes the circumference ≈ 100, so each
-// segment's dasharray is just its percentage.
 const R = 15.9;
 const TRACK = '#eef2ff';
 

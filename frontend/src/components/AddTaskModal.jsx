@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { C, FONT, R, SHADOW } from '../theme';
 
-// Values must match TASK_TYPES in backend/server.js.
 const TASK_TYPES = [
   { value: 'homework', label: 'การบ้าน' },
   { value: 'project', label: 'โปรเจกต์' },
@@ -19,16 +18,11 @@ const EMPTY = {
   due_date: '',
 };
 
-// Form for work that never came from Classroom or Teams. `onCreated` receives
-// the created row in the same shape /api/assignments returns, so the caller
-// can append it without refetching.
 function AddTaskModal({ open, onClose, onCreated }) {
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  // Start clean each time it opens, so a cancelled entry isn't waiting there
-  // the next time the student adds something.
   useEffect(() => {
     if (open) {
       setForm(EMPTY);
@@ -72,7 +66,6 @@ function AddTaskModal({ open, onClose, onCreated }) {
 
   return (
     <div style={styles.overlay} onClick={onClose}>
-      {/* The card swallows the click so only the backdrop closes. */}
       <form style={styles.card} onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
         <h2 style={styles.heading}>เพิ่มงานใหม่</h2>
 

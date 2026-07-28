@@ -1,8 +1,5 @@
 import React from 'react';
 
-// Hand-drawn stroke icons matching the design reference (24 viewBox, 2px
-// stroke, round caps/joins). Kept in one file since each is a couple of paths.
-
 function Svg({ size = 16, color = 'currentColor', width, children, ...rest }) {
   return (
     <svg
@@ -120,7 +117,6 @@ export function SortIcon(props) {
   );
 }
 
-// The 8-spoke "in progress" mark — solid fill, not a stroke icon.
 export function SpinnerIcon({ size = 16, color = '#ec4899' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ flexShrink: 0 }}>

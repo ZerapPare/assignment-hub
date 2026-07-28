@@ -4,8 +4,6 @@ import { C, FONT, R } from '../theme';
 import BrandMark from './BrandMark';
 import { HomeIcon, PencilIcon, CalendarIcon, GearIcon } from '../icons';
 
-// Entries without a `path` have no page behind them yet, so they stay
-// presentational — no pointer cursor, no click handler.
 const NAV = [
   { key: 'home', label: 'หน้าแรก', Icon: HomeIcon, path: '/home' },
   { key: 'all', label: 'การบ้านทั้งหมด', Icon: PencilIcon },
@@ -13,13 +11,9 @@ const NAV = [
   { key: 'settings', label: 'ตั้งค่า', Icon: GearIcon, path: '/settings' },
 ];
 
-// Left navigation rail. `active` = current nav key. `student` powers the
-// profile card. `onLogout` clears the session and returns to /login.
 function Sidebar({ active = 'home', student, onLogout }) {
   const navigate = useNavigate();
   const name = student?.student_name || '—';
-  // University is NULL until the University table is populated; fall back to
-  // the real email rather than printing a generic word that looks like data.
   const sub = student?.university_name || student?.university_email || '';
 
   return (

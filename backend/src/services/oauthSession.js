@@ -3,8 +3,6 @@ const pool = require('../db');
 const { FRONTEND_URL } = require('../config');
 const { findOrCreateUniversity, studentIdFromEmail, trySetStudentId } = require('./identity');
 
-// --- OAuth plumbing shared by both providers ---
-
 const PROVIDERS = {
   google: { accessCol: 'gg_access_token', refreshCol: 'gg_refresh_token' },
   microsoft: { accessCol: 'ms_access_token', refreshCol: 'ms_refresh_token' },
@@ -27,13 +25,9 @@ function checkState(req) {
   return Boolean(expected) && req.query.state === expected;
 }
 
-// Where both OAuth callbacks land. Two modes:
-//   link  — an already-logged-in student connecting their *other* platform.
-//           Their row is found by session, never by email (a personal Google
-//           address rarely matches a university Microsoft one), and their
-//           existing name is left alone.
-//   login — ordinary sign-in, keyed on the unique university_email.
-// Returns the user_id to put in the session.
+// Link mode finds the row by session, never by email — a personal Google
+// address rarely matches a university Microsoft one, and matching on email
+// would create a second Student instead of connecting the existing one.
 async function completeLogin({ req, provider, email, name, tokens }) {
   const { accessCol, refreshCol } = PROVIDERS[provider];
   const access = tokens.access_token || null;
@@ -83,8 +77,6 @@ async function completeLogin({ req, provider, email, name, tokens }) {
   return userId;
 }
 
-// Ends both callbacks: link mode returns to settings with a confirmation,
-// ordinary login goes to the dashboard.
 function finishOAuth(req, res, provider) {
   const wasLink = Boolean(req.session.linkMode);
   delete req.session.linkMode;
