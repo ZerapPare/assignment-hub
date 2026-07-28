@@ -68,6 +68,9 @@ CREATE TABLE Assignment (
     assignment_id           INT AUTO_INCREMENT PRIMARY KEY,
     external_assignment_id  VARCHAR(100),
     title                   VARCHAR(255) NOT NULL,
+    -- 'homework' | 'project' | 'quiz' | 'exam' | 'reading' | 'other'.
+    -- Only set on manually added work; synced coursework leaves it NULL.
+    task_type               VARCHAR(50),
     origin_link             VARCHAR(500),
     course_id               INT NOT NULL,
     CONSTRAINT fk_assignment_course
