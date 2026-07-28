@@ -125,11 +125,11 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | GET    | `/api/auth/google/callback`   | —    | Exchanges code, upserts user + tokens, starts session |
 | GET    | `/api/auth/microsoft`         | —    | Redirects to Microsoft's consent screen              |
 | GET    | `/api/auth/microsoft/callback`| —    | Exchanges code, upserts user + tokens, starts session |
-| GET    | `/api/me`                     | ✅   | The logged-in student (greeting + sidebar profile)   |
+| GET    | `/api/me`                     | Yes  | The logged-in student (greeting + sidebar profile)   |
 | POST   | `/api/auth/logout`            | —    | Destroys the session                                 |
-| GET    | `/api/assignments`            | ✅   | All assignments joined with course + detail info     |
+| GET    | `/api/assignments`            | Yes  | All assignments joined with course + detail info     |
 
-`✅` = requires a logged-in session (returns `401` otherwise). Quick check:
+`Yes` = requires a logged-in session (returns `401` otherwise). Quick check:
 
 ```bash
 curl http://localhost:3000/api/health
