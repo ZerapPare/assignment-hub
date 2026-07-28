@@ -23,9 +23,11 @@ services:
       DB_USER: root
       DB_PASSWORD: root123
       DB_NAME: assignment_hub
-      OAUTH_REDIRECT_URL: http://localhost:5173/api/auth/google/callback
-      MS_OAUTH_REDIRECT_URL: http://localhost:5173/api/auth/microsoft/callback
-      FRONTEND_URL: http://localhost:5173
+      # PUBLIC_URL is the origin the browser actually uses. Defaults to the local
+      # dev setup; on a deployed host set it in a root .env (see .env.example).
+      OAUTH_REDIRECT_URL: ${PUBLIC_URL:-http://localhost:5173}/api/auth/google/callback
+      MS_OAUTH_REDIRECT_URL: ${PUBLIC_URL:-http://localhost:5173}/api/auth/microsoft/callback
+      FRONTEND_URL: ${PUBLIC_URL:-http://localhost:5173}
     volumes:
       - ./backend:/app          # mount source for hot reload
       - /app/node_modules       # keep container's installed modules
@@ -33,7 +35,9 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "5173:5173"
+      # Host port only. Set FRONTEND_PORT=80 in a root .env on a deployed host so
+      # the site answers on the bare domain; local dev keeps 5173.
+      - "${FRONTEND_PORT:-5173}:5173"
     depends_on:
       - backend
     volumes:
