@@ -78,7 +78,11 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
 
     let courses;
     try {
-      ({ data: { courses = [] } } = await classroom.courses.list({ courseStates: ['ACTIVE'] }));
+      // studentId 'me' — only courses this user attends as a student.
+      // courses.list otherwise also returns courses they *teach* (e.g.
+      // self-created classrooms), whose coursework the coursework.me scope
+      // can't read (403 — that needs the teacher-facing coursework.students).
+      ({ data: { courses = [] } } = await classroom.courses.list({ courseStates: ['ACTIVE'], studentId: 'me' }));
       console.log('[DBG-a4f2] user_id=%s courses.list ok, count=%s', req.session.userId, courses.length);
     } catch (listErr) {
       console.log('[DBG-a4f2] user_id=%s courses.list FAILED: %s', req.session.userId, listErr.message);
@@ -87,6 +91,7 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
 
     let coursesSynced = 0;
     let assignmentsSynced = 0;
+    const skippedCourses = [];
 
     for (const course of courses) {
       // Course rows in this schema belong to one student, so match on
@@ -110,7 +115,17 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
       }
       coursesSynced++;
 
-      const courseWork = await listCourseWorkSince(classroom, course.id, cutoffDate);
+      // One unreadable course must not abort the whole sync — skip it and
+      // keep going so every other course's assignments still come in.
+      let courseWork;
+      try {
+        courseWork = await listCourseWorkSince(classroom, course.id, cutoffDate);
+      } catch (workErr) {
+        console.warn('[classroom] skipping course %s (%s): courseWork.list failed: %s',
+          course.id, course.name, workErr.message);
+        skippedCourses.push(course.name);
+        continue;
+      }
 
       for (const work of courseWork) {
         // Look up whether *this student* has already turned this in.
@@ -176,7 +191,7 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
       }
     }
 
-    res.json({ ok: true, coursesSynced, assignmentsSynced, deletedCount });
+    res.json({ ok: true, coursesSynced, assignmentsSynced, deletedCount, skippedCourses });
   } catch (err) {
     // Google API errors carry the real reason in err.response.data — log
     // and surface that instead of just err.message, which is often just "Bad Request".
