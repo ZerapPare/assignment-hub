@@ -14,14 +14,26 @@
 | Auth | Google + Microsoft OAuth 2.0 (`google-auth-library`, `jose`, `express-session`) |
 | Database | MySQL 8.0 |
 | Container | Docker + Docker Compose |
+| HTTPS (เฉพาะตอน deploy) | Caddy 2 + Let's Encrypt (ออก cert อัตโนมัติ) |
 
-## โครงสร้าง 3 services
+## โครงสร้าง services
+
+**บนเครื่องตัวเอง — 3 services**
 
 ```
 Browser  →  frontend (:5173, Vite)  →  backend (:3000, Express)  →  db (:3306, MySQL)
 ```
 
+**บนเซิร์ฟเวอร์ — เพิ่ม Caddy คุม TLS ข้างหน้า**
+
+```
+Browser ──https:443──►  caddy  ──http──►  frontend  ──/api──►  backend  ──►  db
+```
+
 frontend ไม่คุยกับ MySQL ตรงๆ — เรียก `/api/*` แล้ว Vite proxy ส่งต่อไป backend (ไม่ต้องตั้ง CORS)
+
+Caddy อยู่ใน Docker Compose profile ชื่อ `tls` จึง**ไม่สตาร์ทตอน dev ปกติ** ขึ้นเฉพาะตอนสั่ง
+`docker compose --profile tls up -d` — ดู [Deploy บนเซิร์ฟเวอร์](#deploy-บนเซิร์ฟเวอร์-https-ผ่านโดเมน)
 
 ## Prerequisites
 
@@ -222,13 +234,60 @@ Caddy ออก cert ภายในไม่กี่วินาที ถ้�
 > **cert เก็บใน named volume `caddy_data`** อย่าลบด้วย `docker compose down -v` โดยไม่จำเป็น
 > เพราะ Let's Encrypt จำกัด 5 cert ต่อโดเมนต่อสัปดาห์ ถ้าขอใหม่ทุกครั้งที่ recreate จะโดน rate limit
 
+### อัปเดตโค้ดหลัง deploy แล้ว
+
+**แก้โค้ดเฉย ๆ ไม่ต้องรันคำสั่ง docker เลย** — ซอร์สถูก mount เข้า container อยู่ (`./frontend:/app`, `./backend:/app`)
+Vite HMR กับ `node --watch` โหลดใหม่ให้เอง แค่ `git pull` บนเซิร์ฟเวอร์ก็พอ
+
+| แก้อะไร | ต้องทำ |
+|---|---|
+| โค้ด `.jsx` `.js` `server.js` | ไม่ต้องทำอะไร |
+| `.env` / `docker-compose.yml` | `docker compose --profile tls up -d --force-recreate` |
+| `vite.config.js` | `docker compose restart frontend` |
+| `Caddyfile` | `docker compose restart caddy` |
+| เพิ่ม npm package | `docker compose rm -fsv <service>` แล้ว `docker compose --profile tls up -d --build` |
+
+แถวสุดท้ายสำคัญ — package ใหม่ต้องลบ anonymous volume ของ `node_modules` ทิ้งก่อน ไม่งั้น container
+ยังใช้ของเก่าแล้วพังด้วย `Cannot find module` (`--force-recreate` เฉย ๆ ไม่ช่วย)
+
+> **บนเซิร์ฟเวอร์ ให้ใส่ `--profile tls` ทุกครั้งที่พิมพ์ `up`** ถ้าเผลอ `down` แล้ว `up` เปล่า ๆ
+> Caddy จะไม่กลับมา เว็บหลุด https ทันที ส่วน `logs` / `restart` / `ps` ไม่ต้องใส่
+
 ## คำสั่งที่ใช้บ่อย
 
 | คำสั่ง | ทำอะไร |
 |---|---|
-| `docker compose up --build` | build + รันทั้งหมด |
+| `docker compose up --build` | build + รันทั้งหมด (local dev) |
+| `docker compose --profile tls up -d` | รันพร้อม Caddy (บนเซิร์ฟเวอร์) |
 | `docker compose down` | หยุดทั้งหมด |
-| `docker compose down -v` | หยุด + ลบข้อมูล DB (ใช้เมื่อแก้ `init.sql` แล้วอยากให้รันใหม่) |
+| `docker compose down -v` | หยุด + ลบข้อมูล DB (ใช้เมื่อแก้ `init.sql`) — **ลบ `caddy_data` ด้วย** ระวังบนเซิร์ฟเวอร์ |
+| `docker compose rm -fsv <service>` | ลบ service + anonymous volume (ใช้ตอนเพิ่ม npm package) |
 | `docker compose logs -f backend` | ดู log backend |
 
 > `init.sql` รันเฉพาะตอนสร้าง database ครั้งแรก ถ้าแก้ไฟล์แล้ว table ไม่เปลี่ยน ให้ `docker compose down -v` ก่อนแล้ว `up` ใหม่
+> — แต่บนเซิร์ฟเวอร์ที่มี HTTPS แล้ว ให้ลบเฉพาะ db ด้วย `docker compose rm -fsv db` แทน ไม่งั้น cert หายไปด้วย
+
+## เจอปัญหาบ่อย
+
+| อาการ | สาเหตุ |
+|---|---|
+| `403 Blocked request. This host is not allowed` | โดเมนไม่อยู่ใน `allowedHosts` ของ [vite.config.js](frontend/vite.config.js) — เพิ่มแล้วต้อง restart frontend |
+| `ERR_CONNECTION_REFUSED` | ไม่มีอะไรฟังพอร์ตนั้น เช็ค `docker compose ps` · **refused = firewall ผ่านแต่ไม่มีคนฟัง / timeout = โดน firewall บล็อก** |
+| `/api/*` เป็น `500` ทุกเส้น | request ไปไม่ถึง Express — `/api/health` คืนได้แค่ `200`/`503` ถ้าได้ `500` แปลว่า Vite proxy ต่อ `backend:3000` ไม่ติด ดู `docker compose logs backend` |
+| `Cannot find module '<pkg>'` | anonymous volume บัง `node_modules` ใหม่ → `docker compose rm -fsv backend` แล้ว `up -d --build` |
+| `Error 400: redirect_uri_mismatch` | URI ไม่ตรงกับที่ลงทะเบียนใน OAuth client **ตัวนั้น** — เช็คว่าเซิร์ฟเวอร์ส่ง client ไหนก่อน (ดูด้านล่าง) |
+
+**เช็คว่าเซิร์ฟเวอร์ใช้ OAuth client ตัวไหนอยู่:**
+
+```bash
+curl -s -D - -o /dev/null https://<โดเมน>/api/auth/google | grep -i location
+```
+
+เลขหน้า `client_id` คือ **project number** ของ Google Cloud เอาไปเปิด
+`https://console.cloud.google.com/apis/credentials?project=<เลขนั้น>` จะเข้า project ที่ถูกต้องเลย
+
+`.env.local` เป็น git-ignored เครื่องที่ clone ใหม่จึงไม่ได้ credentials ติดมาด้วย ถ้า local login ได้
+แต่เซิร์ฟเวอร์ไม่ได้ ให้เทียบ `GOOGLE_CLIENT_ID` ของสองเครื่อง — มักเป็นคนละ client กัน
+(ก๊อป id กับ secret ไปคู่กันเสมอ ถ้าสลับคู่จะได้ `invalid_client`)
+
+> รายการเต็มพร้อมคำอธิบายละเอียด ดูที่ [PROJECT_SETUP.md → Troubleshooting](PROJECT_SETUP.md#troubleshooting)

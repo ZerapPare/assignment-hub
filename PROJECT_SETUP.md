@@ -53,11 +53,16 @@ Then open **http://localhost:5173**.
 
 ## Services (docker-compose.yml)
 
-| Service    | Build / Image | Port          | Role                                          |
-|------------|---------------|---------------|-----------------------------------------------|
-| `frontend` | `./frontend`  | `5173:5173`   | Vite dev server, hot reload, proxies `/api`   |
-| `backend`  | `./backend`   | `3000:3000`   | Express REST API, connects to MySQL           |
-| `db`       | `mysql:8.0`   | `3306:3306`   | Database `assignment_hub`, root pw `root123`  |
+| Service    | Build / Image   | Port          | Role                                          |
+|------------|-----------------|---------------|-----------------------------------------------|
+| `frontend` | `./frontend`    | `5173`        | Vite dev server, hot reload, proxies `/api`   |
+| `backend`  | `./backend`     | `3000`        | Express REST API, connects to MySQL           |
+| `db`       | `mysql:8.0`     | `3306`        | Database `assignment_hub`, root pw `root123`  |
+| `caddy`    | `caddy:2-alpine`| `80`, `443`   | TLS reverse proxy — **profile `tls` only**, not started locally |
+
+`caddy` sits behind a Compose profile, so `docker compose up` never starts it. It
+only comes up with `docker compose --profile tls up -d`, which is what a deployed
+host uses. See [Deploying over HTTPS](#deploying-over-https).
 
 ### Hot reload
 
@@ -65,9 +70,17 @@ Both app services mount their source folder as a volume (`./frontend:/app`, `./b
 - **frontend** — Vite HMR (`usePolling` is on so changes are detected inside Docker on Windows)
 - **backend** — `node --watch` restarts the server on change
 
-### Backend environment variables
+### Environment variables — three separate places
 
-Non-secret config lives in `docker-compose.yml`; **secrets** live in a git-ignored `.env.local` at the repo root (loaded via the backend service's `env_file`).
+This trips people up, so be precise about which file a variable belongs in:
+
+| File | Read by | Committed? |
+|---|---|---|
+| `docker-compose.yml` | Compose | yes — non-secret defaults live here |
+| `.env` | **Compose itself**, for `${...}` substitution | no (`.env*` is git-ignored) |
+| `.env.local` | loaded **into the backend container** via `env_file` | no |
+
+`.env` is optional: local dev needs none at all. Only a deployed host creates one.
 
 | Variable                | Where            | Value / purpose                                  |
 |-------------------------|------------------|--------------------------------------------------|
@@ -75,15 +88,20 @@ Non-secret config lives in `docker-compose.yml`; **secrets** live in a git-ignor
 | `DB_USER`               | compose          | `root`                                           |
 | `DB_PASSWORD`           | compose          | `root123`                                        |
 | `DB_NAME`               | compose          | `assignment_hub`                                 |
-| `OAUTH_REDIRECT_URL`    | compose          | `http://localhost:5173/api/auth/google/callback` |
-| `MS_OAUTH_REDIRECT_URL` | compose          | `http://localhost:5173/api/auth/microsoft/callback` |
-| `FRONTEND_URL`          | compose          | `http://localhost:5173`                          |
+| `OAUTH_REDIRECT_URL`    | compose          | derived — `${PUBLIC_URL}/api/auth/google/callback` |
+| `MS_OAUTH_REDIRECT_URL` | compose          | derived — `${PUBLIC_URL}/api/auth/microsoft/callback` |
+| `FRONTEND_URL`          | compose          | derived — `${PUBLIC_URL}`                        |
+| `PUBLIC_URL`            | **.env**         | origin the browser uses. Defaults to `http://localhost:5173`. Builds all three redirect URLs above, so it must match what is registered with Google/Azure exactly |
+| `SITE_HOST`             | **.env**         | hostname Caddy requests a certificate for        |
+| `BIND`                  | **.env**         | interface the app ports publish on. `127.0.0.1` on a deployed host keeps frontend/backend/db off the internet; defaults to `0.0.0.0` |
+| `FRONTEND_PORT`         | **.env**         | host port mapped to Vite's 5173; defaults to `5173`. Leave it alone when Caddy is in front — Caddy owns 80/443 |
+| `HMR_CLIENT_PORT`       | **.env**         | public port the hot-reload websocket dials (`443` behind TLS). Unset locally |
 | `GOOGLE_CLIENT_ID`      | **.env.local**   | Google OAuth client ID                           |
-| `GOOGLE_CLIENT_SECRET`  | **.env.local**   | Google OAuth client secret                       |
+| `GOOGLE_CLIENT_SECRET`  | **.env.local**   | Google OAuth client secret — must come from the *same* client as the ID |
 | `MS_CLIENT_ID`          | **.env.local**   | Azure app (application) ID                        |
 | `MS_CLIENT_SECRET`      | **.env.local**   | Azure client secret                              |
 | `MS_TENANT_ID`          | **.env.local**   | *(optional)* Azure tenant; defaults to `organizations` |
-| `SESSION_SECRET`        | **.env.local**   | random string that signs the session cookie      |
+| `SESSION_SECRET`        | **.env.local**   | random string that signs the session cookie. **Set this on any internet-facing host** — the fallback in `server.js` is a literal published in this repo, so leaving it empty lets anyone forge a session. Generate with `openssl rand -hex 32`; it does not need to match between machines |
 
 ## Frontend routes
 
@@ -108,7 +126,7 @@ rather than declared in `index.html`.
 
 ## Authentication (OAuth)
 
-Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on the `localhost:5173` origin via the Vite `/api` proxy, so the session cookie is same-host. On callback the backend upserts the user into `Student` (keyed on the unique email; university matched by email domain), stores the provider's access/refresh tokens (`gg_*` for Google, `ms_*` for Microsoft), and starts an `express-session` cookie. The dashboard reads `/api/me`; a `401` bounces you to `/login`.
+Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on a single origin (`localhost:5173` locally, `PUBLIC_URL` when deployed) via the Vite `/api` proxy, so the session cookie is same-host. On callback the backend upserts the user into `Student` (keyed on the unique email; university matched by email domain), stores the provider's access/refresh tokens (`gg_*` for Google, `ms_*` for Microsoft), and starts an `express-session` cookie. The dashboard reads `/api/me`; a `401` bounces you to `/login`.
 
 **Prerequisites — create OAuth apps and a `.env.local`:**
 
@@ -175,6 +193,8 @@ curl -i http://localhost:3000/api/auth/google  # 302 to accounts.google.com
 assignment-hub/
 ├── docker-compose.yml        # defines frontend + backend + db
 ├── init.sql                  # schema only, no seed data (runs on first DB start)
+├── Caddyfile                 # TLS reverse proxy config (used by the `tls` profile)
+├── .env                      # deploy settings for Compose substitution (git-ignored)
 ├── .env.local                # OAuth secrets (git-ignored) — you create this
 ├── backend/
 │   ├── Dockerfile
@@ -223,7 +243,49 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e \
    JOIN Course c USING(course_id) JOIN Assignment_Detail d USING(assignment_id) ORDER BY d.due_date;"
 ```
 
-> `init.sql` only runs when the database is first created. After editing it, run `docker compose down -v` then `up --build` to recreate the schema.
+> `init.sql` only runs when the database is first created. After editing it, run `docker compose down -v` then `up --build` to recreate the schema — but on a host already serving HTTPS, remove just the database instead (`docker compose rm -fsv db`), since `down -v` would take `caddy_data` with it.
+
+## Deploying over HTTPS
+
+Local dev stays on plain HTTP. A deployed host adds Caddy, which obtains and
+renews a Let's Encrypt certificate by itself.
+
+**HTTPS is not optional if you want Google login to work.** Google refuses any
+`redirect_uri` that is not `https://` unless the host is `localhost` — the Cloud
+Console rejects such a URI at save time, so there is nothing to configure your way
+around.
+
+1. **DNS** — the hostname must already resolve to the machine. Caddy proves control
+   of it via an ACME challenge, so this has to be true *before* the first start.
+2. **Firewall** — open TCP **80 and 443**. Port 80 is still required with HTTPS: the
+   ACME challenge uses it and Caddy redirects `http://` → `https://` from it. On GCP
+   the instance's *Allow HTTP/HTTPS traffic* checkboxes do this.
+3. **`.env`** at the repo root:
+
+   ```env
+   SITE_HOST=your-host.example.org
+   PUBLIC_URL=https://your-host.example.org
+   BIND=127.0.0.1
+   HMR_CLIENT_PORT=443
+   ```
+
+4. **`server.allowedHosts`** in `frontend/vite.config.js` must list the hostname, or
+   Vite answers every request with `403 Blocked request`.
+5. **Start with the profile** — a port-mapping or `.env` change needs a recreate, not
+   a restart:
+
+   ```bash
+   docker compose --profile tls up -d --force-recreate
+   docker compose logs -f caddy      # wait for "certificate obtained successfully"
+   ```
+
+6. **Register the redirect URIs** with the providers — `https://<host>/api/auth/google/callback`
+   in Google Cloud Console, `.../microsoft/callback` in Azure. Keep the `localhost`
+   entries so local dev still works.
+
+Certificates live in the `caddy_data` named volume. Avoid `docker compose down -v`,
+which deletes it and forces a re-issue against Let's Encrypt's limit of 5
+certificates per domain per week.
 
 ## Common Commands
 
@@ -231,13 +293,26 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e \
 |----------------------------------|-----------------------------------------|
 | `docker compose up --build`      | Build and run all three services        |
 | `docker compose down`            | Stop all services                       |
-| `docker compose down -v`         | Stop and wipe DB data (re-run init.sql) |
+| `docker compose down -v`         | Stop and wipe DB data (re-run init.sql). **Also deletes `caddy_data`** — only safe before TLS is set up |
 | `docker compose logs -f backend` | Follow backend logs                     |
 | `docker compose logs -f frontend`| Follow frontend logs                    |
+| `docker compose --profile tls up -d` | Bring the stack up with Caddy in front (deployed hosts) |
+| `docker compose rm -fsv <service>`   | Drop a service **and its anonymous `node_modules` volume** — the fix after adding a dependency |
 
 ## Troubleshooting
 
 - **`port is already allocated`** — an old container is holding 3306/3000/5173. `docker ps -a`, then `docker rm -f <name>`.
+- **`403 Blocked request. This host is not allowed`** — Vite rejects Host headers it doesn't recognise. Add the hostname to `server.allowedHosts` in `frontend/vite.config.js`, then recreate the frontend container (the setting is read once at startup, so a reload won't pick it up).
+- **`ERR_CONNECTION_REFUSED` on the bare domain** — nothing is listening on port 80. Either `FRONTEND_PORT` is still 5173, or the `tls` profile wasn't used so Caddy never started. `docker compose ps` shows what is actually published. A *refused* connection means the firewall let the packet through and no process answered; a firewall block shows up as a **timeout** instead — a useful way to tell the two apart.
+- **Every `/api/*` route returns `500`, including `/api/health`** — the request never reached Express. `/api/health` can only answer `200` or `503`, so a `500` there is Vite's proxy failing to connect to `backend:3000`. Check `docker compose logs backend` for a crash; `docker compose logs frontend | grep proxy` confirms it (`[vite] http proxy error`).
+- **`Error 400: redirect_uri_mismatch`** — Google compares the `redirect_uri` byte-for-byte against what is registered on **that specific OAuth client**. Before editing anything in the Console, confirm which client the server is actually sending:
+
+  ```bash
+  curl -s -D - -o /dev/null https://<host>/api/auth/google | grep -i location
+  ```
+
+  The `client_id` prefix is the **Google Cloud project number** (`123456789-abc….apps.googleusercontent.com` lives in project `123456789`), so `https://console.cloud.google.com/apis/credentials?project=<that number>` opens the right project directly. Editing a client in a different project — easy to do when several exist — changes nothing and looks identical from the outside. Also check `http` vs `https`, a stray trailing slash, and that the URI went in *Authorized redirect URIs*, not *Authorized JavaScript origins*.
+- **`redirect_uri` is correct but login still fails on a deployed host while localhost works** — the two hosts are probably using different OAuth clients. Compare `GOOGLE_CLIENT_ID` in each machine's `.env.local`; `.env.local` is git-ignored, so a deployed checkout never inherits the one you use locally. Copy the ID **and** secret together — a mixed pair fails with `invalid_client`.
 - **`getaddrinfo ENOTFOUND db`** — the stack started in a bad state. `docker compose down` then `docker compose up -d --force-recreate`.
 - **Frontend loads but shows "waiting for database"** — MySQL is still initializing on first run; wait ~15s and refresh.
 - **`Error: Cannot find module '<pkg>'` after a new dependency was added** — the `/app/node_modules` anonymous volume survives container recreation and shadows the `node_modules` baked into the freshly built image, so `--force-recreate` and even `docker compose down` + `up --build` do **not** fix it. Drop the volume for that one service:
