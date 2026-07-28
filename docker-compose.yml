@@ -11,6 +11,8 @@ services:
       - "${BIND:-0.0.0.0}:3306:3306"
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - db_data:/var/lib/mysql  # without this, all data lives in the container
+                                # layer and every `docker compose down` wipes it
 
   backend:
     build: ./backend
@@ -75,5 +77,6 @@ services:
       - frontend
 
 volumes:
+  db_data:
   caddy_data:
   caddy_config:
