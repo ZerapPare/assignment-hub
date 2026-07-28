@@ -240,4 +240,11 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e \
 - **`port is already allocated`** — an old container is holding 3306/3000/5173. `docker ps -a`, then `docker rm -f <name>`.
 - **`getaddrinfo ENOTFOUND db`** — the stack started in a bad state. `docker compose down` then `docker compose up -d --force-recreate`.
 - **Frontend loads but shows "waiting for database"** — MySQL is still initializing on first run; wait ~15s and refresh.
-- **Added a new npm dependency but the container can't find it** — the `node_modules` anonymous volume from the old container shadows the freshly built image. Either install it into the running container (`docker exec assignment-hub-frontend-1 npm install <pkg>`) or do a clean rebuild: `docker compose down` then `docker compose up -d --build`.
+- **`Error: Cannot find module '<pkg>'` after a new dependency was added** — the `/app/node_modules` anonymous volume survives container recreation and shadows the `node_modules` baked into the freshly built image, so `--force-recreate` and even `docker compose down` + `up --build` do **not** fix it. Drop the volume for that one service:
+
+  ```bash
+  docker compose rm -fsv backend     # -v is the part that removes the anonymous volume
+  docker compose up -d --build backend
+  ```
+
+  Do **not** reach for `docker compose down -v` — it also wipes the named volumes, including `caddy_data`, which means re-requesting a Let's Encrypt certificate against a 5-per-week limit.
