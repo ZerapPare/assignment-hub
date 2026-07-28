@@ -91,6 +91,7 @@ Non-secret config lives in `docker-compose.yml`; **secrets** live in a git-ignor
 |----------|---------------|-------------------------------------------------------------|
 | `/login` | Login screen  | Real Google / Microsoft OAuth (buttons redirect to the backend) |
 | `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, the task table, a month calendar, upcoming deadlines, and a 48h checklist |
+| `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, and connect state for Google and Microsoft |
 | `*`      | →             | Redirects to `/login`                                       |
 
 Every figure on the dashboard is derived in a single `useMemo` over the `/api/assignments`
@@ -105,7 +106,7 @@ chart, calendar dot and list updates without a refetch. Manual work is stored un
 Two controls are still inert because no endpoint backs them yet:
 
 - The **48h checklist** is read-only — nothing can write `Assignment_Detail.status` back.
-- **Sidebar nav items** other than `หน้าแรก` have no route, so they carry no pointer cursor.
+- **Sidebar nav items** other than `หน้าแรก` and `ตั้งค่า` have no route, so they carry no pointer cursor.
 
 Fonts and base CSS are injected by `src/GlobalStyles.jsx` (mounted once in `App.jsx`)
 rather than declared in `index.html`.
