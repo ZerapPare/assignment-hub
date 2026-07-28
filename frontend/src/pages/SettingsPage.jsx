@@ -11,19 +11,12 @@ const PLATFORMS = [
     name: 'Google Classroom',
     Icon: GoogleIcon,
     field: 'google_connected',
-    // Google's login already asks for the Classroom scopes, so connecting it
-    // is what makes the dashboard's sync button work.
-    note: 'เชื่อมต่อแล้วจะซิงก์งานจาก Google Classroom ได้จากหน้าแดชบอร์ด',
   },
   {
     key: 'microsoft',
     name: 'Microsoft Teams',
     Icon: MicrosoftIcon,
     field: 'microsoft_connected',
-    // Be straight about this: the Microsoft flow only requests
-    // openid/email/profile/User.Read and nothing reads ms_access_token yet,
-    // so connecting it stores the account but brings in no assignments.
-    note: 'ใช้สำหรับเข้าสู่ระบบ — ยังไม่รองรับการซิงก์งานจาก Teams',
   },
 ];
 
@@ -167,7 +160,7 @@ function SettingsPage() {
               )}
 
               <div style={styles.platformList}>
-                {PLATFORMS.map(({ key, name, Icon, field, note }) => (
+                {PLATFORMS.map(({ key, name, Icon, field }) => (
                   <div key={key} style={styles.platformRow}>
                     {/* The two brand marks are 20px and 18px wide; the box
                         keeps both rows aligned. */}
@@ -176,7 +169,6 @@ function SettingsPage() {
                     </span>
                     <div style={styles.platformText}>
                       <div style={styles.platformName}>{name}</div>
-                      <div style={styles.platformNote}>{note}</div>
                     </div>
                     {me[field] ? (
                       <span style={styles.connectedPill}>เชื่อมต่อแล้ว</span>
@@ -260,7 +252,6 @@ const styles = {
   },
   platformText: { flex: '1 1 200px', minWidth: 0 },
   platformName: { fontSize: 13.5, fontWeight: 700, color: C.ink },
-  platformNote: { fontSize: 11.5, color: C.mutedLight, marginTop: 2 },
   connectedPill: {
     fontSize: 11.5,
     fontWeight: 700,
