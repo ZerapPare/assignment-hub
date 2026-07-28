@@ -152,7 +152,7 @@ function HomePage() {
       <div style={styles.main}>
         {loading && <p style={styles.muted}>กำลังโหลด…</p>}
         {error && (
-          <p style={styles.error}>⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>
+          <p style={styles.error}>{error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>
         )}
 
         {!loading && !error && (

@@ -3,9 +3,9 @@
 เว็บรวมงาน/การบ้านและกำหนดส่งจาก Google Classroom และ Microsoft Teams ไว้ในที่เดียว
 รันด้วย Docker ทั้งหมด — ไม่ต้องลง Node.js หรือ MySQL ในเครื่อง
 
-> 📄 รายละเอียดสถาปัตยกรรม/โครงสร้างแบบเต็ม ดูที่ [PROJECT_SETUP.md](PROJECT_SETUP.md)
+> รายละเอียดสถาปัตยกรรม/โครงสร้างแบบเต็ม ดูที่ [PROJECT_SETUP.md](PROJECT_SETUP.md)
 
-## 🛠 Tech Stack
+## Tech Stack
 
 | ส่วน | เทคโนโลยี |
 |---|---|
@@ -15,7 +15,7 @@
 | Database | MySQL 8.0 |
 | Container | Docker + Docker Compose |
 
-## 🧩 โครงสร้าง 3 services
+## โครงสร้าง 3 services
 
 ```
 Browser  →  frontend (:5173, Vite)  →  backend (:3000, Express)  →  db (:3306, MySQL)
@@ -23,12 +23,12 @@ Browser  →  frontend (:5173, Vite)  →  backend (:3000, Express)  →  db (:3
 
 frontend ไม่คุยกับ MySQL ตรงๆ — เรียก `/api/*` แล้ว Vite proxy ส่งต่อไป backend (ไม่ต้องตั้ง CORS)
 
-## 📦 Prerequisites
+## Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (เปิดโปรแกรมทิ้งไว้ก่อนรันคำสั่ง)
 - [Git](https://git-scm.com/)
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Clone โปรเจกต์
 
@@ -75,18 +75,18 @@ db-1        | ... ready for connections
 
 จะเจอหน้า **login** ก่อน → กด "เข้าสู่ระบบด้วย Google/Microsoft" → ไปหน้า consent ของ provider → กลับมาที่ **dashboard** (ระบบสร้าง user ในตาราง `Student` + เก็บ token ให้อัตโนมัติ) กด "ออกจากระบบ" ที่ sidebar เพื่อออก
 
-> ⏳ ครั้งแรก MySQL start ช้ากว่าแอป ถ้าหน้า dashboard ขึ้น "รอ database พร้อม..." ให้รอ 10–20 วิ แล้ว refresh
+> ครั้งแรก MySQL start ช้ากว่าแอป ถ้าหน้า dashboard ขึ้น "รอ database พร้อม..." ให้รอ 10–20 วิ แล้ว refresh
 >
-> 💡 dev ใช้ session แบบ in-memory — backend restart (เช่นตอนแก้โค้ด) จะ logout เอง เป็นเรื่องปกติ
+> dev ใช้ session แบบ in-memory — backend restart (เช่นตอนแก้โค้ด) จะ logout เอง เป็นเรื่องปกติ
 
-## 🖥 หน้าจอ
+## หน้าจอ
 
 | Path | หน้า |
 |---|---|
 | `/login` | หน้าเข้าสู่ระบบ (Google / Microsoft) |
 | `/home` | Dashboard — การ์ดสถิติ, งานด่วน, งานทั้งหมด, กราฟความคืบหน้า, ปฏิทิน (ดึงข้อมูลจริงจาก API) |
 
-## 🗄 Database
+## Database
 
 Database ชื่อ `assignment_hub` ถูกสร้างอัตโนมัติจาก `init.sql` ตอน start ครั้งแรก มี 7 ตาราง:
 
@@ -106,20 +106,20 @@ Database ชื่อ `assignment_hub` ถูกสร้างอัตโน�
 docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES; SELECT title, status FROM Assignment a JOIN Assignment_Detail d USING(assignment_id);"
 ```
 
-## 🔌 API (backend)
+## API (backend)
 
 | Method | Path | ต้อง login? | คืนอะไร |
 |---|---|---|---|
 | GET | `/api/health` | — | สถานะการต่อ DB |
 | GET | `/api/auth/google` · `/microsoft` | — | ส่งไปหน้า consent ของ provider |
 | GET | `/api/auth/{provider}/callback` | — | แลก code → สร้าง/อัปเดต user + token → เริ่ม session |
-| GET | `/api/me` | ✅ | ข้อมูล user ที่ login อยู่ |
+| GET | `/api/me` | ต้อง | ข้อมูล user ที่ login อยู่ |
 | POST | `/api/auth/logout` | — | ออกจากระบบ (ลบ session) |
-| GET | `/api/assignments` | ✅ | งานทั้งหมด (JOIN course + detail) |
+| GET | `/api/assignments` | ต้อง | งานทั้งหมด (JOIN course + detail) |
 
-`✅` = ต้องมี session ไม่งั้นได้ `401`
+`ต้อง` = ต้องมี session ไม่งั้นได้ `401`
 
-## 📁 Project Structure (ย่อ)
+## Project Structure (ย่อ)
 
 ```
 assignment-hub/
@@ -136,7 +136,7 @@ assignment-hub/
         └── icons/       # Google/Microsoft SVG
 ```
 
-## 🔧 คำสั่งที่ใช้บ่อย
+## คำสั่งที่ใช้บ่อย
 
 | คำสั่ง | ทำอะไร |
 |---|---|
@@ -145,4 +145,4 @@ assignment-hub/
 | `docker compose down -v` | หยุด + ลบข้อมูล DB (ใช้เมื่อแก้ `init.sql` แล้วอยากให้รันใหม่) |
 | `docker compose logs -f backend` | ดู log backend |
 
-> ⚠️ `init.sql` รันเฉพาะตอนสร้าง database ครั้งแรก ถ้าแก้ไฟล์แล้ว table ไม่เปลี่ยน ให้ `docker compose down -v` ก่อนแล้ว `up` ใหม่
+> `init.sql` รันเฉพาะตอนสร้าง database ครั้งแรก ถ้าแก้ไฟล์แล้ว table ไม่เปลี่ยน ให้ `docker compose down -v` ก่อนแล้ว `up` ใหม่

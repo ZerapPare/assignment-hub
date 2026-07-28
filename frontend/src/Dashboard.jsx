@@ -34,7 +34,7 @@ function Dashboard() {
 
       {error && (
         <p style={styles.error}>
-          ⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh
+          {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh
         </p>
       )}
 
