@@ -1,21 +1,22 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { C, FONT, R } from '../theme';
 import BrandMark from './BrandMark';
 import { HomeIcon, PencilIcon, CalendarIcon, GearIcon } from '../icons';
 
+// Entries without a `path` have no page behind them yet, so they stay
+// presentational — no pointer cursor, no click handler.
 const NAV = [
-  { key: 'home', label: 'หน้าแรก', Icon: HomeIcon },
+  { key: 'home', label: 'หน้าแรก', Icon: HomeIcon, path: '/home' },
   { key: 'all', label: 'การบ้านทั้งหมด', Icon: PencilIcon },
   { key: 'stats', label: 'สถิติ', Icon: CalendarIcon },
-  { key: 'settings', label: 'ตั้งค่า', Icon: GearIcon },
+  { key: 'settings', label: 'ตั้งค่า', Icon: GearIcon, path: '/settings' },
 ];
 
 // Left navigation rail. `active` = current nav key. `student` powers the
 // profile card. `onLogout` clears the session and returns to /login.
-//
-// The nav items are presentational only — the router has just /login and
-// /home — so they carry no pointer cursor or click handler.
 function Sidebar({ active = 'home', student, onLogout }) {
+  const navigate = useNavigate();
   const name = student?.student_name || '—';
   // University is NULL until the University table is populated; fall back to
   // the real email rather than printing a generic word that looks like data.
@@ -28,16 +29,18 @@ function Sidebar({ active = 'home', student, onLogout }) {
       </div>
 
       <nav style={styles.nav}>
-        {NAV.map(({ key, label, Icon }) => {
+        {NAV.map(({ key, label, Icon, path }) => {
           const on = key === active;
           return (
             <div
               key={key}
+              onClick={path && !on ? () => navigate(path) : undefined}
               style={{
                 ...styles.navItem,
                 background: on ? C.pinkBg : 'transparent',
                 color: on ? C.navy : C.muted,
                 fontWeight: on ? 700 : 500,
+                cursor: path && !on ? 'pointer' : 'default',
               }}
             >
               <Icon size={14} color={on ? C.navy : C.muted} />
