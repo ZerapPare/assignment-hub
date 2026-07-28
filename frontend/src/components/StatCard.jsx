@@ -1,14 +1,14 @@
 import React from 'react';
+import { C, R } from '../theme';
 
-const poppins = "'Poppins', sans-serif";
-
-// A single metric tile: label + big number in an accent color.
-function StatCard({ label, value, color }) {
+// A single metric tile: icon swatch on top, then label + count.
+function StatCard({ icon, iconBg, label, value }) {
   return (
     <div style={styles.card}>
-      <div style={styles.label}>{label}</div>
-      <div style={{ ...styles.value, color: color || 'oklch(25% 0.02 290)' }}>
-        {value}
+      <div style={{ ...styles.swatch, background: iconBg }}>{icon}</div>
+      <div style={{ minWidth: 0, overflow: 'hidden' }}>
+        <div style={styles.label}>{label}</div>
+        <div style={styles.value}>{value}</div>
       </div>
     </div>
   );
@@ -16,18 +16,32 @@ function StatCard({ label, value, color }) {
 
 const styles = {
   card: {
-    background: 'white',
-    borderRadius: 16,
-    padding: '18px 20px',
-    boxShadow: '0 2px 10px -4px oklch(30% 0.03 290 / 0.1)',
+    background: C.card,
+    borderRadius: R.card,
+    padding: '14px 10px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  swatch: {
+    width: 32,
+    height: 32,
+    borderRadius: 5,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   label: {
-    fontSize: 12.5,
-    color: 'oklch(55% 0.02 290)',
-    fontWeight: 600,
-    marginBottom: 6,
+    fontSize: 11,
+    color: C.mutedLight,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
-  value: { fontFamily: poppins, fontSize: 26, fontWeight: 800 },
+  value: { fontSize: 18, fontWeight: 700, color: C.ink },
 };
 
 export default StatCard;

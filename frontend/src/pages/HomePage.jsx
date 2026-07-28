@@ -2,24 +2,32 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import StatCard from '../components/StatCard';
-import TaskRow from '../components/TaskRow';
+import TaskRow, { GRID } from '../components/TaskRow';
+import BarChart from '../components/BarChart';
 import DonutChart from '../components/DonutChart';
-import TrendChart from '../components/TrendChart';
 import MiniCalendar from '../components/MiniCalendar';
+import DeadlineList from '../components/DeadlineList';
+import UrgentChecklist from '../components/UrgentChecklist';
+import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } from '../icons';
+import { C, FONT, R, SHADOW, WEEKDAYS, TH_MONTHS_SHORT } from '../theme';
 
-const inter = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Sarabun', sans-serif";
-const poppins = "'Poppins', sans-serif";
 const HOUR = 1000 * 60 * 60;
+const URGENT_H = 48;
 
-const TH_MONTHS_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const fmtDate = (d) => `${d.getDate()} ${TH_MONTHS_SHORT[d.getMonth()]}`;
+const fmtTime = (d) =>
+  `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
-// Status → label + colors for the "all tasks" list.
+// Anything the sync didn't classify falls back to "not started", the same way
+// the previous UI treated an unknown status.
+const normalizeStatus = (s) => (s === 'completed' || s === 'in_progress' ? s : 'not_started');
+
 const STATUS = {
-  not_started: { label: 'ยังไม่เริ่ม', color: 'oklch(45% 0.01 90)', bg: 'oklch(94% 0.01 90)', dot: 'oklch(70% 0.02 90)' },
-  in_progress: { label: 'กำลังทำ', color: 'oklch(48% 0.15 250)', bg: 'oklch(93% 0.06 250)', dot: 'oklch(60% 0.15 250)' },
-  completed: { label: 'ส่งแล้ว', color: 'oklch(45% 0.13 150)', bg: 'oklch(92% 0.06 150)', dot: 'oklch(66% 0.14 150)' },
+  not_started: { label: 'ยังไม่เริ่ม', color: C.muted, bg: C.lineSoft },
+  in_progress: { label: 'กำลังทำ', color: C.blueText, bg: C.blueBg },
+  completed: { label: 'ส่งแล้ว', color: C.green, bg: C.greenBg },
 };
+const URGENT_PILL = { label: 'ด่วน', color: C.pinkDark, bg: C.pinkBg };
 
 const FILTERS = [
   { key: 'all', label: 'ทั้งหมด', match: () => true },
@@ -39,6 +47,10 @@ function HomePage() {
   const [cutoffDate, setCutoffDate] = useState(
     () => localStorage.getItem('classroomSyncCutoff') || '2026-06-28'
   );
+  const [cal, setCal] = useState(() => {
+    const n = new Date();
+    return { year: n.getFullYear(), month: n.getMonth() };
+  });
 
   useEffect(() => {
     // Gate on the session: /api/me returns 401 when not logged in → go to /login.
@@ -97,38 +109,53 @@ function HomePage() {
     }
   };
 
-  // Derive all view data from the assignments list.
+  const shiftMonth = (delta) =>
+    setCal((c) => {
+      const d = new Date(c.year, c.month + delta, 1);
+      return { year: d.getFullYear(), month: d.getMonth() };
+    });
+
+  // Every number on this page is derived from the /api/assignments response.
   const view = useMemo(() => {
     const now = new Date();
-    const withDate = assignments.map((a) => ({ ...a, due: a.due_date ? new Date(a.due_date) : null }));
+    const withDate = assignments.map((a) => ({
+      ...a,
+      status: normalizeStatus(a.status),
+      due: a.due_date ? new Date(a.due_date) : null,
+    }));
 
     const total = withDate.length;
     const inProgress = withDate.filter((a) => a.status === 'in_progress').length;
     const completed = withDate.filter((a) => a.status === 'completed').length;
+    const notStarted = withDate.filter((a) => a.status === 'not_started').length;
 
     const notDone = withDate.filter((a) => a.status !== 'completed' && a.due);
-    const urgentCount = notDone.filter((a) => a.due - now <= 48 * HOUR && a.due - now >= 0).length;
+    const urgentCount = notDone.filter(
+      (a) => a.due - now <= URGENT_H * HOUR && a.due - now >= 0
+    ).length;
     const urgentList = [...notDone].sort((a, b) => a.due - b.due).slice(0, 3);
 
-    // Weekly workload buckets (6 weeks from the current week's Sunday).
-    const weekStart = new Date(now);
-    weekStart.setHours(0, 0, 0, 0);
-    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-    const trend = Array.from({ length: 6 }, (_, w) => {
-      const s = new Date(weekStart);
-      s.setDate(s.getDate() + w * 7);
-      const e = new Date(s);
-      e.setDate(e.getDate() + 7);
-      const value = withDate.filter((a) => a.due && a.due >= s && a.due < e).length;
-      return { label: `ส.${w + 1}`, value };
-    });
+    // Checklist: everything due in the next 48h, completed ones included so
+    // the struck-through rows mean something.
+    const checklist = withDate
+      .filter((a) => a.due && a.due - now >= 0 && a.due - now <= URGENT_H * HOUR)
+      .sort((a, b) => a.due - b.due)
+      .slice(0, 5);
 
-    // Calendar: mark days in the current month that have a due date.
-    const busyDays = new Set(
-      withDate
-        .filter((a) => a.due && a.due.getFullYear() === now.getFullYear() && a.due.getMonth() === now.getMonth())
-        .map((a) => a.due.getDate())
-    );
+    // Workload for the next 7 days, one bar per day starting today.
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const week7 = Array.from({ length: 7 }, (_, i) => {
+      const s = new Date(dayStart);
+      s.setDate(s.getDate() + i);
+      const e = new Date(s);
+      e.setDate(e.getDate() + 1);
+      return {
+        label: WEEKDAYS[s.getDay()],
+        value: withDate.filter((a) => a.due && a.due >= s && a.due < e).length,
+        isToday: i === 0,
+      };
+    });
 
     return {
       now,
@@ -136,26 +163,38 @@ function HomePage() {
       total,
       inProgress,
       completed,
+      notStarted,
       urgentCount,
       urgentList,
-      trend,
-      busyDays,
-      percent: total ? Math.round((completed / total) * 100) : 0,
+      checklist,
+      week7,
     };
   }, [assignments]);
 
-  const firstName = student?.student_name?.split(' ')[0] || 'ผู้ใช้';
+  // Recomputed as the user pages through months.
+  const busyDays = useMemo(
+    () =>
+      new Set(
+        view.withDate
+          .filter((a) => a.due && a.due.getFullYear() === cal.year && a.due.getMonth() === cal.month)
+          .map((a) => a.due.getDate())
+      ),
+    [view.withDate, cal.year, cal.month]
+  );
+
+  const isCurrentMonth =
+    cal.year === view.now.getFullYear() && cal.month === view.now.getMonth();
+
   const activeFilter = FILTERS.find((f) => f.key === filter) || FILTERS[0];
   const filteredTasks = view.withDate.filter(activeFilter.match);
 
-  // "เหลือ X" text + urgency color from hours until due.
-  const remain = (due) => {
-    if (!due) return { text: '—', color: 'oklch(60% 0.02 90)' };
-    const h = (due - view.now) / HOUR;
-    if (h < 0) return { text: 'เลยกำหนด', color: 'oklch(62% 0.19 25)' };
-    if (h < 24) return { text: `เหลือ ${Math.max(1, Math.round(h))} ชม.`, color: 'oklch(62% 0.19 25)' };
-    if (h < 72) return { text: `เหลือ ${Math.round(h)} ชม.`, color: 'oklch(58% 0.15 60)' };
-    return { text: `เหลือ ${Math.round(h / 24)} วัน`, color: 'oklch(52% 0.14 290)' };
+  const pillFor = (a) => {
+    const urgent =
+      a.status !== 'completed' &&
+      a.due &&
+      a.due - view.now >= 0 &&
+      a.due - view.now <= URGENT_H * HOUR;
+    return urgent ? URGENT_PILL : STATUS[a.status];
   };
 
   return (
@@ -164,25 +203,16 @@ function HomePage() {
 
       <div style={styles.main}>
         {loading && <p style={styles.muted}>กำลังโหลด…</p>}
-        {error && (
-          <p style={styles.error}>⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>
-        )}
+        {error && <p style={styles.error}>⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>}
 
         {!loading && !error && (
           <>
             {/* Header */}
             <div style={styles.header}>
-              <div>
-                <h1 style={styles.greeting}>สวัสดี {firstName} </h1>
-                <p style={styles.subtitle}>
-                  {view.urgentCount > 0
-                    ? `วันนี้มีงาน ${view.urgentCount} ชิ้นที่ใกล้กำหนดส่ง อย่าลืมเช็คนะ`
-                    : 'ไม่มีงานด่วนใน 48 ชม. สบายไปเลย '}
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <label style={styles.cutoffLabel}>
-                  งานตั้งแต่วันที่
+              <h1 style={styles.title}>แดชบอร์ด</h1>
+              <div style={styles.toolbar}>
+                <label style={styles.cutoff}>
+                  <span style={styles.cutoffText}>งานตั้งแต่วันที่</span>
                   <input
                     type="date"
                     value={cutoffDate}
@@ -190,58 +220,86 @@ function HomePage() {
                     style={styles.cutoffInput}
                   />
                 </label>
-                <button style={styles.syncBtn} onClick={handleSync} disabled={syncing}>
-                  {syncing ? 'กำลังซิงก์…' : '⟳ ซิงก์ Classroom'}
+                <button
+                  type="button"
+                  style={{ ...styles.ghostBtn, opacity: syncing ? 0.6 : 1 }}
+                  onClick={handleSync}
+                  disabled={syncing}
+                >
+                  <RefreshIcon size={14} color={C.muted} />
+                  {syncing ? 'กำลังซิงก์…' : 'ซิงก์ Classroom'}
                 </button>
-                <button style={styles.addBtn}>+ เพิ่มงานใหม่</button>
+                {/* No create endpoint exists yet, so this stays disabled rather
+                    than looking clickable and doing nothing. */}
+                <button
+                  type="button"
+                  style={styles.primaryBtn}
+                  disabled
+                  title="ยังไม่เปิดใช้งาน"
+                >
+                  + เพิ่มงานใหม่
+                </button>
               </div>
             </div>
 
-            {/* Stat cards */}
-            <div style={styles.statGrid}>
-              <StatCard label="งานทั้งหมด" value={view.total} />
-              <StatCard label="กำลังทำ" value={view.inProgress} color="oklch(60% 0.15 250)" />
-              <StatCard label="ส่งแล้ว" value={view.completed} color="oklch(60% 0.14 150)" />
-              <StatCard label="ด่วน (48 ชม.)" value={view.urgentCount} color="oklch(62% 0.19 25)" />
-            </div>
-
-            {/* Two-column body */}
             <div style={styles.body}>
               {/* Left column */}
               <div style={styles.leftCol}>
-                {/* Urgent */}
-                <div style={styles.card}>
-                  <div style={styles.cardHead}>
-                    <span style={styles.cardTitle}>งานด่วน · ใกล้ถึงกำหนดส่ง</span>
-                    <span style={styles.urgentBadge}>ภายใน 48 ชม.</span>
+                <div style={styles.statGrid}>
+                  <StatCard
+                    label="งานทั้งหมด"
+                    value={view.total}
+                    iconBg={C.indigoBg}
+                    icon={<PencilIcon size={16} color={C.navy} />}
+                  />
+                  <StatCard
+                    label="กำลังทำ"
+                    value={view.inProgress}
+                    iconBg={C.pinkBg}
+                    icon={<SpinnerIcon size={16} color={C.pink} />}
+                  />
+                  <StatCard
+                    label="ส่งแล้ว"
+                    value={view.completed}
+                    iconBg={C.blueBg}
+                    icon={<CheckCircleIcon size={16} color="#3b82f6" />}
+                  />
+                  <StatCard
+                    label={`ด่วน ${URGENT_H} ชม.`}
+                    value={view.urgentCount}
+                    iconBg={C.navy}
+                    icon={<HourglassIcon size={16} color={C.pink} />}
+                  />
+                </div>
+
+                {/* Charts */}
+                <div style={styles.chartGrid}>
+                  <div style={styles.card}>
+                    <div style={styles.cardHead}>
+                      <span style={styles.cardTitle}>ปริมาณงานต่อสัปดาห์</span>
+                      <span style={styles.badge}>7 วันข้างหน้า</span>
+                    </div>
+                    <BarChart data={view.week7} />
                   </div>
-                  <div style={styles.urgentList}>
-                    {view.urgentList.length === 0 && (
-                      <p style={styles.muted}>ไม่มีงานค้าง </p>
-                    )}
-                    {view.urgentList.map((a) => {
-                      const r = remain(a.due);
-                      return (
-                        <div key={a.assignment_id} style={styles.urgentItem}>
-                          <div style={{ ...styles.urgentBar, background: r.color }} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={styles.urgentItemTitle}>{a.title}</div>
-                            <div style={styles.urgentItemMeta}>
-                              {a.platform_source || 'เพิ่มเอง'} · กำหนดส่ง{' '}
-                              {a.due ? fmtDate(a.due) : '—'}
-                            </div>
-                          </div>
-                          <span style={{ ...styles.urgentRemain, color: r.color }}>{r.text}</span>
-                        </div>
-                      );
-                    })}
+
+                  <div style={styles.card}>
+                    <div style={styles.cardHead}>
+                      <span style={styles.cardTitle}>สถานะงาน</span>
+                      <span style={styles.badge}>{view.total} งาน</span>
+                    </div>
+                    <DonutChart
+                      completed={view.completed}
+                      inProgress={view.inProgress}
+                      notStarted={view.notStarted}
+                      total={view.total}
+                    />
                   </div>
                 </div>
 
-                {/* All tasks */}
-                <div style={styles.card}>
+                {/* Task table */}
+                <div style={{ ...styles.card, padding: 22 }}>
                   <div style={styles.cardHead}>
-                    <span style={styles.cardTitle}>งานทั้งหมด</span>
+                    <span style={{ ...styles.cardTitle, fontSize: 15 }}>งานทั้งหมด</span>
                     <div style={styles.tabs}>
                       {FILTERS.map((f) => (
                         <span
@@ -249,9 +307,9 @@ function HomePage() {
                           onClick={() => setFilter(f.key)}
                           style={{
                             ...styles.tab,
-                            background: filter === f.key ? 'oklch(93% 0.05 290)' : 'transparent',
-                            color: filter === f.key ? 'oklch(45% 0.16 290)' : 'oklch(50% 0.02 290)',
-                            fontWeight: filter === f.key ? 600 : 500,
+                            background: filter === f.key ? C.pinkBg : 'transparent',
+                            color: filter === f.key ? C.navy : C.muted,
+                            fontWeight: filter === f.key ? 700 : 500,
                           }}
                         >
                           {f.label}
@@ -259,41 +317,78 @@ function HomePage() {
                       ))}
                     </div>
                   </div>
-                  <div>
-                    {filteredTasks.length === 0 && <p style={styles.muted}>ไม่มีงานในหมวดนี้</p>}
-                    {filteredTasks.map((a, i) => {
-                      const s = STATUS[a.status] || STATUS.not_started;
-                      return (
-                        <TaskRow
-                          key={a.assignment_id}
-                          title={a.title}
-                          meta={`${a.course_name} · ${a.due ? fmtDate(a.due) : '—'}`}
-                          dotColor={s.dot}
-                          badgeText={s.label}
-                          badgeColor={s.color}
-                          badgeBg={s.bg}
-                          last={i === filteredTasks.length - 1}
-                        />
-                      );
-                    })}
+
+                  <div style={styles.tableHead}>
+                    <span>รายวิชา</span>
+                    <span>แพลตฟอร์ม</span>
+                    <span>กำหนดส่ง</span>
+                    <span>สถานะ</span>
                   </div>
+
+                  {filteredTasks.length === 0 && <p style={styles.muted}>ไม่มีงานในหมวดนี้</p>}
+                  {filteredTasks.map((a, i) => {
+                    const pill = pillFor(a);
+                    return (
+                      <TaskRow
+                        key={a.assignment_id}
+                        title={a.title}
+                        course={a.course_name}
+                        platform={a.platform_source || 'เพิ่มเอง'}
+                        due={a.due ? fmtDate(a.due) : '—'}
+                        badgeText={pill.label}
+                        badgeColor={pill.color}
+                        badgeBg={pill.bg}
+                        last={i === filteredTasks.length - 1}
+                      />
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Right column */}
               <div style={styles.rightCol}>
-                <div style={styles.card}>
-                  <DonutChart percent={view.percent} done={view.completed} total={view.total} />
-                </div>
-                <div style={styles.card}>
-                  <TrendChart data={view.trend} />
-                </div>
-                <div style={styles.card}>
+                <div style={{ ...styles.card, background: C.blue }}>
                   <MiniCalendar
-                    year={view.now.getFullYear()}
-                    month={view.now.getMonth()}
-                    today={view.now.getDate()}
-                    busyDays={view.busyDays}
+                    year={cal.year}
+                    month={cal.month}
+                    today={isCurrentMonth ? view.now.getDate() : null}
+                    busyDays={busyDays}
+                    onPrev={() => shiftMonth(-1)}
+                    onNext={() => shiftMonth(1)}
+                  />
+                </div>
+
+                <div style={styles.card}>
+                  <div style={styles.cardHead}>
+                    <span style={styles.cardTitle}>กำหนดส่งใกล้ถึง</span>
+                  </div>
+                  <DeadlineList
+                    items={view.urgentList.map((a) => ({
+                      id: a.assignment_id,
+                      dateText: a.due ? fmtDate(a.due) : '—',
+                      timeText: a.due ? fmtTime(a.due) : '',
+                      title: a.title,
+                      source: a.platform_source || 'เพิ่มเอง',
+                    }))}
+                  />
+                </div>
+
+                <div style={styles.card}>
+                  <div style={styles.cardHead}>
+                    <span style={styles.cardTitle}>งานด่วน</span>
+                    {view.checklist.length > 0 && (
+                      <span style={styles.badgeFaint}>
+                        เหลือ {view.checklist.filter((a) => a.status !== 'completed').length} จาก{' '}
+                        {view.checklist.length}
+                      </span>
+                    )}
+                  </div>
+                  <UrgentChecklist
+                    items={view.checklist.map((a) => ({
+                      id: a.assignment_id,
+                      title: a.title,
+                      done: a.status === 'completed',
+                    }))}
                   />
                 </div>
               </div>
@@ -306,128 +401,107 @@ function HomePage() {
 }
 
 const styles = {
-  page: {
-    minHeight: '100vh',
-    width: '100%',
-    fontFamily: inter,
-    background: 'oklch(97.5% 0.01 90)',
-    display: 'flex',
-  },
-  main: {
-    flex: 1,
-    padding: '32px 40px',
-    boxSizing: 'border-box',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 24,
-  },
-  muted: { color: 'oklch(55% 0.02 290)', fontSize: 14 },
-  error: { color: 'oklch(60% 0.15 60)', fontSize: 14 },
+  page: { minHeight: '100vh', width: '100%', fontFamily: FONT, background: C.pageBg, display: 'flex' },
+  main: { flex: 1, minWidth: 0, padding: '26px 28px 40px', boxSizing: 'border-box' },
+
+  muted: { color: C.mutedLight, fontSize: 13, margin: '8px 0 0' },
+  error: { color: C.pinkDark, fontSize: 14 },
 
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    flexWrap: 'wrap',
     gap: 16,
+    marginBottom: 22,
+    flexWrap: 'wrap',
   },
-  greeting: { fontFamily: poppins, fontSize: 26, fontWeight: 800, color: 'oklch(22% 0.02 290)', margin: '0 0 4px' },
-  subtitle: { margin: 0, fontSize: 14, color: 'oklch(50% 0.02 290)' },
-  addBtn: {
+  title: { fontSize: 22, fontWeight: 700, color: C.ink, margin: 0 },
+  toolbar: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  cutoff: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '12px 20px',
-    borderRadius: 12,
-    border: 'none',
-    background: 'oklch(55% 0.18 290)',
-    color: 'white',
-    fontFamily: inter,
-    fontWeight: 600,
-    fontSize: 14,
-    cursor: 'pointer',
-    boxShadow: '0 8px 20px -6px oklch(55% 0.18 290 / 0.5)',
+    background: C.card,
+    borderRadius: R.pill,
+    padding: '9px 14px',
   },
-
-  syncBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '12px 20px',
-    borderRadius: 12,
-    border: '1px solid oklch(85% 0.02 290)',
-    background: 'white',
-    color: 'oklch(40% 0.05 290)',
-    fontFamily: inter,
-    fontWeight: 600,
-    fontSize: 14,
-    cursor: 'pointer',
-  },
-  cutoffLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    fontSize: 12.5,
-    fontWeight: 600,
-    color: 'oklch(50% 0.02 290)',
-  },
+  cutoffText: { fontSize: 13, color: C.muted, whiteSpace: 'nowrap' },
   cutoffInput: {
-    padding: '9px 10px',
-    borderRadius: 10,
-    border: '1px solid oklch(85% 0.02 290)',
-    fontFamily: inter,
+    border: 'none',
     fontSize: 13,
-    color: 'oklch(30% 0.02 290)',
+    color: C.ink,
+    fontFamily: FONT,
+    background: 'transparent',
+  },
+  ghostBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '9px 16px',
+    borderRadius: R.pill,
+    border: `1px solid ${C.lineInput}`,
+    background: C.card,
+    color: C.ink,
+    fontFamily: FONT,
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  primaryBtn: {
+    padding: '9px 18px',
+    borderRadius: R.pill,
+    border: 'none',
+    background: C.navy,
+    color: 'white',
+    fontFamily: FONT,
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: 'not-allowed',
+    opacity: 0.55,
+    whiteSpace: 'nowrap',
+    boxShadow: SHADOW.primaryBtn,
   },
 
-  statGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 },
+  body: { display: 'grid', gridTemplateColumns: 'minmax(0,1.7fr) minmax(0,1fr)', gap: 18 },
+  leftCol: { display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 },
+  rightCol: { display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 },
 
-  body: { display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 20, alignItems: 'start' },
-  leftCol: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
-  rightCol: { display: 'flex', flexDirection: 'column', gap: 20 },
+  statGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 10 },
+  chartGrid: { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14 },
 
-  card: {
-    background: 'white',
-    borderRadius: 18,
-    padding: 22,
-    boxShadow: '0 2px 10px -4px oklch(30% 0.03 290 / 0.1)',
-  },
+  card: { background: C.card, borderRadius: R.card, padding: 20, minWidth: 0 },
   cardHead: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    flexWrap: 'wrap',
     gap: 10,
-    marginBottom: 16,
+    flexWrap: 'wrap',
+    marginBottom: 14,
   },
-  cardTitle: { fontFamily: poppins, fontWeight: 700, fontSize: 16, color: 'oklch(25% 0.02 290)' },
-  urgentBadge: {
-    fontSize: 12,
-    background: 'oklch(92% 0.06 25)',
-    color: 'oklch(45% 0.17 25)',
-    padding: '4px 10px',
-    borderRadius: 20,
-    fontWeight: 600,
+  cardTitle: { fontWeight: 700, fontSize: 14.5, color: C.ink },
+  badge: {
+    fontSize: 11.5,
+    padding: '5px 12px',
+    borderRadius: 8,
+    background: C.pageBg,
+    color: C.muted,
+    whiteSpace: 'nowrap',
   },
+  badgeFaint: { fontSize: 11.5, color: C.mutedLight, whiteSpace: 'nowrap' },
 
-  urgentList: { display: 'flex', flexDirection: 'column', gap: 10 },
-  urgentItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 14,
-    padding: 14,
-    borderRadius: 14,
-    background: 'oklch(97% 0.01 290)',
-    border: '1px solid oklch(91% 0.02 290)',
-  },
-  urgentBar: { width: 6, height: 36, borderRadius: 4, flexShrink: 0 },
-  urgentItemTitle: { fontSize: 14, fontWeight: 600, color: 'oklch(25% 0.02 290)' },
-  urgentItemMeta: { fontSize: 12, color: 'oklch(50% 0.02 290)', marginTop: 2 },
-  urgentRemain: { fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap' },
+  tabs: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+  tab: { fontSize: 12, padding: '5px 12px', borderRadius: R.pill, cursor: 'pointer' },
 
-  tabs: { display: 'flex', gap: 8, flexWrap: 'wrap' },
-  tab: { fontSize: 12, padding: '5px 12px', borderRadius: 20, cursor: 'pointer' },
+  tableHead: {
+    display: 'grid',
+    gridTemplateColumns: GRID,
+    gap: 8,
+    fontSize: 11.5,
+    color: C.mutedLight,
+    padding: '0 4px 10px',
+    borderBottom: `1px solid ${C.lineSoft}`,
+  },
 };
 
 export default HomePage;

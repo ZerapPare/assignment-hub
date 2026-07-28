@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
-
-const fontStack =
-  "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Sarabun', sans-serif";
+import { C, FONT, R, SHADOW } from '../theme';
 
 // Reusable OAuth-provider sign-in button (Google / Microsoft / ...)
 function ProviderButton({ icon, label, onClick }) {
@@ -25,23 +23,22 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '0.65rem',
+    gap: 10,
     width: '100%',
-    padding: '0.85rem 1rem',
-    fontSize: '0.95rem',
+    padding: '14px 20px',
+    fontSize: 15,
     fontWeight: 600,
-    fontFamily: fontStack,
-    color: '#1e293b',
-    background: '#ffffff',
-    border: '1px solid #e2e8f0',
-    borderRadius: 12,
+    fontFamily: FONT,
+    color: C.inkAlt,
+    background: C.card,
+    border: `1.5px solid ${C.lineBtn}`,
+    borderRadius: R.sso,
     cursor: 'pointer',
-    transition: 'all 0.15s ease',
+    transition: 'box-shadow .15s, border-color .15s',
   },
   btnHover: {
-    borderColor: '#c4b5fd',
-    background: '#faf5ff',
-    boxShadow: '0 4px 12px -4px rgba(124, 58, 237, 0.25)',
+    borderColor: C.lineBtnHover,
+    boxShadow: SHADOW.ssoHover,
   },
   icon: { display: 'flex', alignItems: 'center' },
 };

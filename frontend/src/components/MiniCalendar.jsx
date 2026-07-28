@@ -1,15 +1,11 @@
 import React from 'react';
+import { C, FONT, WEEKDAYS, TH_MONTHS } from '../theme';
 
-const poppins = "'Poppins', sans-serif";
-const TH_MONTHS = [
-  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
-];
-const WEEKDAYS = ['อา', 'จ', 'อ', 'พฤ', 'พ', 'ศ', 'ส'];
-
-// Month calendar. `busyDays` = Set of day numbers that have a due date.
-function MiniCalendar({ year, month, today, busyDays }) {
-  const firstWeekday = new Date(year, month, 1).getDay(); // 0=Sun
+// Month calendar on the light-blue card. `busyDays` = Set of day numbers in
+// the displayed month that have a due date. `today` is null unless the
+// displayed month is the current one.
+function MiniCalendar({ year, month, today, busyDays, onPrev, onNext }) {
+  const firstWeekday = new Date(year, month, 1).getDay(); // 0 = Sunday
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const cells = [];
@@ -19,24 +15,36 @@ function MiniCalendar({ year, month, today, busyDays }) {
   return (
     <div>
       <div style={styles.header}>
+        {/* Buddhist Era, matching how Thai students read dates. */}
         <span style={styles.title}>
           {TH_MONTHS[month]} {year + 543}
         </span>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button type="button" onClick={onPrev} style={styles.navBtn} aria-label="เดือนก่อนหน้า">
+            ‹
+          </button>
+          <button type="button" onClick={onNext} style={styles.navBtn} aria-label="เดือนถัดไป">
+            ›
+          </button>
+        </div>
       </div>
+
       <div style={styles.grid}>
         {WEEKDAYS.map((w) => (
-          <div key={w} style={styles.weekday}>{w}</div>
+          <div key={w} style={styles.weekday}>
+            {w}
+          </div>
         ))}
         {cells.map((n, i) => {
-          const isToday = n === today;
+          const isToday = n != null && n === today;
           const hasDot = n != null && busyDays.has(n) && !isToday;
           return (
             <div
               key={i}
               style={{
                 ...styles.cell,
-                color: isToday ? 'white' : 'oklch(30% 0.02 290)',
-                background: isToday ? 'oklch(58% 0.17 290)' : 'transparent',
+                color: isToday ? 'white' : n == null ? 'transparent' : C.navy,
+                background: isToday ? C.pink : 'transparent',
                 fontWeight: isToday ? 700 : 500,
               }}
             >
@@ -51,27 +59,34 @@ function MiniCalendar({ year, month, today, busyDays }) {
 }
 
 const styles = {
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontFamily: poppins, fontWeight: 700, fontSize: 16, color: 'oklch(25% 0.02 290)' },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(7, 1fr)',
-    gap: 5,
-    marginTop: 16,
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
   },
-  weekday: {
-    fontSize: 10.5,
-    color: 'oklch(60% 0.02 90)',
-    textAlign: 'center',
-    fontWeight: 600,
+  title: { fontFamily: FONT, fontWeight: 700, fontSize: 14.5, color: C.ink },
+  navBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    border: 'none',
+    background: C.card,
+    color: C.ink,
+    fontSize: 11,
+    lineHeight: 1,
+    cursor: 'pointer',
+    padding: 0,
   },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 5 },
+  weekday: { fontSize: 10, color: '#6b8aa8', textAlign: 'center', fontWeight: 600 },
   cell: {
     aspectRatio: '1',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     fontSize: 11.5,
-    borderRadius: 8,
+    borderRadius: 4,
     position: 'relative',
   },
   dot: {
@@ -80,7 +95,7 @@ const styles = {
     width: 4,
     height: 4,
     borderRadius: '50%',
-    background: 'oklch(62% 0.19 25)',
+    background: C.pink,
   },
 };
 

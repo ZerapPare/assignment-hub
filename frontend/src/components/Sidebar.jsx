@@ -1,49 +1,47 @@
 import React from 'react';
-
-const poppins = "'Poppins', sans-serif";
+import { C, FONT, R } from '../theme';
+import BrandMark from './BrandMark';
+import { HomeIcon, PencilIcon, CalendarIcon, GearIcon } from '../icons';
 
 const NAV = [
-  { key: 'home', label: 'หน้าแรก' },
-  { key: 'all', label: 'การบ้านทั้งหมด' },
-  { key: 'stats', label: 'สถิติ' },
-  { key: 'settings', label: 'ตั้งค่า' },
+  { key: 'home', label: 'หน้าแรก', Icon: HomeIcon },
+  { key: 'all', label: 'การบ้านทั้งหมด', Icon: PencilIcon },
+  { key: 'stats', label: 'สถิติ', Icon: CalendarIcon },
+  { key: 'settings', label: 'ตั้งค่า', Icon: GearIcon },
 ];
 
 // Left navigation rail. `active` = current nav key. `student` powers the
-// profile. `onLogout` clears the session and returns to /login.
+// profile card. `onLogout` clears the session and returns to /login.
+//
+// The nav items are presentational only — the router has just /login and
+// /home — so they carry no pointer cursor or click handler.
 function Sidebar({ active = 'home', student, onLogout }) {
-  const name = student?.student_name || 'ผู้ใช้';
-  const university = student?.university_name || 'มหาวิทยาลัย';
+  const name = student?.student_name || '—';
+  // University is NULL until the University table is populated; fall back to
+  // the real email rather than printing a generic word that looks like data.
+  const sub = student?.university_name || student?.university_email || '';
 
   return (
     <div style={styles.rail}>
-      <div style={styles.brand}>
-        <div style={styles.logoMark}>
-          <div style={styles.logoInner} />
-        </div>
-        <span style={styles.brandName}>Assignment Hub</span>
+      <div style={{ padding: '0 8px' }}>
+        <BrandMark size={22} fontSize={17} weight={700} />
       </div>
 
       <nav style={styles.nav}>
-        {NAV.map((item) => {
-          const on = item.key === active;
+        {NAV.map(({ key, label, Icon }) => {
+          const on = key === active;
           return (
             <div
-              key={item.key}
+              key={key}
               style={{
                 ...styles.navItem,
-                background: on ? 'oklch(93% 0.05 290)' : 'transparent',
-                color: on ? 'oklch(45% 0.16 290)' : 'oklch(45% 0.02 290)',
-                fontWeight: on ? 600 : 500,
+                background: on ? C.pinkBg : 'transparent',
+                color: on ? C.navy : C.muted,
+                fontWeight: on ? 700 : 500,
               }}
             >
-              <div
-                style={{
-                  ...styles.navDot,
-                  background: on ? 'oklch(55% 0.18 290)' : 'oklch(80% 0.02 290)',
-                }}
-              />
-              {item.label}
+              <Icon size={14} color={on ? C.navy : C.muted} />
+              {label}
             </div>
           );
         })}
@@ -52,9 +50,9 @@ function Sidebar({ active = 'home', student, onLogout }) {
       <div style={styles.footer}>
         <div style={styles.profile}>
           <div style={styles.avatar} />
-          <div style={{ overflow: 'hidden' }}>
+          <div style={{ overflow: 'hidden', minWidth: 0 }}>
             <div style={styles.profileName}>{name}</div>
-            <div style={styles.profileUni}>{university}</div>
+            {sub && <div style={styles.profileSub}>{sub}</div>}
           </div>
         </div>
         <button type="button" onClick={onLogout} style={styles.logout}>
@@ -67,73 +65,68 @@ function Sidebar({ active = 'home', student, onLogout }) {
 
 const styles = {
   rail: {
-    width: 240,
+    width: 220,
     flexShrink: 0,
-    background: 'oklch(99% 0.005 90)',
-    borderRight: '1px solid oklch(92% 0.01 90)',
-    padding: '24px 18px',
+    background: C.card,
+    borderRight: `1px solid ${C.line}`,
+    padding: '22px 14px',
     display: 'flex',
     flexDirection: 'column',
-    gap: 28,
+    gap: 24,
     boxSizing: 'border-box',
   },
-  brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px' },
-  logoMark: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
-    background: 'linear-gradient(135deg, oklch(60% 0.18 290), oklch(65% 0.19 310))',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  logoInner: { width: 16, height: 16, borderRadius: 4, background: 'white' },
-  brandName: { fontFamily: poppins, fontWeight: 800, fontSize: 17, color: 'oklch(25% 0.02 290)' },
-  nav: { display: 'flex', flexDirection: 'column', gap: 4 },
+  nav: { display: 'flex', flexDirection: 'column', gap: 2 },
   navItem: {
     display: 'flex',
     alignItems: 'center',
     gap: 12,
-    padding: '11px 12px',
-    borderRadius: 12,
-    fontSize: 14,
+    padding: '10px 12px',
+    borderRadius: R.pill,
+    fontSize: 13.5,
+    fontFamily: FONT,
   },
-  navDot: { width: 8, height: 8, borderRadius: 2 },
   footer: { marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 8 },
   profile: {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
-    padding: '10px 8px',
-    borderRadius: 12,
-    background: 'oklch(96% 0.02 90)',
-  },
-  logout: {
-    padding: '9px 12px',
-    borderRadius: 10,
-    border: '1px solid oklch(90% 0.02 290)',
-    background: 'white',
-    color: 'oklch(50% 0.05 290)',
-    fontFamily: 'inherit',
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
+    padding: 10,
+    borderRadius: R.pill,
+    background: C.blue,
   },
   avatar: {
     width: 34,
     height: 34,
     borderRadius: '50%',
-    background: 'linear-gradient(135deg, oklch(70% 0.14 25), oklch(72% 0.14 60))',
+    background: `linear-gradient(135deg, ${C.navy}, ${C.pinkSoft})`,
     flexShrink: 0,
   },
   profileName: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: 'oklch(25% 0.02 290)',
+    fontSize: 12.5,
+    fontWeight: 700,
+    color: C.ink,
     whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
-  profileUni: { fontSize: 11.5, color: 'oklch(55% 0.02 290)', whiteSpace: 'nowrap' },
+  profileSub: {
+    fontSize: 11,
+    color: C.muted,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  logout: {
+    padding: 9,
+    borderRadius: R.pill,
+    border: `1px solid ${C.lineInput}`,
+    background: C.card,
+    color: C.ink,
+    fontFamily: FONT,
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: 'pointer',
+  },
 };
 
 export default Sidebar;
