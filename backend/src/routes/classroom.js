@@ -8,14 +8,6 @@ const { toMysqlDateTime, listCourseWorkSince } = require('../services/classroomS
 
 const router = express.Router();
 
-// Pull the logged-in student's Classroom courses + coursework and upsert
-// them into Course / Assignment / Assignment_Detail so re-syncing doesn't
-// create duplicates. Both upsert keys pair Classroom's own id with the row's
-// owner — Course on (external_course_id, student_id), Assignment on
-// (external_assignment_id, course_id) — because Classroom hands every student
-// in a class the *same* coursework id. Matching on the external id alone would
-// make one classmate's sync find (and update) a row belonging to another, and
-// never insert that student's own copy.
 router.post('/api/classroom/sync', requireAuth, async (req, res) => {
   try {
     const cutoffDate = req.body?.cutoffDate ? new Date(req.body.cutoffDate) : null;
@@ -35,9 +27,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
     client.setCredentials({ refresh_token: refreshToken });
     const classroom = google.classroom({ version: 'v1', auth: client });
 
-    // Moving the cutoff forward prunes what was synced under an older one.
-    // Scoped to this student's Google Classroom courses — manual entries and
-    // Teams assignments are never touched here.
     let deletedCount = 0;
     if (cutoffDate) {
       const [toDelete] = await pool.query(
@@ -50,7 +39,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
       );
       const ids = toDelete.map((r) => r.assignment_id);
       if (ids.length) {
-        // Child tables first to satisfy the foreign key constraints.
         await pool.query('DELETE FROM Notification WHERE assignment_id IN (?)', [ids]);
         await pool.query('DELETE FROM Schedule WHERE assignment_id IN (?)', [ids]);
         await pool.query('DELETE FROM Assignment_Detail WHERE assignment_id IN (?)', [ids]);
@@ -59,10 +47,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
       }
     }
 
-    // studentId 'me' — only courses this user attends as a student.
-    // courses.list otherwise also returns courses they *teach* (e.g.
-    // self-created classrooms), whose coursework the coursework.me scope
-    // can't read (403 — that needs the teacher-facing coursework.students).
     const { data: { courses = [] } } = await classroom.courses.list({ courseStates: ['ACTIVE'], studentId: 'me' });
 
     let coursesSynced = 0;
@@ -70,8 +54,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
     const skippedCourses = [];
 
     for (const course of courses) {
-      // Course rows in this schema belong to one student, so match on
-      // (external_course_id, student_id) rather than external id alone.
       const [existingCourse] = await pool.query(
         'SELECT course_id FROM Course WHERE external_course_id = ? AND student_id = ? LIMIT 1',
         [course.id, req.session.userId]
@@ -91,8 +73,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
       }
       coursesSynced++;
 
-      // One unreadable course must not abort the whole sync — skip it and
-      // keep going so every other course's assignments still come in.
       let courseWork;
       try {
         courseWork = await listCourseWorkSince(classroom, course.id, cutoffDate);
@@ -119,9 +99,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
 
         const dueDateTime = toMysqlDateTime(work.dueDate, work.dueTime);
 
-        // Scoped to this student's own course row — `courseId` was resolved
-        // above from (external_course_id, student_id), so a classmate's copy
-        // of the same coursework can never match here.
         const [existingAssignment] = await pool.query(
           'SELECT assignment_id FROM Assignment WHERE external_assignment_id = ? AND course_id = ? LIMIT 1',
           [work.id, courseId]
@@ -139,8 +116,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
               [work.description || null, dueDateTime, 'completed', assignmentId]
             );
           } else {
-            // Status is left out on purpose: the student's own not_started /
-            // in_progress must survive a re-sync.
             await pool.query(
               'UPDATE Assignment_Detail SET description = ?, due_date = ? WHERE assignment_id = ?',
               [work.description || null, dueDateTime, assignmentId]
@@ -166,8 +141,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
 
     res.json({ ok: true, coursesSynced, assignmentsSynced, deletedCount, skippedCourses });
   } catch (err) {
-    // Google API errors carry the real reason in err.response.data — log
-    // and surface that instead of just err.message, which is often just "Bad Request".
     const googleDetail = err.response?.data?.error || err.errors || null;
     console.error('[classroom] sync error:', err.message, googleDetail ? JSON.stringify(googleDetail) : '');
     res.status(500).json({
