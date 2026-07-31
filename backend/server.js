@@ -26,7 +26,6 @@ app.use(require('./src/routes/auth'));
 app.use(require('./src/routes/me'));
 app.use(require('./src/routes/assignments'));
 app.use(require('./src/routes/classroom'));
-app.use(require('./routes/teams'));
 
 app.listen(PORT, () => {
   console.log(`Backend API running on http://localhost:${PORT}`);
