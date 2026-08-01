@@ -41,6 +41,11 @@ function HomePage() {
   const [assignments, setAssignments] = useState([]);
   const [student, setStudent] = useState(null);
   const [filter, setFilter] = useState('all');
+
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [courseFilter, setCourseFilter] = useState("all");
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [syncing, setSyncing] = useState(false);
@@ -181,7 +186,51 @@ function HomePage() {
     cal.year === view.now.getFullYear() && cal.month === view.now.getMonth();
 
   const activeFilter = FILTERS.find((f) => f.key === filter) || FILTERS[0];
-  const filteredTasks = view.withDate.filter(activeFilter.match);
+  // const filteredTasks = view.withDate.filter(activeFilter.match);
+
+  const filteredTasks = view.withDate
+
+    //Platform
+    .filter(activeFilter.match)
+
+    //Status
+    .filter(a =>
+
+      statusFilter === "all"
+
+      || a.status === statusFilter
+
+    )
+
+    //Course
+    .filter(a =>
+
+      courseFilter === "all"
+
+      || a.course_name === courseFilter
+
+    )
+    
+    //Search
+    .filter((a) => {
+
+      if (!search) return true;
+
+      const keyword = search.toLowerCase();
+
+      return (
+
+        a.title.toLowerCase().includes(keyword) ||
+
+        a.course_name.toLowerCase().includes(keyword) ||
+
+        (a.description || "")
+          .toLowerCase()
+          .includes(keyword)
+
+      );
+
+    });
 
   const pillFor = (a) => {
     const urgent =
@@ -192,30 +241,30 @@ function HomePage() {
     return urgent ? URGENT_PILL : STATUS[a.status];
   };
 
-	const [editOpen, setEditOpen] = useState(false);
-	const [editingAssignment, setEditingAssignment] = useState(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingAssignment, setEditingAssignment] = useState(null);
 
-	const handleDelete = async (id) => {
-		if (!window.confirm('คุณแน่ใจว่าต้องการลบงานนี้?')) return;
-		try {
-			const res = await fetch(`/api/assignments/${id}`, { method: 'DELETE' });
-			if (!res.ok) throw new Error('Delete failed');
-			setAssignments((prev) => prev.filter((a) => a.assignment_id !== id));
-		} catch (err) {
-			setError(err.message);
-		}
-		};
+  const handleDelete = async (id) => {
+    if (!window.confirm('คุณแน่ใจว่าต้องการลบงานนี้?')) return;
+    try {
+      const res = await fetch(`/api/assignments/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Delete failed');
+      setAssignments((prev) => prev.filter((a) => a.assignment_id !== id));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
-		const handleEdit = (assignment) => {
-		setEditingAssignment(assignment);
-		setEditOpen(true);
-		};
+  const handleEdit = (assignment) => {
+    setEditingAssignment(assignment);
+    setEditOpen(true);
+  };
 
-		const handleEditSave = (updated) => {
-		setAssignments((prev) =>
-			prev.map((a) => (a.assignment_id === updated.assignment_id ? updated : a))
-		);
-		};
+  const handleEditSave = (updated) => {
+    setAssignments((prev) =>
+      prev.map((a) => (a.assignment_id === updated.assignment_id ? updated : a))
+    );
+  };
 
   return (
     <div style={styles.page}>
@@ -327,8 +376,48 @@ function HomePage() {
                     </div>
                   </div>
 
+                  <div style={styles.searchBar}>
+                    <input
+                      type="text"
+                      placeholder="ค้นหางาน..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      style={styles.searchInput}
+                    />
+                  </div>
+
+                  <div style={styles.filterBar}>
+
+                    <select
+                      value={statusFilter}
+                      style={styles.filterSelect}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                    >
+                      <option value="all">ทุกสถานะ</option>
+                      <option value="not_started">ยังไม่เริ่ม</option>
+                      <option value="in_progress">กำลังทำ</option>
+                      <option value="completed">ส่งแล้ว</option>
+                    </select>
+
+                    <select
+                      value={courseFilter}
+                      style={styles.filterSelect}
+                      onChange={(e) => setCourseFilter(e.target.value)}
+                    >
+                      <option value="all">ทุกรายวิชา</option>
+
+                      {[...new Set(assignments.map(a => a.course_name))].map(course => (
+                        <option key={course} value={course}>
+                          {course}
+                        </option>
+                      ))}
+
+                    </select>
+
+                  </div>
+
                   <div style={styles.tableHead}>
-					<span>งาน</span>
+                    <span>งาน</span>
                     <span>รายวิชา</span>
                     <span>แพลตฟอร์ม</span>
                     <span>กำหนดส่ง</span>
@@ -349,9 +438,9 @@ function HomePage() {
                         badgeColor={pill.color}
                         badgeBg={pill.bg}
                         last={i === filteredTasks.length - 1}
-						isManual={!a.platform_source}
-						onEdit={() => handleEdit(a)}
-						onDelete={() => handleDelete(a.assignment_id)}
+                        isManual={!a.platform_source}
+                        onEdit={() => handleEdit(a)}
+                        onDelete={() => handleDelete(a.assignment_id)}
                       />
                     );
                   })}
@@ -413,12 +502,12 @@ function HomePage() {
           onClose={() => setAddOpen(false)}
           onCreated={(a) => setAssignments((prev) => [...prev, a])}
         />
-		<EditTaskModal
-			open={editOpen}
-			onClose={() => setEditOpen(false)}
-			assignment={editingAssignment}
-			onSave={handleEditSave}
-			/>
+        <EditTaskModal
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          assignment={editingAssignment}
+          onSave={handleEditSave}
+        />
       </div>
     </div>
   );
@@ -515,6 +604,60 @@ const styles = {
 
   tabs: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   tab: { fontSize: 12, padding: '5px 12px', borderRadius: R.pill, cursor: 'pointer' },
+
+  searchBar: {
+    marginBottom: 15,
+  },
+
+  searchInput: {
+    width: '100%',
+    padding: '10px 14px',
+    borderRadius: 8,
+    border: '1px solid #ddd',
+    fontSize: 14,
+  },
+
+ filterBar: {
+  display: "flex",
+  alignItems: "center",
+  gap: 16,
+  marginBottom: 18,
+},
+
+filterSelect: {
+  minWidth: 200,
+  height: 40,
+
+  padding: "0 14px",
+
+  borderRadius: 10,
+  border: `1px solid ${C.lineInput}`,
+
+  background: "#fff",
+  color: C.ink,
+
+  fontFamily: FONT,
+  fontSize: 13,
+  fontWeight: 500,
+
+  cursor: "pointer",
+  outline: "none",
+
+  transition: "border-color .2s ease, box-shadow .2s ease",
+
+  appearance: "none",
+  WebkitAppearance: "none",
+  MozAppearance: "none",
+
+  backgroundImage: `
+    linear-gradient(45deg, transparent 50%, ${C.muted} 50%),
+    linear-gradient(135deg, ${C.muted} 50%, transparent 50%)
+  `,
+  backgroundPosition:
+    "calc(100% - 18px) calc(50% - 2px), calc(100% - 12px) calc(50% - 2px)",
+  backgroundSize: "6px 6px, 6px 6px",
+  backgroundRepeat: "no-repeat",
+},
 
   tableHead: {
     display: 'grid',
