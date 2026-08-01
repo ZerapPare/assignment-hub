@@ -184,3 +184,39 @@ router.patch('/api/assignments/:id', requireAuth, async (req, res) => {
 });
 
 module.exports = router;
+
+// Delete a manually added task (UR08)
+router.delete('/api/assignments/:id', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(404).json({ error: 'not found' });
+
+  try {
+    // 1. Verify ownership and that it's manual
+    const [owned] = await pool.query(
+      `SELECT a.assignment_id FROM Assignment a
+       JOIN Course c ON a.course_id = c.course_id
+       WHERE a.assignment_id = ? AND c.student_id = ? AND c.platform_source IS NULL
+       LIMIT 1`,
+      [id, req.session.userId]
+    );
+    if (!owned.length) return res.status(404).json({ error: 'not found' });
+
+    // 2. Delete in transaction (no ON DELETE CASCADE)
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query('DELETE FROM Assignment_Detail WHERE assignment_id = ?', [id]);
+      await conn.query('DELETE FROM Assignment WHERE assignment_id = ?', [id]);
+      await conn.commit();
+      res.status(204).send(); // No content
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  } catch (err) {
+    console.error('[assignments] delete failed:', err.message);
+    res.status(503).json({ error: 'Database not ready', message: err.message });
+  }
+});

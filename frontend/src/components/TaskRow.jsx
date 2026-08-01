@@ -1,48 +1,109 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { C } from '../theme';
+import { PencilIcon, TrashIcon } from '../icons';
 
-export const GRID = '2fr 1fr 1fr 1fr';
+// 6 columns layout definition
+export const GRID = '1.5fr 1.5fr 1fr 1fr 1fr 0.6fr';
 
-const PALETTE = [
-  [C.blueMid, C.navy],
-  [C.pinkSoft, C.pink],
-  ['#8fd6a8', C.green],
-  ['#cbd5e1', '#94a3b8'],
-  ['#a5b4fc', '#4f46e5'],
-  ['#fcd34d', '#d97706'],
-];
-
-function gradientFor(seed) {
-  let hash = 0;
-  const s = seed || '';
-  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) | 0;
-  const [from, to] = PALETTE[Math.abs(hash) % PALETTE.length];
-  return `linear-gradient(135deg, ${from}, ${to})`;
+/**
+ * Matching Header Component
+ * Use this in your parent component above your list of TaskRows
+ */
+export function TaskHeader() {
+  return (
+    <div style={styles.headerRow}>
+      <span style={styles.headerCell}>ชื่องาน</span>
+      <span style={styles.headerCell}>รายวิชา</span>
+      <span style={styles.headerCell}>แพลตฟอร์ม</span>
+      <span style={styles.headerCell}>กำหนดส่ง</span>
+      <span style={styles.headerCell}>สถานะ</span>
+      <span style={{ ...styles.headerCell, textAlign: 'right' }} />
+    </div>
+  );
 }
 
-function TaskRow({ title, course, platform, due, badgeText, badgeColor, badgeBg, last }) {
+/**
+ * Action Button Component (Handles hover in React inline styles)
+ */
+function ActionButton({ onClick, title, children }) {
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      style={{
+        ...styles.actionBtn,
+        background: isHovered ? C.lineSoft : 'transparent',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TaskRow({
+  title,
+  course,
+  platform,
+  due,
+  badgeText,
+  badgeColor,
+  badgeBg,
+  last,
+  isManual = false,
+  onEdit,
+  onDelete,
+}) {
   return (
     <div
       style={{
         ...styles.row,
-        borderBottom: last ? 'none' : `1px solid ${C.pageBg}`,
+        borderBottom: last ? 'none' : `1px solid ${C.lineSoft}`,
       }}
     >
-      <div style={styles.subject}>
-        <div style={{ ...styles.avatar, background: gradientFor(course || title) }} />
-        <div style={{ minWidth: 0 }}>
-          <div style={styles.title}>{title}</div>
-          {course && <div style={styles.course}>{course}</div>}
-        </div>
-      </div>
-      <span style={styles.cell}>{platform}</span>
+      <span style={styles.cellTitle} title={title}>{title}</span>
+      <span style={styles.cell} title={course}>{course}</span>
+      <span style={styles.cell} title={platform}>{platform}</span>
       <span style={styles.cell}>{due}</span>
-      <span style={{ ...styles.badge, color: badgeColor, background: badgeBg }}>{badgeText}</span>
+      <span style={styles.cell}>
+        <span style={{ ...styles.badge, background: badgeBg, color: badgeColor }}>
+          {badgeText}
+        </span>
+      </span>
+      <span style={{ ...styles.cell, textAlign: 'right' }}>
+        {isManual && (
+          <span style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <ActionButton onClick={onEdit} title="แก้ไข">
+              <PencilIcon size={14} color={C.muted} />
+            </ActionButton>
+            <ActionButton onClick={onDelete} title="ลบ">
+              <TrashIcon size={14} color={C.pinkDark} />
+            </ActionButton>
+          </span>
+        )}
+      </span>
     </div>
   );
 }
 
 const styles = {
+  headerRow: {
+    display: 'grid',
+    gridTemplateColumns: GRID,
+    alignItems: 'center',
+    gap: 8,
+    padding: '12px 4px',
+    borderBottom: `1px solid ${C.lineSoft}`,
+  },
+  headerCell: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: C.muted,
+  },
   row: {
     display: 'grid',
     gridTemplateColumns: GRID,
@@ -50,19 +111,10 @@ const styles = {
     gap: 8,
     padding: '12px 4px',
   },
-  subject: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 },
-  avatar: { width: 30, height: 30, borderRadius: '50%', flexShrink: 0 },
-  title: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: C.ink,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  course: {
-    fontSize: 11,
-    color: C.mutedLight,
+  cellTitle: {
+    fontSize: 12.5,
+    fontWeight: 500,
+    color: C.text || '#2D3748',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -75,12 +127,22 @@ const styles = {
     whiteSpace: 'nowrap',
   },
   badge: {
+    display: 'inline-block',
     fontSize: 11.5,
     fontWeight: 600,
     padding: '4px 10px',
     borderRadius: 6,
-    width: 'fit-content',
     whiteSpace: 'nowrap',
+  },
+  actionBtn: {
+    border: 'none',
+    cursor: 'pointer',
+    padding: 4,
+    borderRadius: 4,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'background 0.2s',
   },
 };
 
