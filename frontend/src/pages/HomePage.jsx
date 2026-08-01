@@ -9,6 +9,7 @@ import MiniCalendar from '../components/MiniCalendar';
 import DeadlineList from '../components/DeadlineList';
 import UrgentChecklist from '../components/UrgentChecklist';
 import AddTaskModal from '../components/AddTaskModal';
+import EditTaskModal from '../components/EditTaskModal';
 import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } from '../icons';
 import { C, FONT, R, SHADOW, WEEKDAYS, TH_MONTHS_SHORT } from '../theme';
 
@@ -191,6 +192,31 @@ function HomePage() {
     return urgent ? URGENT_PILL : STATUS[a.status];
   };
 
+	const [editOpen, setEditOpen] = useState(false);
+	const [editingAssignment, setEditingAssignment] = useState(null);
+
+	const handleDelete = async (id) => {
+		if (!window.confirm('คุณแน่ใจว่าต้องการลบงานนี้?')) return;
+		try {
+			const res = await fetch(`/api/assignments/${id}`, { method: 'DELETE' });
+			if (!res.ok) throw new Error('Delete failed');
+			setAssignments((prev) => prev.filter((a) => a.assignment_id !== id));
+		} catch (err) {
+			setError(err.message);
+		}
+		};
+
+		const handleEdit = (assignment) => {
+		setEditingAssignment(assignment);
+		setEditOpen(true);
+		};
+
+		const handleEditSave = (updated) => {
+		setAssignments((prev) =>
+			prev.map((a) => (a.assignment_id === updated.assignment_id ? updated : a))
+		);
+		};
+
   return (
     <div style={styles.page}>
       <Sidebar active="home" student={student} onLogout={handleLogout} />
@@ -302,6 +328,7 @@ function HomePage() {
                   </div>
 
                   <div style={styles.tableHead}>
+					<span>งาน</span>
                     <span>รายวิชา</span>
                     <span>แพลตฟอร์ม</span>
                     <span>กำหนดส่ง</span>
@@ -322,6 +349,9 @@ function HomePage() {
                         badgeColor={pill.color}
                         badgeBg={pill.bg}
                         last={i === filteredTasks.length - 1}
+						isManual={!a.platform_source}
+						onEdit={() => handleEdit(a)}
+						onDelete={() => handleDelete(a.assignment_id)}
                       />
                     );
                   })}
@@ -383,6 +413,12 @@ function HomePage() {
           onClose={() => setAddOpen(false)}
           onCreated={(a) => setAssignments((prev) => [...prev, a])}
         />
+		<EditTaskModal
+			open={editOpen}
+			onClose={() => setEditOpen(false)}
+			assignment={editingAssignment}
+			onSave={handleEditSave}
+			/>
       </div>
     </div>
   );
