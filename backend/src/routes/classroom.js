@@ -110,19 +110,25 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
             'UPDATE Assignment SET title = ?, origin_link = ? WHERE assignment_id = ?',
             [work.title, work.alternateLink || null, assignmentId]
           );
+          // Classroom owns the work's own data, so these always refresh (UR05).
+          await pool.query(
+            'UPDATE Assignment_Detail SET description = ?, due_date = ? WHERE assignment_id = ?',
+            [work.description || null, dueDateTime, assignmentId]
+          );
+          // Status is the student's own progress marker (A3.3), so Google only
+          // gets to seed it. status_updated_at goes non-NULL the first time the
+          // student picks a status by hand, and from then on the sync leaves it
+          // alone — otherwise every sync would undo their choice.
           if (isFinished) {
             await pool.query(
-              'UPDATE Assignment_Detail SET description = ?, due_date = ?, status = ? WHERE assignment_id = ?',
-              [work.description || null, dueDateTime, 'completed', assignmentId]
-            );
-          } else {
-            await pool.query(
-              'UPDATE Assignment_Detail SET description = ?, due_date = ? WHERE assignment_id = ?',
-              [work.description || null, dueDateTime, assignmentId]
+              'UPDATE Assignment_Detail SET status = ? WHERE assignment_id = ? AND status_updated_at IS NULL',
+              ['submitted', assignmentId]
             );
           }
         } else {
-          const initialStatus = isFinished ? 'completed' : 'not_started';
+          // TURNED_IN / RETURNED both mean the student handed it in, which is
+          // 'submitted' — not 'completed'. Only the student sets 'completed'.
+          const initialStatus = isFinished ? 'submitted' : 'not_started';
 
           const [ins] = await pool.query(
             `INSERT INTO Assignment (external_assignment_id, title, origin_link, course_id)

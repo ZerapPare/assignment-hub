@@ -7,6 +7,12 @@ const router = express.Router();
 
 const TASK_TYPES = ['homework', 'project', 'quiz', 'exam', 'reading', 'other'];
 
+// The four statuses a student can pick (UC-5). 'submitted' means handed in,
+// 'completed' means the student considers the work finished — only they set it.
+// classroom.js writes 'submitted' / 'not_started' from Google's submission
+// state; keep the two lists in step if this one ever changes.
+const TASK_STATUSES = ['not_started', 'in_progress', 'submitted', 'completed'];
+
 // Where manually added work goes when the student doesn't name a subject.
 const MANUAL_COURSE_NAME = 'งานที่เพิ่มเอง';
 
@@ -22,6 +28,7 @@ const ASSIGNMENT_SELECT = `
          d.description,
          d.due_date,
          d.status,
+         d.status_updated_at,
          d.priority_score
   FROM Assignment a
   JOIN Course c                 ON a.course_id = c.course_id
@@ -183,7 +190,50 @@ router.patch('/api/assignments/:id', requireAuth, async (req, res) => {
   }
 });
 
-module.exports = router;
+// Change a task's status (UC-5).
+//
+// Deliberately a separate route from PATCH /:id rather than another field on
+// it: that one is restricted to manual work because UR05 says a task's own
+// data must never diverge from Classroom/Teams. Status is different — it is
+// the student's private progress marker (A3.3), so it is allowed on synced
+// coursework too, and the ownership check below drops the platform_source
+// predicate on purpose.
+router.patch('/api/assignments/:id/status', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(404).json({ error: 'not found' });
+
+  const status = req.body?.status ? String(req.body.status) : null;
+  if (!status || !TASK_STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'สถานะไม่ถูกต้อง' });
+  }
+
+  try {
+    const [owned] = await pool.query(
+      `SELECT a.assignment_id FROM Assignment a
+       JOIN Course c ON a.course_id = c.course_id
+       WHERE a.assignment_id = ? AND c.student_id = ?
+       LIMIT 1`,
+      [id, req.session.userId]
+    );
+    if (!owned.length) return res.status(404).json({ error: 'not found' });
+
+    // Upsert rather than UPDATE: the list query LEFT JOINs Assignment_Detail,
+    // so a row without one is possible and a plain UPDATE would touch nothing
+    // and silently report status: null back.
+    await pool.query(
+      `INSERT INTO Assignment_Detail (assignment_id, status, status_updated_at)
+       VALUES (?, ?, NOW())
+       ON DUPLICATE KEY UPDATE status = VALUES(status), status_updated_at = NOW()`,
+      [id, status]
+    );
+
+    const [rows] = await pool.query(`${ASSIGNMENT_SELECT} WHERE a.assignment_id = ?`, [id]);
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('[assignments] status update failed:', err.message);
+    res.status(503).json({ error: 'Database not ready', message: err.message });
+  }
+});
 
 // Delete a manually added task (UR08)
 router.delete('/api/assignments/:id', requireAuth, async (req, res) => {
@@ -220,3 +270,5 @@ router.delete('/api/assignments/:id', requireAuth, async (req, res) => {
     res.status(503).json({ error: 'Database not ready', message: err.message });
   }
 });
+
+module.exports = router;

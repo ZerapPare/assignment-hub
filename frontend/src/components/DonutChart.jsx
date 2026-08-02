@@ -4,9 +4,10 @@ import { C } from '../theme';
 const R = 15.9;
 const TRACK = '#eef2ff';
 
-function DonutChart({ completed = 0, inProgress = 0, notStarted = 0, total = 0 }) {
+function DonutChart({ completed = 0, submitted = 0, inProgress = 0, notStarted = 0, total = 0 }) {
   const segments = [
-    { key: 'completed', label: 'ส่งแล้ว', value: completed, color: C.navy },
+    { key: 'completed', label: 'เสร็จสมบูรณ์', value: completed, color: C.navy },
+    { key: 'submitted', label: 'ส่งแล้ว', value: submitted, color: C.amber },
     { key: 'in_progress', label: 'กำลังทำ', value: inProgress, color: C.pink },
     { key: 'not_started', label: 'ยังไม่เริ่ม', value: notStarted, color: C.blueMid },
   ];
@@ -69,10 +70,11 @@ const styles = {
   },
   legend: {
     display: 'flex',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     gap: 6,
     marginTop: 10,
-    fontSize: 11,
+    fontSize: 10,
     color: C.muted,
   },
   legendItem: { display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' },

@@ -84,7 +84,12 @@ CREATE TABLE Assignment_Detail (
     assignment_id   INT PRIMARY KEY,
     description     TEXT,
     due_date        DATETIME,
-    status          VARCHAR(50),        -- derived attribute in diagram
+    -- 'not_started' | 'in_progress' | 'submitted' | 'completed'. The student
+    -- owns this (UC-5); Classroom only seeds it while status_updated_at is NULL.
+    status          VARCHAR(50),
+    -- Set only when the student changes status by hand. NULL therefore means
+    -- "the platform still owns this row's status" — see backend/src/routes/classroom.js.
+    status_updated_at DATETIME,
     priority_score  DECIMAL(5,2),
     CONSTRAINT fk_detail_assignment
         FOREIGN KEY (assignment_id) REFERENCES Assignment(assignment_id)

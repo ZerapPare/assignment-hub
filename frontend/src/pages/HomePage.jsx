@@ -20,14 +20,24 @@ const fmtDate = (d) => `${d.getDate()} ${TH_MONTHS_SHORT[d.getMonth()]}`;
 const fmtTime = (d) =>
   `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
-const normalizeStatus = (s) => (s === 'completed' || s === 'in_progress' ? s : 'not_started');
-
 const STATUS = {
   not_started: { label: 'ยังไม่เริ่ม', color: C.muted, bg: C.lineSoft },
   in_progress: { label: 'กำลังทำ', color: C.blueText, bg: C.blueBg },
-  completed: { label: 'ส่งแล้ว', color: C.green, bg: C.greenBg },
+  submitted: { label: 'ส่งแล้ว', color: C.amber, bg: C.amberBg },
+  completed: { label: 'เสร็จสมบูรณ์', color: C.green, bg: C.greenBg },
 };
-const URGENT_PILL = { label: 'ด่วน', color: C.pinkDark, bg: C.pinkBg };
+
+// Anything the backend hasn't heard of falls back rather than rendering blank.
+const normalizeStatus = (s) => (s in STATUS ? s : 'not_started');
+
+// The order the student picks from, and the order the filter lists.
+const STATUS_OPTIONS = Object.entries(STATUS).map(([value, s]) => ({ value, label: s.label }));
+
+// UR26: neither a submitted nor a completed task should still be nagging the
+// student, so both drop out of the urgent surfaces.
+const DONE = ['submitted', 'completed'];
+const isDone = (a) => DONE.includes(a.status);
+
 
 const FILTERS = [
   { key: 'all', label: 'ทั้งหมด', match: () => true },
@@ -130,15 +140,23 @@ function HomePage() {
 
     const total = withDate.length;
     const inProgress = withDate.filter((a) => a.status === 'in_progress').length;
+    const submitted = withDate.filter((a) => a.status === 'submitted').length;
     const completed = withDate.filter((a) => a.status === 'completed').length;
     const notStarted = withDate.filter((a) => a.status === 'not_started').length;
 
-    const notDone = withDate.filter((a) => a.status !== 'completed' && a.due);
+    // UR15: overall completion, where handed-in work already counts (UR26
+    // groups submitted with completed).
+    const progressPct = total ? Math.round(((submitted + completed) / total) * 100) : 0;
+
+    const notDone = withDate.filter((a) => !isDone(a) && a.due);
     const urgentCount = notDone.filter(
       (a) => a.due - now <= URGENT_H * HOUR && a.due - now >= 0
     ).length;
     const urgentList = [...notDone].sort((a, b) => a.due - b.due).slice(0, 3);
 
+    // Deliberately unfiltered by status: this one is a checklist, so finished
+    // work stays visible with a tick and feeds the "เหลือ X จาก Y" counter.
+    // UR26 is about not *notifying* — that's what notDone/urgentCount cover.
     const checklist = withDate
       .filter((a) => a.due && a.due - now >= 0 && a.due - now <= URGENT_H * HOUR)
       .sort((a, b) => a.due - b.due)
@@ -163,8 +181,10 @@ function HomePage() {
       withDate,
       total,
       inProgress,
+      submitted,
       completed,
       notStarted,
+      progressPct,
       urgentCount,
       urgentList,
       checklist,
@@ -232,14 +252,8 @@ function HomePage() {
 
     });
 
-  const pillFor = (a) => {
-    const urgent =
-      a.status !== 'completed' &&
-      a.due &&
-      a.due - view.now >= 0 &&
-      a.due - view.now <= URGENT_H * HOUR;
-    return urgent ? URGENT_PILL : STATUS[a.status];
-  };
+  const isUrgent = (a) =>
+    !isDone(a) && a.due && a.due - view.now >= 0 && a.due - view.now <= URGENT_H * HOUR;
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState(null);
@@ -264,6 +278,46 @@ function HomePage() {
     setAssignments((prev) =>
       prev.map((a) => (a.assignment_id === updated.assignment_id ? updated : a))
     );
+  };
+
+  // Per-row rather than the page-level `error`: that one blanks the whole
+  // dashboard (the body renders only when !error), and UC-5 ext 4a wants the
+  // failure shown while everything else — including the old status — stays put.
+  const [statusPending, setStatusPending] = useState({});
+  const [statusErrors, setStatusErrors] = useState({});
+
+  const handleStatusChange = async (id, next) => {
+    setStatusErrors((prev) => {
+      const { [id]: _dropped, ...rest } = prev;
+      return rest;
+    });
+    setStatusPending((prev) => ({ ...prev, [id]: true }));
+    try {
+      const res = await fetch(`/api/assignments/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next }),
+      });
+      if (res.status === 401) {
+        navigate('/login');
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'อัปเดตสถานะไม่สำเร็จ');
+      // Nothing else to do for UC-5 step 5: `view` is memoised on `assignments`,
+      // so the stat cards, donut, progress bar and urgent lists all follow.
+      setAssignments((prev) =>
+        prev.map((a) => (a.assignment_id === data.assignment_id ? data : a))
+      );
+    } catch (err) {
+      // `assignments` is untouched, so the select snaps back on its own.
+      setStatusErrors((prev) => ({ ...prev, [id]: err.message }));
+    } finally {
+      setStatusPending((prev) => {
+        const { [id]: _dropped, ...rest } = prev;
+        return rest;
+      });
+    }
   };
 
   return (
@@ -319,8 +373,8 @@ function HomePage() {
                     icon={<SpinnerIcon size={16} color={C.pink} />}
                   />
                   <StatCard
-                    label="ส่งแล้ว"
-                    value={view.completed}
+                    label="ส่ง/เสร็จ"
+                    value={view.submitted + view.completed}
                     iconBg={C.blueBg}
                     icon={<CheckCircleIcon size={16} color="#3b82f6" />}
                   />
@@ -348,10 +402,18 @@ function HomePage() {
                     </div>
                     <DonutChart
                       completed={view.completed}
+                      submitted={view.submitted}
                       inProgress={view.inProgress}
                       notStarted={view.notStarted}
                       total={view.total}
                     />
+
+                    <div style={styles.progressWrap}>
+                      <div style={styles.progressTrack}>
+                        <div style={{ ...styles.progressFill, width: `${view.progressPct}%` }} />
+                      </div>
+                      <span style={styles.progressLabel}>{view.progressPct}% สำเร็จ</span>
+                    </div>
                   </div>
                 </div>
 
@@ -394,9 +456,11 @@ function HomePage() {
                       onChange={(e) => setStatusFilter(e.target.value)}
                     >
                       <option value="all">ทุกสถานะ</option>
-                      <option value="not_started">ยังไม่เริ่ม</option>
-                      <option value="in_progress">กำลังทำ</option>
-                      <option value="completed">ส่งแล้ว</option>
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
                     </select>
 
                     <select
@@ -426,7 +490,7 @@ function HomePage() {
 
                   {filteredTasks.length === 0 && <p style={styles.muted}>ไม่มีงานในหมวดนี้</p>}
                   {filteredTasks.map((a, i) => {
-                    const pill = pillFor(a);
+                    const pill = STATUS[a.status];
                     return (
                       <TaskRow
                         key={a.assignment_id}
@@ -434,6 +498,12 @@ function HomePage() {
                         course={a.course_name}
                         platform={a.platform_source || 'เพิ่มเอง'}
                         due={a.due ? fmtDate(a.due) : '—'}
+                        status={a.status}
+                        statusOptions={STATUS_OPTIONS}
+                        onStatusChange={(next) => handleStatusChange(a.assignment_id, next)}
+                        statusPending={!!statusPending[a.assignment_id]}
+                        statusError={statusErrors[a.assignment_id] || null}
+                        urgent={isUrgent(a)}
                         badgeText={pill.label}
                         badgeColor={pill.color}
                         badgeBg={pill.bg}
@@ -479,7 +549,7 @@ function HomePage() {
                     <span style={styles.cardTitle}>งานด่วน</span>
                     {view.checklist.length > 0 && (
                       <span style={styles.badgeFaint}>
-                        เหลือ {view.checklist.filter((a) => a.status !== 'completed').length} จาก{' '}
+                        เหลือ {view.checklist.filter((a) => !isDone(a)).length} จาก{' '}
                         {view.checklist.length}
                       </span>
                     )}
@@ -488,7 +558,7 @@ function HomePage() {
                     items={view.checklist.map((a) => ({
                       id: a.assignment_id,
                       title: a.title,
-                      done: a.status === 'completed',
+                      done: isDone(a),
                     }))}
                   />
                 </div>
@@ -601,6 +671,28 @@ const styles = {
     whiteSpace: 'nowrap',
   },
   badgeFaint: { fontSize: 11.5, color: C.mutedLight, whiteSpace: 'nowrap' },
+
+  // UR15 — overall completion, under the donut it summarises.
+  progressWrap: { marginTop: 12 },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    background: C.lineSoft,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+    background: C.navy,
+    transition: 'width .3s ease',
+  },
+  progressLabel: {
+    display: 'block',
+    marginTop: 6,
+    fontSize: 11,
+    color: C.muted,
+    textAlign: 'right',
+  },
 
   tabs: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   tab: { fontSize: 12, padding: '5px 12px', borderRadius: R.pill, cursor: 'pointer' },
