@@ -17,6 +17,11 @@ export const C = {
   green: '#16a34a',
   greenBg: '#dcfce7',
 
+  // 'ส่งแล้ว' (submitted). Pink is already the urgent pill and blue is
+  // 'กำลังทำ', so the fourth status needed a colour of its own.
+  amber: '#d97706',
+  amberBg: '#fef3c7',
+
   pageBg: '#f5f6fa',
   loginBg: '#f7f8fa',
   card: '#ffffff',
