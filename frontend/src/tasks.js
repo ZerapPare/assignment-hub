@@ -34,12 +34,6 @@ export const STATUS_OPTIONS = Object.entries(STATUS).map(([value, s]) => ({
 export const DONE = ['submitted', 'completed'];
 export const isDone = (a) => DONE.includes(a.status);
 
-// Handing work in is a fact, not a preference: once a task reads 'ส่งแล้ว' its
-// status is final and the control locks. The backend refuses the same move, so
-// this only decides whether the student is offered a dead end.
-export const isStatusLocked = (a) => a.status === 'submitted';
-export const STATUS_LOCKED_HINT = 'งานที่ส่งแล้วเปลี่ยนสถานะไม่ได้';
-
 export const PLATFORM_FILTERS = [
   { key: 'all', label: 'ทั้งหมด', match: () => true },
   { key: 'classroom', label: 'Classroom', match: (a) => a.platform_source === 'Google Classroom' },

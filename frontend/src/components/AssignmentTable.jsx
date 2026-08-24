@@ -1,15 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import TaskRow, { GRID } from './TaskRow';
 import { C, FONT, R } from '../theme';
-import {
-  PLATFORM_FILTERS,
-  STATUS,
-  STATUS_OPTIONS,
-  STATUS_LOCKED_HINT,
-  fmtDate,
-  isStatusLocked,
-  isUrgent,
-} from '../tasks';
+import { PLATFORM_FILTERS, STATUS, STATUS_OPTIONS, fmtDate, isUrgent } from '../tasks';
 
 // The task list, with its own search and filter state — nothing outside cares
 // which tab is open, so it stays here rather than in the page.
@@ -137,8 +129,6 @@ function AssignmentTable({
             onStatusChange={(next) => onStatusChange?.(a.assignment_id, next)}
             statusPending={!!statusPending[a.assignment_id]}
             statusError={statusErrors[a.assignment_id] || null}
-            statusLocked={isStatusLocked(a)}
-            statusLockedHint={STATUS_LOCKED_HINT}
             urgent={isUrgent(a, now)}
             badgeText={pill.label}
             badgeColor={pill.color}
