@@ -100,7 +100,7 @@ db-1        | ... ready for connections
 | Path | หน้า |
 |---|---|
 | `/login` | หน้าเข้าสู่ระบบ (Google / Microsoft) |
-| `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ตารางงานทั้งหมด, ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน |
+| `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ตารางงานทั้งหมด (ค้นหา + กรองตามสถานะ/วิชา/แหล่งที่มา, เปลี่ยนสถานะ, แก้ไข/ลบงานที่เพิ่มเอง), ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน |
 | `/settings` | ตั้งค่า — โปรไฟล์, แก้รหัสนักศึกษา, สถานะเชื่อมต่อ Google/Microsoft |
 
 ทุกตัวเลขบนหน้า dashboard คำนวณจาก response ของ `/api/assignments` จริง ไม่มีข้อมูลตัวอย่างฝังในโค้ด
@@ -110,9 +110,25 @@ db-1        | ... ready for connections
 state ตัวเดียวกับที่ `useMemo` อ่าน ทุกการ์ด กราฟ จุดบนปฏิทิน และรายการจึงอัปเดตพร้อมกันโดยไม่ต้อง refetch
 งานที่เพิ่มเองเก็บใต้ `Course` ที่ `platform_source IS NULL` ซึ่งตรงกับแท็บ `เพิ่มเอง`
 
+**ปุ่มแก้ไข / ลบ** ในแถวของตาราง ขึ้นเฉพาะงานที่เพิ่มเอง — เปิด `EditTaskModal` (`PATCH /api/assignments/:id`)
+หรือลบทิ้ง (`DELETE /api/assignments/:id`) งานที่ซิงก์มาจาก Classroom แก้/ลบไม่ได้ ให้แพลตฟอร์มเป็นเจ้าของข้อมูล
+
+### สถานะงาน (UC-5)
+
+ช่องสถานะในตารางเป็น dropdown เลือกได้ 4 ค่า — `ยังไม่เริ่ม` · `กำลังทำ` · `ส่งแล้ว` · `เสร็จสมบูรณ์`
+เลือกแล้วยิง `PATCH /api/assignments/:id/status` ทันที **ใช้ได้กับงานที่ซิงก์มาด้วย** เพราะสถานะถือเป็น
+ความคืบหน้าส่วนตัวของนักศึกษา ไม่ใช่ข้อมูลของงานที่แพลตฟอร์มเป็นเจ้าของ
+
+ครั้งแรกที่ตั้งสถานะเอง คอลัมน์ `Assignment_Detail.status_updated_at` จะเปลี่ยนจาก `NULL` เป็นเวลาที่กด
+และตั้งแต่นั้น **ซิงก์จะไม่ทับสถานะนั้นอีก** (ก่อนหน้านั้น Google เป็นคนตั้งให้ — งานที่ `TURNED_IN`/`RETURNED`
+มาเป็น `ส่งแล้ว`) งานที่ `ส่งแล้ว` หรือ `เสร็จสมบูรณ์` จะหลุดออกจากการ์ด "งานด่วน" และ checklist 48 ชม.
+
+> ถ้ายิงไม่สำเร็จ error จะขึ้นในแถวนั้นแถวเดียว สถานะเดิมค้างไว้ ส่วนที่เหลือของ dashboard ไม่หาย
+
 ส่วนที่ยังไม่พร้อมใช้:
 
-- **checklist "งานด่วน"** — แสดงอย่างเดียว กดติ๊กไม่ได้ (`PATCH /api/assignments/:id` แก้ได้เฉพาะงานที่เพิ่มเอง ยังไม่มี UI เรียก)
+- **checklist "งานด่วน"** — แสดงอย่างเดียว กดติ๊กในนั้นไม่ได้ (เปลี่ยนสถานะได้จาก dropdown ในตารางแทน)
+- **ช่อง "วิชา" ใน modal แก้ไข** — แก้แล้วไม่มีผล `PATCH /api/assignments/:id` ยังไม่รับ `course_name`
 - **เมนู sidebar** `การบ้านทั้งหมด` / `สถิติ` — ยังไม่มี route รองรับ
 
 ## Database
@@ -124,8 +140,8 @@ Database ชื่อ `assignment_hub` ถูกสร้างอัตโน�
 | `University` | มหาวิทยาลัย + โดเมนอีเมล |
 | `Student` | ผู้ใช้ + token สำหรับ login (Google/Microsoft) |
 | `Course` | รายวิชา + แพลตฟอร์มต้นทาง (Classroom/Teams) |
-| `Assignment` | งาน: ชื่อ, ลิงก์ต้นทาง, วิชา |
-| `Assignment_Detail` | รายละเอียด: คำอธิบาย, deadline, สถานะ, priority |
+| `Assignment` | งาน: ชื่อ, ประเภท (`task_type`), ลิงก์ต้นทาง, วิชา |
+| `Assignment_Detail` | รายละเอียด: คำอธิบาย, deadline, สถานะ, `status_updated_at`, priority |
 | `Schedule` | ช่วงเวลาที่วางแผนทำ + เวลาที่คาดว่าจะใช้ |
 | `Notification` | การแจ้งเตือนของแต่ละงาน |
 
@@ -133,6 +149,29 @@ Database ชื่อ `assignment_hub` ถูกสร้างอัตโน�
 
 ```bash
 docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES; SELECT title, status FROM Assignment a JOIN Assignment_Detail d USING(assignment_id);"
+```
+
+### Migrations
+
+`init.sql` รันครั้งเดียวตอนสร้าง database ใหม่เท่านั้น **database ที่มีอยู่แล้วจะไม่ได้ schema ใหม่ตามไปด้วย**
+ไฟล์ใน `migrations/` คือ `ALTER` ที่เทียบเท่ากัน รันซ้ำได้ไม่เสียหายถ้า database สร้างจาก `init.sql` ล่าสุดอยู่แล้ว
+(จะ error ว่ามีคอลัมน์/index อยู่แล้ว แล้วผ่านไป)
+
+```bash
+./migrate.sh        # macOS / Linux / Git Bash
+migrate.bat         # Windows cmd
+```
+
+| ไฟล์ | เพิ่มอะไร |
+|---|---|
+| `001_identity.sql` | unique `University.email_domain` + unique `Student (student_id, university_id)` |
+| `002_task_type.sql` | `Assignment.task_type` |
+| `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` — **อย่า backfill** ค่านี้ `NULL` แปลว่า "นักศึกษายังไม่เคยตั้งสถานะเอง" ถ้าใส่ค่าให้ทุกแถว ซิงก์จะหยุดอัปเดตสถานะจาก Classroom ทั้งหมด |
+
+เช็คว่าลงครบ:
+
+```bash
+docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assignment; DESCRIBE Assignment_Detail;"
 ```
 
 ## API (backend)
@@ -147,11 +186,23 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES; SE
 | POST | `/api/auth/logout` | — | ออกจากระบบ (ลบ session) |
 | GET | `/api/assignments` | ต้อง | งาน**ของผู้ใช้ที่ login อยู่** (JOIN course + detail) |
 | POST | `/api/assignments` | ต้อง | เพิ่มงานเอง คืน `201` พร้อมแถวที่สร้าง |
-| PATCH | `/api/assignments/:id` | ต้อง | แก้งานที่เพิ่มเอง (งานที่ซิงก์มาแก้ไม่ได้) |
+| PATCH | `/api/assignments/:id` | ต้อง | แก้งานที่เพิ่มเอง (งานที่ซิงก์มาแก้ไม่ได้ — คืน `404`) |
+| PATCH | `/api/assignments/:id/status` | ต้อง | เปลี่ยนสถานะ — **ใช้ได้กับงานที่ซิงก์มาด้วย** |
+| DELETE | `/api/assignments/:id` | ต้อง | ลบงานที่เพิ่มเอง คืน `204` (งานที่ซิงก์มาลบไม่ได้ — คืน `404`) |
 | POST | `/api/classroom/sync` | ต้อง | ดึงงานจาก Google Classroom มาลง DB |
 
 `ต้อง` = ต้องมี session ไม่งั้นได้ `401` — และทุก query ผูกกับ `student_id` จาก session
 ไม่ได้รับ id มาจาก client ผู้ใช้จึงเห็นเฉพาะข้อมูลของตัวเอง
+
+`POST /api/assignments` รับ `{ title, task_type, course_name, description, due_date }` บังคับแค่ `title`
+`task_type` เป็นหนึ่งใน `homework | project | quiz | exam | reading | other` ไม่ใส่ `course_name` จะไปอยู่ใต้วิชา `งานที่เพิ่มเอง`
+`PATCH /api/assignments/:id` รับชุดย่อยของ `title` · `task_type` · `description` · `due_date` (ยังไม่รับ `course_name`)
+
+**ทำไม status แยกเป็นอีก route:** `PATCH /:id` จำกัดไว้เฉพาะงานที่เพิ่มเอง เพราะข้อมูลของงานที่ซิงก์มา
+ต้องไม่ต่างจากต้นทาง (UR05) แต่ *สถานะ* เป็นของนักศึกษาเอง (A3.3) จึงแก้ได้ทุกงาน
+`PATCH /:id/status` รับ `{ "status": "not_started" | "in_progress" | "submitted" | "completed" }`
+แล้วเขียนแบบ upsert (แถวที่ยังไม่มี `Assignment_Detail` ก็ตั้งสถานะได้) พร้อมประทับ `status_updated_at`
+ซึ่งเป็นตัวบอกให้ซิงก์รอบต่อไป **ไม่ต้องไปยุ่งกับสถานะแถวนั้นอีก**
 
 `/api/classroom/sync` รับ body `{ "cutoffDate": "YYYY-MM-DD" | null }` (เอาเฉพาะงานที่กำหนดส่งตั้งแต่วันนั้น
 งานเก่ากว่านั้นที่เคยซิงก์ไว้จะถูกลบ) แล้วคืน `{ ok, coursesSynced, assignmentsSynced, deletedCount, skippedCourses }`
@@ -175,6 +226,8 @@ assignment-hub/
 ├── docker-compose.yml   # 3 services: frontend + backend + db
 ├── .env.local           # secret OAuth (git-ignored — สร้างเอง)
 ├── init.sql             # schema เปล่า ไม่มีข้อมูลตัวอย่าง (รันครั้งแรก)
+├── migrations/          # ALTER สำหรับ database ที่สร้างไปแล้ว (001–003)
+├── migrate.sh           # รัน migration ทั้งหมดเรียงตามลำดับ (มี .bat สำหรับ Windows)
 ├── backend/             # Express API + mysql2 + OAuth + Classroom sync
 │   ├── server.js        # entry บาง ๆ — ตั้ง session แล้ว mount router
 │   └── src/
@@ -182,6 +235,7 @@ assignment-hub/
 │       ├── db.js        # mysql2 pool ตัวเดียวที่ทุก route ใช้ร่วมกัน
 │       ├── routes/      # health, auth, me, assignments, classroom
 │       ├── services/    # classroomSync, identity, oauthSession
+│       ├── utils/       # dueDate — แปลง datetime-local เป็น DATETIME ตามเวลาที่ผู้ใช้พิมพ์
 │       └── middleware/  # requireAuth
 └── frontend/            # React + Vite + react-router
     └── src/
@@ -191,7 +245,7 @@ assignment-hub/
         ├── pages/           # LoginPage, HomePage, SettingsPage
         ├── components/      # Sidebar, StatCard, TaskRow, BarChart, DonutChart,
         │                    # MiniCalendar, DeadlineList, UrgentChecklist,
-        │                    # AddTaskModal, ProviderButton, BrandMark
+        │                    # AddTaskModal, EditTaskModal, ProviderButton, BrandMark
         └── icons/           # Google/Microsoft SVG + ไอคอน UI (index.jsx)
 ```
 
@@ -286,6 +340,7 @@ Vite HMR กับ `node --watch` โหลดใหม่ให้เอง แ
 | `docker compose down -v` | หยุด + ลบข้อมูล DB (ใช้เมื่อแก้ `init.sql`) — **ลบ `caddy_data` ด้วย** ระวังบนเซิร์ฟเวอร์ |
 | `docker compose rm -fsv <service>` | ลบ service + anonymous volume (ใช้ตอนเพิ่ม npm package) |
 | `docker compose logs -f backend` | ดู log backend |
+| `./migrate.sh` · `migrate.bat` | รัน migration ทั้งหมดกับ database ที่มีอยู่แล้ว |
 
 > `init.sql` รันเฉพาะตอนสร้าง database ครั้งแรก ถ้าแก้ไฟล์แล้ว table ไม่เปลี่ยน ให้ `docker compose down -v` ก่อนแล้ว `up` ใหม่
 > — แต่บนเซิร์ฟเวอร์ที่มี HTTPS แล้ว ให้ลบเฉพาะ db ด้วย `docker compose rm -fsv db` แทน ไม่งั้น cert หายไปด้วย
@@ -298,6 +353,8 @@ Vite HMR กับ `node --watch` โหลดใหม่ให้เอง แ
 | `ERR_CONNECTION_REFUSED` | ไม่มีอะไรฟังพอร์ตนั้น เช็ค `docker compose ps` · **refused = firewall ผ่านแต่ไม่มีคนฟัง / timeout = โดน firewall บล็อก** |
 | `/api/*` เป็น `500` ทุกเส้น | request ไปไม่ถึง Express — `/api/health` คืนได้แค่ `200`/`503` ถ้าได้ `500` แปลว่า Vite proxy ต่อ `backend:3000` ไม่ติด ดู `docker compose logs backend` |
 | `Cannot find module '<pkg>'` | anonymous volume บัง `node_modules` ใหม่ → `docker compose rm -fsv backend` แล้ว `up -d --build` |
+| `Unknown column 'status_updated_at'` / `'task_type'` | database เก่าที่สร้างก่อนแก้ `init.sql` — `init.sql` ไม่รันซ้ำ ต้องรัน `./migrate.sh` (หรือ `migrate.bat`) เอง |
+| เปลี่ยนสถานะแล้วซิงก์รอบถัดไปทับกลับ | `status_updated_at` ของแถวนั้นยังเป็น `NULL` แปลว่า `PATCH /:id/status` ไม่ได้เขียนลงไปจริง เช็ค log backend |
 | แก้โค้ดแล้ว backend ยังรันของเก่า | `node --watch` มักไม่เห็นไฟล์ที่เปลี่ยนผ่าน bind mount ของ Docker → `docker compose restart backend` หลัง `git pull` |
 | ซิงก์สำเร็จแต่งานไม่ขึ้น (และ localhost ได้เยอะกว่า) | upsert key ขาดเงื่อนไขเจ้าของ → คนที่ซิงก์ทีหลังไปเจอแถวของเพื่อน ดู [หมายเหตุใต้ตาราง API](#api-backend) |
 | `Error 400: redirect_uri_mismatch` | URI ไม่ตรงกับที่ลงทะเบียนใน OAuth client **ตัวนั้น** — เช็คว่าเซิร์ฟเวอร์ส่ง client ไหนก่อน (ดูด้านล่าง) |
