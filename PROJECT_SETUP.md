@@ -157,9 +157,6 @@ Two details of that control matter:
   `!error`, so reusing it would blank the whole page over one failed dropdown (UC-5 ext 4a).
 - **`submitted` and `completed` both count as done.** `DONE`/`isDone` in `tasks.js` drop
   them from the dashboard's urgent card and 48h checklist, so a finished task stops nagging (UR26).
-- **`submitted` is terminal.** Once a task reads `ส่งแล้ว` its status is final: the `<select>`
-  is disabled and the API answers `409`. Handing work in is a fact, not a preference, so there
-  is nothing left to choose. Edit and delete are unaffected — only the status locks.
 
 ### Notification preferences
 
@@ -243,7 +240,7 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | GET    | `/api/assignments`            | Yes  | The **session user's** assignments + course/detail info |
 | POST   | `/api/assignments`            | Yes  | Creates a manual task; `201` with the created row    |
 | PATCH  | `/api/assignments/:id`        | Yes  | Edits a **manual** task; `404` for synced or other users' rows |
-| PATCH  | `/api/assignments/:id/status` | Yes  | Sets the task's status — allowed on **synced** rows too; `409` once the task is `submitted` |
+| PATCH  | `/api/assignments/:id/status` | Yes  | Sets the task's status — allowed on **synced** rows too |
 | DELETE | `/api/assignments/:id`        | Yes  | Deletes a **manual** task; `204` on success, `404` for synced or other users' rows |
 | POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework into the DB      |
 | GET    | `/api/notification-settings`  | Yes  | Reminder preferences; **defaults without writing** when never saved |
@@ -277,12 +274,7 @@ reason `POST` writes both rows inside a transaction.
 | Rationale | a task's data must not diverge from Classroom/Teams (UR05) | progress is the student's private marker (A3.3) |
 
 The body is `{ "status": "not_started" | "in_progress" | "submitted" | "completed" }`; anything
-else is `400`. A task already sitting at `submitted` refuses every move with `409` — the
-payload is valid, it is the task's state that says no. The ownership check runs **first**, so
-another student's task still answers `404` rather than leaking its status through a `409`.
-`LOCKED_STATUS` in `routes/assignments.js` and `isStatusLocked()` in `frontend/src/tasks.js`
-are the two halves of that rule; the UI half only decides whether the student is offered a
-dead end. The write is an upsert (`INSERT … ON DUPLICATE KEY UPDATE`) rather than an
+else is `400`. The write is an upsert (`INSERT … ON DUPLICATE KEY UPDATE`) rather than an
 `UPDATE`, because the list query `LEFT JOIN`s `Assignment_Detail` — a row without one is
 possible, and a plain `UPDATE` would match nothing and still report `status: null` back.
 

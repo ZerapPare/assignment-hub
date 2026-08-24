@@ -55,8 +55,6 @@ function TaskRow({
   onStatusChange,
   statusPending = false,
   statusError = null,
-  statusLocked = false,
-  statusLockedHint,
   urgent = false,
   badgeText,
   badgeColor,
@@ -87,20 +85,17 @@ function TaskRow({
           native select's own popup is painted outside the DOM flow, so it is
           never clipped by the row. */}
       <span style={{ ...styles.cell, overflow: 'visible', whiteSpace: 'normal' }}>
-        {/* A locked row keeps full colour — it is settled, not unavailable —
-            so only the cursor and the tooltip mark it, unlike the dimming that
-            shows a change is still in flight. */}
         <select
           value={status}
-          disabled={statusPending || statusLocked}
+          disabled={statusPending}
           onChange={(e) => onStatusChange?.(e.target.value)}
-          title={statusLocked ? statusLockedHint || badgeText : badgeText}
+          title={badgeText}
           style={{
             ...styles.statusSelect,
             backgroundColor: badgeBg,
             color: badgeColor,
             opacity: statusPending ? 0.6 : 1,
-            cursor: statusPending || statusLocked ? 'default' : 'pointer',
+            cursor: statusPending ? 'default' : 'pointer',
           }}
         >
           {statusOptions.map((s) => (
