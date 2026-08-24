@@ -6,7 +6,7 @@ import { HomeIcon, PencilIcon, CalendarIcon, GearIcon } from '../icons';
 
 const NAV = [
   { key: 'home', label: 'หน้าแรก', Icon: HomeIcon, path: '/home' },
-  { key: 'all', label: 'การบ้านทั้งหมด', Icon: PencilIcon },
+  { key: 'all', label: 'งานทั้งหมด', Icon: PencilIcon, path: '/assignments' },
   { key: 'stats', label: 'สถิติ', Icon: CalendarIcon },
   { key: 'settings', label: 'ตั้งค่า', Icon: GearIcon, path: '/settings' },
 ];

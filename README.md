@@ -100,18 +100,33 @@ db-1        | ... ready for connections
 | Path | หน้า |
 |---|---|
 | `/login` | หน้าเข้าสู่ระบบ (Google / Microsoft) |
-| `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ตารางงานทั้งหมด (ค้นหา + กรองตามสถานะ/วิชา/แหล่งที่มา, เปลี่ยนสถานะ, แก้ไข/ลบงานที่เพิ่มเอง), ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน |
+| `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน |
+| `/assignments` | งานทั้งหมด — ตารางงาน: ค้นหา + กรองตามแพลตฟอร์ม/สถานะ/รายวิชา, เปลี่ยนสถานะ, แก้ไข/ลบงานที่เพิ่มเอง |
 | `/settings` | ตั้งค่า — โปรไฟล์, แก้รหัสนักศึกษา, **การแจ้งเตือน**, สถานะเชื่อมต่อ Google/Microsoft |
 
 ทุกตัวเลขบนหน้า dashboard คำนวณจาก response ของ `/api/assignments` จริง ไม่มีข้อมูลตัวอย่างฝังในโค้ด
 (บัญชีที่ยังไม่ซิงก์จะเห็น `0` และ empty state ทุกการ์ด)
 
-**`+ เพิ่มงานใหม่`** เปิด `AddTaskModal` แล้ว `POST` ไป `/api/assignments` — แถวที่สร้างถูกใส่กลับเข้า
-state ตัวเดียวกับที่ `useMemo` อ่าน ทุกการ์ด กราฟ จุดบนปฏิทิน และรายการจึงอัปเดตพร้อมกันโดยไม่ต้อง refetch
+**`+ เพิ่มงานใหม่`** (มีทั้งบน dashboard และหน้างานทั้งหมด) เปิด `AddTaskModal` แล้ว `POST` ไป
+`/api/assignments` — แถวที่สร้างถูกใส่กลับเข้า state ตัวเดียวกับที่ `useMemo` อ่าน ทุกการ์ด กราฟ
+จุดบนปฏิทิน และรายการจึงอัปเดตพร้อมกันโดยไม่ต้อง refetch
 งานที่เพิ่มเองเก็บใต้ `Course` ที่ `platform_source IS NULL` ซึ่งตรงกับแท็บ `เพิ่มเอง`
 
-**ปุ่มแก้ไข / ลบ** ในแถวของตาราง ขึ้นเฉพาะงานที่เพิ่มเอง — เปิด `EditTaskModal` (`PATCH /api/assignments/:id`)
-หรือลบทิ้ง (`DELETE /api/assignments/:id`) งานที่ซิงก์มาจาก Classroom แก้/ลบไม่ได้ ให้แพลตฟอร์มเป็นเจ้าของข้อมูล
+## หน้างานทั้งหมด (`/assignments`)
+
+ตารางงานอยู่หน้านี้หน้าเดียว **ไม่ได้อยู่บน dashboard แล้ว** — dashboard เหลือเฉพาะส่วนสรุป
+(การ์ดสถิติ, กราฟ, ปฏิทิน, กำหนดส่งใกล้ถึง, งานด่วน) เข้าถึงได้จากเมนู `งานทั้งหมด` ใน sidebar
+
+- **ค้นหา** จากชื่องาน · รายวิชา · คำอธิบาย
+- **กรอง** ได้ 3 ชั้นพร้อมกัน — แท็บแพลตฟอร์ม (`ทั้งหมด` / `Classroom` / `Teams` / `เพิ่มเอง`),
+  dropdown สถานะ, dropdown รายวิชา
+- **ปุ่มแก้ไข / ลบ** ในแถว ขึ้นเฉพาะงานที่เพิ่มเอง — เปิด `EditTaskModal` (`PATCH /api/assignments/:id`)
+  หรือลบทิ้ง (`DELETE /api/assignments/:id`) งานที่ซิงก์มาจาก Classroom แก้/ลบไม่ได้ ให้แพลตฟอร์มเป็นเจ้าของข้อมูล
+
+โค้ดที่สองหน้าใช้ร่วมกันแยกไว้ที่ [`src/tasks.js`](frontend/src/tasks.js) (ชุดสถานะ, ตัวกรอง, ตัวจัดรูปแบบวันที่,
+กติกาว่างานแบบไหนนับว่า "เสร็จ") และ [`src/useAssignments.js`](frontend/src/useAssignments.js)
+(ดึงข้อมูล, เด้งไป `/login` เมื่อ `401`, handler เปลี่ยนสถานะ/ลบ/แก้ไข)
+ถ้าจะเพิ่มสถานะใหม่หรือแก้วิธีแก้ไขงาน ให้แก้ที่สองไฟล์นี้ที่เดียว ทั้งสองหน้าจะตามไปเอง
 
 ### สถานะงาน (UC-5)
 
@@ -119,11 +134,17 @@ state ตัวเดียวกับที่ `useMemo` อ่าน ทุ�
 เลือกแล้วยิง `PATCH /api/assignments/:id/status` ทันที **ใช้ได้กับงานที่ซิงก์มาด้วย** เพราะสถานะถือเป็น
 ความคืบหน้าส่วนตัวของนักศึกษา ไม่ใช่ข้อมูลของงานที่แพลตฟอร์มเป็นเจ้าของ
 
+**งานที่สถานะเป็น `ส่งแล้ว` จะเปลี่ยนสถานะไม่ได้อีก** — dropdown ถูก disable และ `PATCH /api/assignments/:id/status`
+ตอบ `409` ถ้ายังพยายามยิงเข้ามา เพราะการส่งงานเป็นข้อเท็จจริง ไม่ใช่ความชอบส่วนตัว จึงถือเป็นสถานะปลายทาง
+(ปุ่ม **แก้ไข/ลบ** ของงานที่เพิ่มเองยังใช้ได้ตามปกติ ล็อกเฉพาะสถานะ)
+
+> ระวัง: `ส่งแล้ว` ยังเลือกเองได้จาก dropdown และเลือกแล้ว**ย้อนกลับไม่ได้** ทั้งงานที่ซิงก์มาและงานที่เพิ่มเอง
+
 ครั้งแรกที่ตั้งสถานะเอง คอลัมน์ `Assignment_Detail.status_updated_at` จะเปลี่ยนจาก `NULL` เป็นเวลาที่กด
 และตั้งแต่นั้น **ซิงก์จะไม่ทับสถานะนั้นอีก** (ก่อนหน้านั้น Google เป็นคนตั้งให้ — งานที่ `TURNED_IN`/`RETURNED`
 มาเป็น `ส่งแล้ว`) งานที่ `ส่งแล้ว` หรือ `เสร็จสมบูรณ์` จะหลุดออกจากการ์ด "งานด่วน" และ checklist 48 ชม.
 
-> ถ้ายิงไม่สำเร็จ error จะขึ้นในแถวนั้นแถวเดียว สถานะเดิมค้างไว้ ส่วนที่เหลือของ dashboard ไม่หาย
+> ถ้ายิงไม่สำเร็จ error จะขึ้นในแถวนั้นแถวเดียว สถานะเดิมค้างไว้ ส่วนที่เหลือของหน้าไม่หาย
 
 ## การแจ้งเตือน (หน้าตั้งค่า)
 
@@ -144,9 +165,9 @@ state ตัวเดียวกับที่ `useMemo` อ่าน ทุ�
 ส่วนที่ยังไม่พร้อมใช้:
 
 - **ปุ่ม "ส่งอีเมลทดสอบ"** — disable ไว้ ยังไม่ได้ต่อระบบส่งอีเมล
-- **checklist "งานด่วน"** — แสดงอย่างเดียว กดติ๊กในนั้นไม่ได้ (เปลี่ยนสถานะได้จาก dropdown ในตารางแทน)
+- **checklist "งานด่วน"** — แสดงอย่างเดียว กดติ๊กในนั้นไม่ได้ (เปลี่ยนสถานะได้ที่หน้า `งานทั้งหมด`)
 - **ช่อง "วิชา" ใน modal แก้ไข** — แก้แล้วไม่มีผล `PATCH /api/assignments/:id` ยังไม่รับ `course_name`
-- **เมนู sidebar** `การบ้านทั้งหมด` / `สถิติ` — ยังไม่มี route รองรับ
+- **เมนู sidebar** `สถิติ` — ยังไม่มี route รองรับ
 
 ## Database
 
@@ -207,7 +228,7 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assign
 | GET | `/api/assignments` | ต้อง | งาน**ของผู้ใช้ที่ login อยู่** (JOIN course + detail) |
 | POST | `/api/assignments` | ต้อง | เพิ่มงานเอง คืน `201` พร้อมแถวที่สร้าง |
 | PATCH | `/api/assignments/:id` | ต้อง | แก้งานที่เพิ่มเอง (งานที่ซิงก์มาแก้ไม่ได้ — คืน `404`) |
-| PATCH | `/api/assignments/:id/status` | ต้อง | เปลี่ยนสถานะ — **ใช้ได้กับงานที่ซิงก์มาด้วย** |
+| PATCH | `/api/assignments/:id/status` | ต้อง | เปลี่ยนสถานะ — **ใช้ได้กับงานที่ซิงก์มาด้วย** (`409` ถ้างานนั้น `ส่งแล้ว`) |
 | DELETE | `/api/assignments/:id` | ต้อง | ลบงานที่เพิ่มเอง คืน `204` (งานที่ซิงก์มาลบไม่ได้ — คืน `404`) |
 | POST | `/api/classroom/sync` | ต้อง | ดึงงานจาก Google Classroom มาลง DB |
 | GET | `/api/notification-settings` | ต้อง | ค่าตั้งการแจ้งเตือน (ยังไม่เคยบันทึก → คืนค่า default) |
@@ -269,12 +290,14 @@ assignment-hub/
 │       └── middleware/  # requireAuth
 └── frontend/            # React + Vite + react-router
     └── src/
-        ├── App.jsx          # router: /login, /home, /settings
+        ├── App.jsx          # router: /login, /home, /assignments, /settings
         ├── theme.js         # design token (สี, ฟอนต์, radius, ชื่อวัน/เดือนไทย)
+        ├── tasks.js         # สถานะงาน, ตัวกรอง, ตัวจัดรูปแบบวันที่ — ใช้ร่วมทุกหน้า
+        ├── useAssignments.js # hook: ดึงงาน + handler เปลี่ยนสถานะ/ลบ/แก้ไข
         ├── GlobalStyles.jsx # โหลดฟอนต์ Maitree + base CSS
-        ├── pages/           # LoginPage, HomePage, SettingsPage
-        ├── components/      # Sidebar, StatCard, TaskRow, BarChart, DonutChart,
-        │                    # MiniCalendar, DeadlineList, UrgentChecklist,
+        ├── pages/           # LoginPage, HomePage, AssignmentsPage, SettingsPage
+        ├── components/      # Sidebar, StatCard, AssignmentTable, TaskRow, BarChart,
+        │                    # DonutChart, MiniCalendar, DeadlineList, UrgentChecklist,
         │                    # AddTaskModal, EditTaskModal, NotificationSettings,
         │                    # Toggle, ProviderButton, BrandMark
         └── icons/           # Google/Microsoft SVG + ไอคอน UI (index.jsx)

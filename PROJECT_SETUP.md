@@ -108,7 +108,8 @@ This trips people up, so be precise about which file a variable belongs in:
 | Path     | Page          | Notes                                                        |
 |----------|---------------|-------------------------------------------------------------|
 | `/login` | Login screen  | Real Google / Microsoft OAuth (buttons redirect to the backend) |
-| `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, the task table (search, status/course/source filters, per-row status control, edit + delete on manual tasks), a month calendar, upcoming deadlines, and a 48h checklist |
+| `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, a month calendar, upcoming deadlines, and a 48h checklist. **Summary only — no task table** |
+| `/assignments` | All tasks | Requires a session. The task table: search, platform/status/course filters, per-row status control, edit + delete on manual tasks |
 | `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, notification preferences, and connect state for Google and Microsoft |
 | `*`      | →             | Redirects to `/login`                                       |
 
@@ -116,10 +117,25 @@ Every figure on the dashboard is derived in a single `useMemo` over the `/api/as
 response — there is no seeded or placeholder data anywhere in the UI. A freshly
 logged-in account (before its first sync) renders zeros and empty states.
 
-**`+ เพิ่มงานใหม่`** opens `AddTaskModal` and `POST`s to `/api/assignments`. The created
-row is appended to the same `assignments` state the `useMemo` reads, so every stat card,
-chart, calendar dot and list updates without a refetch. Manual work is stored under a
-`Course` with `platform_source IS NULL`, which is what the `เพิ่มเอง` filter tab matches.
+**`+ เพิ่มงานใหม่`** (on both the dashboard and the assignments page) opens `AddTaskModal`
+and `POST`s to `/api/assignments`. The created row is appended to the same `assignments`
+state the `useMemo` reads, so every stat card, chart, calendar dot and list updates without a
+refetch. Manual work is stored under a `Course` with `platform_source IS NULL`, which is what
+the `เพิ่มเอง` filter tab matches.
+
+### Shared task code
+
+The dashboard summarises the assignment list and `/assignments` lists it, so the pieces both
+need live in two modules rather than being duplicated:
+
+| Module | Holds |
+|---|---|
+| [`src/tasks.js`](frontend/src/tasks.js) | The `STATUS` map and `STATUS_OPTIONS`, `normalizeStatus`, `DONE`/`isDone`, `PLATFORM_FILTERS`, `withDerived` (parses `due_date`, normalises status), `isUrgent`, `fmtDate`/`fmtTime`, `HOUR`/`URGENT_H` |
+| [`src/useAssignments.js`](frontend/src/useAssignments.js) | The `/api/me` + `/api/assignments` fetch, the `401` → `/login` bounce, `logout`, and the `changeStatus` / `deleteTask` / `saveEdit` handlers with their per-row `statusPending` / `statusErrors` |
+
+Adding a status, changing what counts as done, or changing how a task is edited is a one-file
+change that both screens pick up. `AssignmentTable.jsx` owns the table itself and keeps its
+own search and filter state — no page cares which tab is open, so it never leaves the component.
 
 Each table row carries an **edit** and a **delete** button, shown only for manual work
 (`platform_source IS NULL`). Edit opens `EditTaskModal` → `PATCH /api/assignments/:id` and
@@ -128,7 +144,7 @@ and filters the row out. Synced coursework has neither: the platform stays the s
 truth (UR05), and the backend answers `404` for it rather than trusting the UI to hide them.
 
 **Task status (UC-5)** is a `<select>` in the status cell, over the four values in
-`HomePage.jsx`'s `STATUS` map — `not_started` · `in_progress` · `submitted` · `completed`.
+`tasks.js`'s `STATUS` map — `not_started` · `in_progress` · `submitted` · `completed`.
 Choosing one `PATCH`es `/api/assignments/:id/status` immediately. Unlike edit and delete this
 is offered on **every** task including synced ones, because status is the student's own
 progress marker rather than the platform's data (A3.3).
@@ -138,9 +154,12 @@ Two details of that control matter:
 - **Failures are per-row.** `statusPending` and `statusErrors` are keyed by assignment id, so
   a rejected change shows its message inside that one row and leaves the old status visible.
   The page-level `error` state is deliberately not used here — the body renders only when
-  `!error`, so reusing it would blank the whole dashboard over one failed dropdown (UC-5 ext 4a).
-- **`submitted` and `completed` both count as done.** `DONE`/`isDone` in `HomePage.jsx` drop
-  them from the urgent card and the 48h checklist, so a finished task stops nagging (UR26).
+  `!error`, so reusing it would blank the whole page over one failed dropdown (UC-5 ext 4a).
+- **`submitted` and `completed` both count as done.** `DONE`/`isDone` in `tasks.js` drop
+  them from the dashboard's urgent card and 48h checklist, so a finished task stops nagging (UR26).
+- **`submitted` is terminal.** Once a task reads `ส่งแล้ว` its status is final: the `<select>`
+  is disabled and the API answers `409`. Handing work in is a fact, not a preference, so there
+  is nothing left to choose. Edit and delete are unaffected — only the status locks.
 
 ### Notification preferences
 
@@ -168,7 +187,7 @@ Still inert:
 - **`EditTaskModal`'s course field** posts `course_name`, which `PATCH /api/assignments/:id`
   does not accept — the value is silently dropped. Either add it to the handler or remove
   the input; right now it looks editable and isn't.
-- **Sidebar nav items** other than `หน้าแรก` and `ตั้งค่า` have no route, so they carry no pointer cursor.
+- The **`สถิติ` sidebar item** has no route, so it carries no pointer cursor.
 
 Fonts and base CSS are injected by `src/GlobalStyles.jsx` (mounted once in `App.jsx`)
 rather than declared in `index.html`.
@@ -224,7 +243,7 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | GET    | `/api/assignments`            | Yes  | The **session user's** assignments + course/detail info |
 | POST   | `/api/assignments`            | Yes  | Creates a manual task; `201` with the created row    |
 | PATCH  | `/api/assignments/:id`        | Yes  | Edits a **manual** task; `404` for synced or other users' rows |
-| PATCH  | `/api/assignments/:id/status` | Yes  | Sets the task's status — allowed on **synced** rows too |
+| PATCH  | `/api/assignments/:id/status` | Yes  | Sets the task's status — allowed on **synced** rows too; `409` once the task is `submitted` |
 | DELETE | `/api/assignments/:id`        | Yes  | Deletes a **manual** task; `204` on success, `404` for synced or other users' rows |
 | POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework into the DB      |
 | GET    | `/api/notification-settings`  | Yes  | Reminder preferences; **defaults without writing** when never saved |
@@ -258,7 +277,12 @@ reason `POST` writes both rows inside a transaction.
 | Rationale | a task's data must not diverge from Classroom/Teams (UR05) | progress is the student's private marker (A3.3) |
 
 The body is `{ "status": "not_started" | "in_progress" | "submitted" | "completed" }`; anything
-else is `400`. The write is an upsert (`INSERT … ON DUPLICATE KEY UPDATE`) rather than an
+else is `400`. A task already sitting at `submitted` refuses every move with `409` — the
+payload is valid, it is the task's state that says no. The ownership check runs **first**, so
+another student's task still answers `404` rather than leaking its status through a `409`.
+`LOCKED_STATUS` in `routes/assignments.js` and `isStatusLocked()` in `frontend/src/tasks.js`
+are the two halves of that rule; the UI half only decides whether the student is offered a
+dead end. The write is an upsert (`INSERT … ON DUPLICATE KEY UPDATE`) rather than an
 `UPDATE`, because the list query `LEFT JOIN`s `Assignment_Detail` — a row without one is
 possible, and a plain `UPDATE` would match nothing and still report `status: null` back.
 
@@ -374,16 +398,20 @@ assignment-hub/
     ├── index.html            # bare Vite entry (fonts are injected from GlobalStyles.jsx)
     └── src/
         ├── main.jsx          # React entry
-        ├── App.jsx           # router: /login, /home, /settings
+        ├── App.jsx           # router: /login, /home, /assignments, /settings
         ├── theme.js          # design tokens: colours, font, radii, shadows, Thai day/month names
+        ├── tasks.js          # shared task model: STATUS, filters, isDone, withDerived, date fmt
+        ├── useAssignments.js # shared hook: fetch + status/delete/edit handlers
         ├── GlobalStyles.jsx  # injects the Maitree webfont + base CSS, sets lang="th"
         ├── pages/
         │   ├── LoginPage.jsx    # two-panel login screen (Google/Microsoft OAuth)
-        │   ├── HomePage.jsx     # dashboard (fetches /api/me + /api/assignments, POSTs the sync)
+        │   ├── HomePage.jsx     # dashboard summary + the Classroom sync toolbar
+        │   ├── AssignmentsPage.jsx # the task table
         │   └── SettingsPage.jsx # profile, รหัสนักศึกษา, notifications, provider link state
-        ├── components/       # Sidebar, StatCard, TaskRow, BarChart, DonutChart, MiniCalendar,
-        │                     # DeadlineList, UrgentChecklist, AddTaskModal, EditTaskModal,
-        │                     # NotificationSettings, Toggle, ProviderButton, BrandMark
+        ├── components/       # Sidebar, StatCard, AssignmentTable, TaskRow, BarChart,
+        │                     # DonutChart, MiniCalendar, DeadlineList, UrgentChecklist,
+        │                     # AddTaskModal, EditTaskModal, NotificationSettings, Toggle,
+        │                     # ProviderButton, BrandMark
         └── icons/            # GoogleIcon, MicrosoftIcon + index.jsx (UI icon set, inline SVG)
 ```
 
