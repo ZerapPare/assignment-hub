@@ -109,7 +109,7 @@ This trips people up, so be precise about which file a variable belongs in:
 |----------|---------------|-------------------------------------------------------------|
 | `/login` | Login screen  | Real Google / Microsoft OAuth (buttons redirect to the backend) |
 | `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, the task table (search, status/course/source filters, per-row status control, edit + delete on manual tasks), a month calendar, upcoming deadlines, and a 48h checklist |
-| `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, and connect state for Google and Microsoft |
+| `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, notification preferences, and connect state for Google and Microsoft |
 | `*`      | →             | Redirects to `/login`                                       |
 
 Every figure on the dashboard is derived in a single `useMemo` over the `/api/assignments`
@@ -142,8 +142,27 @@ Two details of that control matter:
 - **`submitted` and `completed` both count as done.** `DONE`/`isDone` in `HomePage.jsx` drop
   them from the urgent card and the 48h checklist, so a finished task stops nagging (UR26).
 
+### Notification preferences
+
+`/settings` holds a third card, `NotificationSettings.jsx`, which fetches and saves
+`/api/notification-settings` on its own — `SettingsPage.jsx` passes it nothing but the email
+to display. Lead times are multi-select over four presets (60 / 180 / 1440 / 4320 minutes)
+plus a custom value; **every selected chip uses one style** (filled `C.navy`), and custom
+values that are currently selected render as chips beside the presets so they can be
+deselected the same way. `Toggle.jsx` is a new shared `role="switch"` control, used twice here.
+
+The master switch dims and disables the rest of the card rather than hiding it, and saving
+still works while off — turning notifications off must not discard the schedule behind them.
+The save button stays disabled until something actually changes, compared against a snapshot
+of what was loaded.
+
+**No email is sent yet.** There is no scheduler, no SMTP, and nothing writes the
+`Notification` table, so `ส่งอีเมลทดสอบ` is disabled and the failure banner never appears
+(`failed_count` is structurally 0 — see [API Endpoints](#api-endpoints-backend)).
+
 Still inert:
 
+- The **`ส่งอีเมลทดสอบ` button** — disabled until a sender exists.
 - The **48h checklist** is display-only. `Assignment_Detail.status` is writable now, but
   `UrgentChecklist` takes no `onToggle` — status changes go through the table's dropdown.
 - **`EditTaskModal`'s course field** posts `course_name`, which `PATCH /api/assignments/:id`
@@ -208,6 +227,8 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | PATCH  | `/api/assignments/:id/status` | Yes  | Sets the task's status — allowed on **synced** rows too |
 | DELETE | `/api/assignments/:id`        | Yes  | Deletes a **manual** task; `204` on success, `404` for synced or other users' rows |
 | POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework into the DB      |
+| GET    | `/api/notification-settings`  | Yes  | Reminder preferences; **defaults without writing** when never saved |
+| PUT    | `/api/notification-settings`  | Yes  | Replaces the whole preference set in one transaction |
 
 `Yes` = requires a logged-in session (returns `401` otherwise).
 
@@ -286,6 +307,29 @@ Neither key is enforced by a database constraint (`external_assignment_id` is
 deliberately **not** unique — several students legitimately hold the same one), so
 correctness here rests entirely on the queries in `routes/classroom.js`.
 
+### Notification preferences
+
+`PUT /api/notification-settings` takes the panel's entire state
+(`{ enabled, lead_times, daily_repeat, daily_repeat_time, last_custom_minutes }`) and
+**replaces** rather than merges — `Notification_Lead_Time` rows for that student are deleted
+and re-inserted inside the same transaction as the `Notification_Setting` upsert. Validation
+runs before any write: `lead_times` must be integers in `1`–`40320` minutes (28 days, max 10
+values, de-duplicated) and `daily_repeat_time` must match `HH:MM`. The response has the same
+shape as `GET`, so the panel drops it straight into state.
+
+Two behaviours are deliberate:
+
+- **`GET` never writes.** A student who has never saved gets defaults (`enabled`, `[1440]`,
+  `08:00`) in the response and still has no row. That keeps "nobody has configured this" a
+  question the table can answer — a read that seeded rows would make it unanswerable.
+- **An empty `lead_times` is a real saved state**, not a reason to fall back to the default.
+  A student who deselects every chip and saves must not find `1 วัน` selected again on reload.
+
+Both responses also carry `failed_count` and `last_failed_at`, counted from `Notification`
+rows where `is_sent = FALSE AND sent_at IS NOT NULL`, scoped to the student by walking
+`Assignment_Detail → Assignment → Course`. **Nothing writes `Notification`, so this is always
+`0`** — it exists so the failure banner has a real source the moment a sender lands.
+
 Quick check:
 
 ```bash
@@ -303,7 +347,8 @@ assignment-hub/
 ├── migrations/               # ALTERs for databases created before a schema change
 │   ├── 001_identity.sql      # unique email domain + (student_id, university_id)
 │   ├── 002_task_type.sql     # Assignment.task_type
-│   └── 003_status_updated_at.sql  # Assignment_Detail.status_updated_at
+│   ├── 003_status_updated_at.sql  # Assignment_Detail.status_updated_at
+│   └── 004_notification_settings.sql  # Notification_Setting + Notification_Lead_Time
 ├── migrate.sh / migrate.bat  # run every migration in order (keep the two in step)
 ├── Caddyfile                 # TLS reverse proxy config (used by the `tls` profile)
 ├── .env                      # deploy settings for Compose substitution (git-ignored)
@@ -316,7 +361,7 @@ assignment-hub/
 │       ├── config.js         # env vars in one place (PORT, SESSION_SECRET, OAuth ids)
 │       ├── db.js             # the shared mysql2 pool
 │       ├── middleware/auth.js    # requireAuth — 401 without a session
-│       ├── routes/           # health, auth, me, assignments, classroom — one file per area
+│       ├── routes/           # health, auth, me, assignments, classroom, notifications
 │       ├── services/
 │       │   ├── classroomSync.js  # Classroom paging + date conversion
 │       │   ├── identity.js       # find-or-create University / upsert Student
@@ -335,10 +380,10 @@ assignment-hub/
         ├── pages/
         │   ├── LoginPage.jsx    # two-panel login screen (Google/Microsoft OAuth)
         │   ├── HomePage.jsx     # dashboard (fetches /api/me + /api/assignments, POSTs the sync)
-        │   └── SettingsPage.jsx # profile, รหัสนักศึกษา, provider link state
+        │   └── SettingsPage.jsx # profile, รหัสนักศึกษา, notifications, provider link state
         ├── components/       # Sidebar, StatCard, TaskRow, BarChart, DonutChart, MiniCalendar,
         │                     # DeadlineList, UrgentChecklist, AddTaskModal, EditTaskModal,
-        │                     # ProviderButton, BrandMark
+        │                     # NotificationSettings, Toggle, ProviderButton, BrandMark
         └── icons/            # GoogleIcon, MicrosoftIcon + index.jsx (UI icon set, inline SVG)
 ```
 
@@ -354,7 +399,8 @@ hex in a component, so both screens keep one palette.
 
 Auto-created on first DB start. Tables:
 
-`University` · `Student` · `Course` · `Assignment` · `Assignment_Detail` · `Schedule` · `Notification`
+`University` · `Student` · `Course` · `Assignment` · `Assignment_Detail` · `Schedule` ·
+`Notification` · `Notification_Setting` · `Notification_Lead_Time`
 
 `init.sql` creates the schema and **inserts nothing** — the database starts empty, so a
 new account sees an empty dashboard until it runs a Classroom sync. `University` rows are
@@ -373,6 +419,16 @@ and is `NULL` for synced coursework, which carries no equivalent. `Assignment_De
 is `NULL` until the student sets a status by hand, and the Classroom sync reads that `NULL`
 as permission to write status — so the column is a flag about *who owns the field*, not just
 an audit timestamp. Never backfill it.
+
+`Notification_Setting` is 1:1 with `Student` and holds the reminder preferences;
+`Notification_Lead_Time` holds one row per selected lead time. Two choices there are worth
+knowing: lead times are stored **in minutes** so presets and custom values share a single
+representation that compares directly against `due_date` (no unit column), and they live in
+a child table rather than a CSV column because a student picks several and the future sender
+has to `JOIN` on them to find which assignments are due. `last_custom_minutes` on the parent
+is only a UI convenience — it remembers the last value typed under `+ กำหนดเอง` so the hint
+line can offer it again, and being set there does **not** mean it is currently selected.
+`Notification` itself is still written by nothing.
 
 Two *absent* constraints are just as deliberate: `Course.external_course_id` and
 `Assignment.external_assignment_id` carry no unique index, because classmates share those
@@ -402,8 +458,9 @@ a database built from the current `init.sql`:
 | `001_identity.sql` | unique `University.email_domain`; unique `Student (student_id, university_id)` | UR02, UR03 |
 | `002_task_type.sql` | `Assignment.task_type` | UR06, A5.1 |
 | `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` | UC-5, A3.3, UR12 |
+| `004_notification_settings.sql` | `Notification_Setting` + `Notification_Lead_Time` tables | UC-6, UR12 |
 
-`migrate.sh` (and `migrate.bat` for cmd) runs all three in order against a running stack:
+`migrate.sh` (and `migrate.bat` for cmd) runs them all in order against a running stack:
 
 ```bash
 ./migrate.sh        # macOS / Linux / Git Bash

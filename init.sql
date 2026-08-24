@@ -122,6 +122,39 @@ CREATE TABLE Notification (
 );
 
 -- =========================================================
+-- TABLE: Notification_Setting (1:1 with Student)
+--
+-- The student's own reminder preferences. No row means "never saved
+-- settings" — the API answers with defaults rather than seeding one.
+-- =========================================================
+CREATE TABLE Notification_Setting (
+    user_id             INT PRIMARY KEY,
+    enabled             BOOLEAN NOT NULL DEFAULT TRUE,
+    daily_repeat        BOOLEAN NOT NULL DEFAULT FALSE,
+    daily_repeat_time   TIME NULL,
+    -- Last value typed under "+ กำหนดเอง", kept so the hint line can offer it
+    -- again. Set here does NOT mean selected — Notification_Lead_Time does.
+    last_custom_minutes INT NULL,
+    CONSTRAINT fk_notification_setting_student
+        FOREIGN KEY (user_id) REFERENCES Student(user_id)
+);
+
+-- =========================================================
+-- TABLE: Notification_Lead_Time (m side of Notification_Setting 1—m)
+--
+-- One row per selected lead time, in minutes, so presets (60, 180, 1440,
+-- 4320) and custom values share one representation and compare directly
+-- against Assignment_Detail.due_date.
+-- =========================================================
+CREATE TABLE Notification_Lead_Time (
+    user_id  INT NOT NULL,
+    minutes  INT NOT NULL,
+    PRIMARY KEY (user_id, minutes),
+    CONSTRAINT fk_lead_time_setting
+        FOREIGN KEY (user_id) REFERENCES Notification_Setting(user_id)
+);
+
+-- =========================================================
 -- No sample data — tables start empty. Universities you actually
 -- support (for matching students by email domain) still need at
 -- least one row here, e.g.:
