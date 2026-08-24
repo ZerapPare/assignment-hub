@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+// ─────────── test error ───────────
+// ตั้งเป็น null เมื่อเทสเสร็จ แล้วลบบล็อกนี้กับที่ใช้ TEST_ERROR ทิ้ง
+//   'load'   → โหลดหน้าไม่สำเร็จ  
+//   'status' → เปลี่ยนสถานะไม่สำเร็จ 
+//   'delete' → ลบงานไม่สำเร็จ   บัค
+const TEST_ERROR = 'null';
+// ──────────────────────────────────────────────────────────
+
 // The dashboard and the assignments page both need the same list, the same
 // bounce to /login on 401, and the same row handlers. Sharing one hook keeps a
 // change to how a task is edited from having to be made twice.
@@ -18,6 +26,12 @@ export default function useAssignments() {
   const [statusErrors, setStatusErrors] = useState({});
 
   useEffect(() => {
+    if (TEST_ERROR === 'load') {
+      setError('ทดสอบ: โหลดข้อมูลงานไม่สำเร็จ');
+      setLoading(false);
+      return;
+    }
+
     fetch('/api/me')
       .then((r) => {
         if (r.status === 401) {
@@ -54,6 +68,8 @@ export default function useAssignments() {
     });
     setStatusPending((prev) => ({ ...prev, [id]: true }));
     try {
+      if (TEST_ERROR === 'status') throw new Error('ทดสอบ: เปลี่ยนสถานะไม่สำเร็จ');
+
       const res = await fetch(`/api/assignments/${id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -82,6 +98,8 @@ export default function useAssignments() {
   const deleteTask = async (id) => {
     if (!window.confirm('คุณแน่ใจว่าต้องการลบงานนี้?')) return;
     try {
+      if (TEST_ERROR === 'delete') throw new Error('ทดสอบ: ลบงานไม่สำเร็จ');
+
       const res = await fetch(`/api/assignments/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Delete failed');
       setAssignments((prev) => prev.filter((a) => a.assignment_id !== id));
