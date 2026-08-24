@@ -13,6 +13,12 @@ const TASK_TYPES = ['homework', 'project', 'quiz', 'exam', 'reading', 'other'];
 // state; keep the two lists in step if this one ever changes.
 const TASK_STATUSES = ['not_started', 'in_progress', 'submitted', 'completed'];
 
+// Handing work in is a fact rather than a preference, so 'submitted' is a
+// terminal status: once a task reads it, nothing may move it again. The UI
+// disables the control, but this is what actually enforces it — mirrored by
+// isStatusLocked() in frontend/src/tasks.js.
+const LOCKED_STATUS = 'submitted';
+
 // Where manually added work goes when the student doesn't name a subject.
 const MANUAL_COURSE_NAME = 'งานที่เพิ่มเอง';
 
@@ -208,14 +214,24 @@ router.patch('/api/assignments/:id/status', requireAuth, async (req, res) => {
   }
 
   try {
+    // The detail row joins in so the current status comes back with the
+    // ownership check — LEFT, because a task without one is possible and is
+    // simply not locked.
     const [owned] = await pool.query(
-      `SELECT a.assignment_id FROM Assignment a
-       JOIN Course c ON a.course_id = c.course_id
+      `SELECT a.assignment_id, d.status FROM Assignment a
+       JOIN Course c                 ON a.course_id = c.course_id
+       LEFT JOIN Assignment_Detail d ON a.assignment_id = d.assignment_id
        WHERE a.assignment_id = ? AND c.student_id = ?
        LIMIT 1`,
       [id, req.session.userId]
     );
     if (!owned.length) return res.status(404).json({ error: 'not found' });
+
+    // 409 rather than 400: the payload is fine, it is the task's current state
+    // that refuses the move.
+    if (owned[0].status === LOCKED_STATUS) {
+      return res.status(409).json({ error: 'งานที่ส่งแล้วเปลี่ยนสถานะไม่ได้' });
+    }
 
     // Upsert rather than UPDATE: the list query LEFT JOINs Assignment_Detail,
     // so a row without one is possible and a plain UPDATE would touch nothing
