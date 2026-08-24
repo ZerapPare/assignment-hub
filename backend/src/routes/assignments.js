@@ -115,9 +115,9 @@ router.post('/api/assignments', requireAuth, async (req, res) => {
 
 // Edit a manually added task (UR07) — most often to move its deadline.
 //
-// Nothing in the frontend calls this yet: the dashboard can create tasks but
-// has no edit affordance. Kept deliberately, not by oversight — UR07 is a
-// real requirement and this is the endpoint the edit UI will use.
+// Called by EditTaskModal, which also sends course_name. That field is not
+// accepted here, so it is dropped: moving a task between courses would mean
+// find-or-creating another Course row, which this route doesn't do.
 router.patch('/api/assignments/:id', requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(404).json({ error: 'not found' });

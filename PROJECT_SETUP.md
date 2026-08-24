@@ -108,7 +108,7 @@ This trips people up, so be precise about which file a variable belongs in:
 | Path     | Page          | Notes                                                        |
 |----------|---------------|-------------------------------------------------------------|
 | `/login` | Login screen  | Real Google / Microsoft OAuth (buttons redirect to the backend) |
-| `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, the task table, a month calendar, upcoming deadlines, and a 48h checklist |
+| `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, the task table (search, status/course/source filters, per-row status control, edit + delete on manual tasks), a month calendar, upcoming deadlines, and a 48h checklist |
 | `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, and connect state for Google and Microsoft |
 | `*`      | →             | Redirects to `/login`                                       |
 
@@ -121,9 +121,34 @@ row is appended to the same `assignments` state the `useMemo` reads, so every st
 chart, calendar dot and list updates without a refetch. Manual work is stored under a
 `Course` with `platform_source IS NULL`, which is what the `เพิ่มเอง` filter tab matches.
 
-Two controls are still inert because no endpoint backs them yet:
+Each table row carries an **edit** and a **delete** button, shown only for manual work
+(`platform_source IS NULL`). Edit opens `EditTaskModal` → `PATCH /api/assignments/:id` and
+splices the returned row back into state; delete confirms, calls `DELETE /api/assignments/:id`,
+and filters the row out. Synced coursework has neither: the platform stays the source of
+truth (UR05), and the backend answers `404` for it rather than trusting the UI to hide them.
 
-- The **48h checklist** is read-only — nothing can write `Assignment_Detail.status` back.
+**Task status (UC-5)** is a `<select>` in the status cell, over the four values in
+`HomePage.jsx`'s `STATUS` map — `not_started` · `in_progress` · `submitted` · `completed`.
+Choosing one `PATCH`es `/api/assignments/:id/status` immediately. Unlike edit and delete this
+is offered on **every** task including synced ones, because status is the student's own
+progress marker rather than the platform's data (A3.3).
+
+Two details of that control matter:
+
+- **Failures are per-row.** `statusPending` and `statusErrors` are keyed by assignment id, so
+  a rejected change shows its message inside that one row and leaves the old status visible.
+  The page-level `error` state is deliberately not used here — the body renders only when
+  `!error`, so reusing it would blank the whole dashboard over one failed dropdown (UC-5 ext 4a).
+- **`submitted` and `completed` both count as done.** `DONE`/`isDone` in `HomePage.jsx` drop
+  them from the urgent card and the 48h checklist, so a finished task stops nagging (UR26).
+
+Still inert:
+
+- The **48h checklist** is display-only. `Assignment_Detail.status` is writable now, but
+  `UrgentChecklist` takes no `onToggle` — status changes go through the table's dropdown.
+- **`EditTaskModal`'s course field** posts `course_name`, which `PATCH /api/assignments/:id`
+  does not accept — the value is silently dropped. Either add it to the handler or remove
+  the input; right now it looks editable and isn't.
 - **Sidebar nav items** other than `หน้าแรก` and `ตั้งค่า` have no route, so they carry no pointer cursor.
 
 Fonts and base CSS are injected by `src/GlobalStyles.jsx` (mounted once in `App.jsx`)
@@ -180,6 +205,8 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | GET    | `/api/assignments`            | Yes  | The **session user's** assignments + course/detail info |
 | POST   | `/api/assignments`            | Yes  | Creates a manual task; `201` with the created row    |
 | PATCH  | `/api/assignments/:id`        | Yes  | Edits a **manual** task; `404` for synced or other users' rows |
+| PATCH  | `/api/assignments/:id/status` | Yes  | Sets the task's status — allowed on **synced** rows too |
+| DELETE | `/api/assignments/:id`        | Yes  | Deletes a **manual** task; `204` on success, `404` for synced or other users' rows |
 | POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework into the DB      |
 
 `Yes` = requires a logged-in session (returns `401` otherwise).
@@ -190,16 +217,50 @@ Only `title` is required; `task_type` is one of `homework | project | quiz | exa
 files the task under `งานที่เพิ่มเอง`. `PATCH /api/assignments/:id` accepts any subset of
 `title`, `task_type`, `description`, `due_date` — most often to move a deadline (UR07).
 Synced coursework is deliberately not editable: the platforms stay the source of truth (UR05).
+`course_name` is **not** among the accepted fields, so a manual task cannot be moved to a
+different course through this route even though `EditTaskModal` sends the key.
 
-> `PATCH /api/assignments/:id` has **no caller yet** — the dashboard can create tasks but
-> has no edit affordance. The endpoint is the one a future edit UI will use; until then it
-> is reachable only by hand.
+`DELETE /api/assignments/:id` (UR08) checks the same ownership-and-manual condition, then
+removes `Assignment_Detail` and `Assignment` in one transaction. The schema declares no
+`ON DELETE CASCADE`, so dropping the detail row by hand is what keeps orphans out; the same
+reason `POST` writes both rows inside a transaction.
+
+### Status is the student's, not the platform's
+
+`PATCH /api/assignments/:id/status` is a separate route rather than another field on
+`PATCH /:id`, and the difference is a requirement, not a style choice:
+
+| | `PATCH /:id` | `PATCH /:id/status` |
+|---|---|---|
+| Ownership check | `student_id` **and** `platform_source IS NULL` | `student_id` only |
+| Applies to | manual tasks | every task, synced included |
+| Rationale | a task's data must not diverge from Classroom/Teams (UR05) | progress is the student's private marker (A3.3) |
+
+The body is `{ "status": "not_started" | "in_progress" | "submitted" | "completed" }`; anything
+else is `400`. The write is an upsert (`INSERT … ON DUPLICATE KEY UPDATE`) rather than an
+`UPDATE`, because the list query `LEFT JOIN`s `Assignment_Detail` — a row without one is
+possible, and a plain `UPDATE` would match nothing and still report `status: null` back.
+
+It also stamps `Assignment_Detail.status_updated_at = NOW()`, and **that column is what
+divides ownership of the field**:
+
+- While `status_updated_at IS NULL`, Classroom may seed the status — a sync writes
+  `submitted` for coursework it reports as `TURNED_IN` or `RETURNED`.
+- Once the student picks a status by hand the column goes non-`NULL`, and the sync's
+  `UPDATE … WHERE status_updated_at IS NULL` stops matching that row forever. Without that
+  predicate every sync would silently undo the student's choice.
+
+`TURNED_IN`/`RETURNED` seed `submitted`, never `completed`. The two are distinct on purpose:
+handed in is something Google can observe, finished is a judgement only the student makes.
+`routes/assignments.js` and `routes/classroom.js` both hold the status list — change one and
+you must change the other.
 
 `POST /api/classroom/sync` takes `{ "cutoffDate": "YYYY-MM-DD" | null }` and returns
 `{ ok, coursesSynced, assignmentsSynced, deletedCount, skippedCourses }`. The cutoff both
 limits what is imported and deletes previously-synced rows that now fall before it, so
 moving the date forward prunes old semesters. A re-sync updates rather than duplicates,
-and keeps a status the user set manually unless Classroom reports the work as turned in.
+and never touches a status the student set by hand — see [Status is the student's, not the
+platform's](#status-is-the-students-not-the-platforms).
 A course whose coursework can't be read is pushed onto `skippedCourses` instead of
 aborting the whole run.
 
@@ -239,6 +300,11 @@ curl -i http://localhost:3000/api/auth/google  # 302 to accounts.google.com
 assignment-hub/
 ├── docker-compose.yml        # defines frontend + backend + db
 ├── init.sql                  # schema only, no seed data (runs on first DB start)
+├── migrations/               # ALTERs for databases created before a schema change
+│   ├── 001_identity.sql      # unique email domain + (student_id, university_id)
+│   ├── 002_task_type.sql     # Assignment.task_type
+│   └── 003_status_updated_at.sql  # Assignment_Detail.status_updated_at
+├── migrate.sh / migrate.bat  # run every migration in order (keep the two in step)
 ├── Caddyfile                 # TLS reverse proxy config (used by the `tls` profile)
 ├── .env                      # deploy settings for Compose substitution (git-ignored)
 ├── .env.local                # OAuth secrets (git-ignored) — you create this
@@ -255,7 +321,7 @@ assignment-hub/
 │       │   ├── classroomSync.js  # Classroom paging + date conversion
 │       │   ├── identity.js       # find-or-create University / upsert Student
 │       │   └── oauthSession.js   # `state` handling and the link-mode flow
-│       └── utils/dueDate.js
+│       └── utils/dueDate.js  # datetime-local → DATETIME, kept in wall-clock time
 └── frontend/
     ├── Dockerfile
     ├── package.json          # react, react-router-dom, vite
@@ -271,7 +337,8 @@ assignment-hub/
         │   ├── HomePage.jsx     # dashboard (fetches /api/me + /api/assignments, POSTs the sync)
         │   └── SettingsPage.jsx # profile, รหัสนักศึกษา, provider link state
         ├── components/       # Sidebar, StatCard, TaskRow, BarChart, DonutChart, MiniCalendar,
-        │                     # DeadlineList, UrgentChecklist, AddTaskModal, ProviderButton, BrandMark
+        │                     # DeadlineList, UrgentChecklist, AddTaskModal, EditTaskModal,
+        │                     # ProviderButton, BrandMark
         └── icons/            # GoogleIcon, MicrosoftIcon + index.jsx (UI icon set, inline SVG)
 ```
 
@@ -300,6 +367,13 @@ unique (so the find-or-create is safe), `Student (student_id, university_id)` is
 (UR03 — the same number may recur at a different university, and unset ids stay `NULL`),
 and `Course.platform_source IS NULL` is what marks a course as manually created.
 
+Two columns are load-bearing in the same way. `Assignment.task_type` holds one of
+`homework | project | quiz | exam | reading | other` (validated in the API, not the schema)
+and is `NULL` for synced coursework, which carries no equivalent. `Assignment_Detail.status_updated_at`
+is `NULL` until the student sets a status by hand, and the Classroom sync reads that `NULL`
+as permission to write status — so the column is a flag about *who owns the field*, not just
+an audit timestamp. Never backfill it.
+
 Two *absent* constraints are just as deliberate: `Course.external_course_id` and
 `Assignment.external_assignment_id` carry no unique index, because classmates share those
 Classroom ids and each needs their own row. That makes the composite upsert keys in
@@ -323,17 +397,41 @@ Because `init.sql` only runs on a fresh database, an existing one never picks up
 changes. `migrations/` holds the equivalent `ALTER`s, applied by hand and safe to skip on
 a database built from the current `init.sql`:
 
+| File | Adds | For |
+|---|---|---|
+| `001_identity.sql` | unique `University.email_domain`; unique `Student (student_id, university_id)` | UR02, UR03 |
+| `002_task_type.sql` | `Assignment.task_type` | UR06, A5.1 |
+| `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` | UC-5, A3.3, UR12 |
+
+`migrate.sh` (and `migrate.bat` for cmd) runs all three in order against a running stack:
+
 ```bash
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/001_identity.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/002_task_type.sql
+./migrate.sh        # macOS / Linux / Git Bash
+migrate.bat         # Windows cmd
+```
+
+Both are plain sequences of the same command, so re-running them on an up-to-date database
+just prints "Duplicate column name" / "Duplicate key name" per statement and moves on —
+there is no migration ledger and nothing tracks which ones already ran. New migrations must
+be appended to **both** scripts by hand.
+
+Applying one on its own:
+
+```bash
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/003_status_updated_at.sql
 ```
 
 Verify:
 
 ```bash
 docker compose exec db mysql -uroot -proot123 assignment_hub \
-  -e "DESCRIBE Assignment; SHOW INDEX FROM University; SHOW INDEX FROM Student;"
+  -e "DESCRIBE Assignment; DESCRIBE Assignment_Detail; SHOW INDEX FROM University; SHOW INDEX FROM Student;"
 ```
+
+> `003` is the one to watch on a database that already holds synced rows: leave
+> `status_updated_at` `NULL` everywhere. Filling it in — for instance to "record" when rows
+> were imported — permanently stops the Classroom sync from updating any status, because
+> non-`NULL` is exactly the signal that the student has taken the field over.
 
 ## Deploying over HTTPS
 
@@ -388,6 +486,7 @@ certificates per domain per week.
 | `docker compose logs -f frontend`| Follow frontend logs                    |
 | `docker compose --profile tls up -d` | Bring the stack up with Caddy in front (deployed hosts) |
 | `docker compose rm -fsv <service>`   | Drop a service **and its anonymous `node_modules` volume** — the fix after adding a dependency |
+| `./migrate.sh` / `migrate.bat`   | Apply every `migrations/*.sql` to an existing database (no-op errors if already applied) |
 
 ## Troubleshooting
 
@@ -411,6 +510,15 @@ certificates per domain per week.
   A lopsided split (one student holding nearly everything while later ones hold almost nothing) means an upsert lookup lost its owner condition and the first student to sync claimed the shared rows — see [Both upsert keys must include the owner](#both-upsert-keys-must-include-the-owner). No migration is needed after fixing the query: the next sync stops matching other people's rows and inserts the missing ones. Far more `Course` rows than `Assignment` rows is the same symptom seen from the other side, since the course upsert is scoped and the assignment one was not.
 - **Code changed on disk but the backend still runs the old version** — `node --watch` uses `fs.watch`, which frequently misses writes arriving through a Docker bind mount (the same reason Vite needs `usePolling`). `docker compose exec backend grep …` will show the new source while the running process still holds the old one in memory. `docker compose restart backend` after a `git pull` on a deployed host.
 - **`redirect_uri` is correct but login still fails on a deployed host while localhost works** — the two hosts are probably using different OAuth clients. Compare `GOOGLE_CLIENT_ID` in each machine's `.env.local`; `.env.local` is git-ignored, so a deployed checkout never inherits the one you use locally. Copy the ID **and** secret together — a mixed pair fails with `invalid_client`.
+- **`Unknown column 'status_updated_at' in 'field list'`** (or `'task_type'`) — the database predates the schema change and `init.sql` does not re-run on an existing volume. Apply the migrations: `./migrate.sh`, or the single file with `docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/003_status_updated_at.sql`. Every `/api/assignments` read fails with this, so the dashboard shows the DB-not-ready state rather than an empty list.
+- **A status set by hand reverts after the next Classroom sync** — the sync only skips rows whose `status_updated_at` is non-`NULL`, so a status that keeps getting overwritten means the column never got stamped. Check the row directly:
+
+  ```bash
+  docker compose exec db mysql -uroot -proot123 assignment_hub -e \
+    "SELECT assignment_id, status, status_updated_at FROM Assignment_Detail WHERE assignment_id = <id>;"
+  ```
+
+  `status_updated_at` still `NULL` after a successful-looking dropdown change means the `PATCH /api/assignments/:id/status` write did not land — check `docker compose logs backend` for `[assignments] status update failed`. The mirror image of this bug is a status that *never* updates from Classroom, which is what backfilling the column causes.
 - **`getaddrinfo ENOTFOUND db`** — the stack started in a bad state. `docker compose down` then `docker compose up -d --force-recreate`.
 - **Frontend loads but shows "waiting for database"** — MySQL is still initializing on first run; wait ~15s and refresh.
 - **`Error: Cannot find module '<pkg>'` after a new dependency was added** — the `/app/node_modules` anonymous volume survives container recreation and shadows the `node_modules` baked into the freshly built image, so `--force-recreate` and even `docker compose down` + `up --build` do **not** fix it. Drop the volume for that one service:
