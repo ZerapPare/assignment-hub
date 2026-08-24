@@ -101,7 +101,7 @@ db-1        | ... ready for connections
 |---|---|
 | `/login` | หน้าเข้าสู่ระบบ (Google / Microsoft) |
 | `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ตารางงานทั้งหมด (ค้นหา + กรองตามสถานะ/วิชา/แหล่งที่มา, เปลี่ยนสถานะ, แก้ไข/ลบงานที่เพิ่มเอง), ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน |
-| `/settings` | ตั้งค่า — โปรไฟล์, แก้รหัสนักศึกษา, สถานะเชื่อมต่อ Google/Microsoft |
+| `/settings` | ตั้งค่า — โปรไฟล์, แก้รหัสนักศึกษา, **การแจ้งเตือน**, สถานะเชื่อมต่อ Google/Microsoft |
 
 ทุกตัวเลขบนหน้า dashboard คำนวณจาก response ของ `/api/assignments` จริง ไม่มีข้อมูลตัวอย่างฝังในโค้ด
 (บัญชีที่ยังไม่ซิงก์จะเห็น `0` และ empty state ทุกการ์ด)
@@ -125,15 +125,32 @@ state ตัวเดียวกับที่ `useMemo` อ่าน ทุ�
 
 > ถ้ายิงไม่สำเร็จ error จะขึ้นในแถวนั้นแถวเดียว สถานะเดิมค้างไว้ ส่วนที่เหลือของ dashboard ไม่หาย
 
+## การแจ้งเตือน (หน้าตั้งค่า)
+
+การ์ด **การแจ้งเตือน** ใน `/settings` ให้ตั้งว่าจะให้เตือนก่อนกำหนดส่งล่วงหน้าเท่าไร
+
+- สวิตช์หลักเปิด/ปิดทั้งการ์ด ปิดแล้วส่วนที่เหลือจะจางและกดไม่ได้ (แต่ค่ายังถูกเก็บไว้)
+- **ช่วงเวลาล่วงหน้า** เลือกได้หลายค่าพร้อมกัน — preset `1 ชั่วโมง` · `3 ชั่วโมง` · `1 วัน` · `3 วัน`
+  และ `+ กำหนดเอง` (ใส่ตัวเลข + หน่วย นาที/ชั่วโมง/วัน ได้ถึง 28 วัน) ค่ากำหนดเองที่เลือกอยู่จะขึ้นเป็นชิปให้กดเอาออกได้
+- **แจ้งเตือนซ้ำรายวัน** + เวลาที่จะส่ง สำหรับงานที่ยังไม่เสร็จ
+- กด `บันทึกการตั้งค่า` เพื่อเขียนลง database (ปุ่มจะกดไม่ได้ถ้ายังไม่มีอะไรเปลี่ยน)
+
+ทุกค่าเก็บเป็น**นาที** ทั้ง preset และค่ากำหนดเอง จึงไม่ต้องมีคอลัมน์หน่วย และเทียบกับ `due_date` ได้ตรง ๆ
+
+> **ยังไม่มีตัวส่งอีเมลจริง** รอบนี้ทำแค่ UI + บันทึกค่า ยังไม่มี scheduler และไม่มีอะไรเขียนตาราง `Notification`
+> ปุ่ม `ส่งอีเมลทดสอบ` จึงถูก disable ไว้ และแบนเนอร์ "ส่งอีเมลไม่สำเร็จ" จะไม่ขึ้นเลยเพราะยังไม่มี log
+> เมื่อทำตัวส่งจริงจะใช้ nodemailer + SMTP
+
 ส่วนที่ยังไม่พร้อมใช้:
 
+- **ปุ่ม "ส่งอีเมลทดสอบ"** — disable ไว้ ยังไม่ได้ต่อระบบส่งอีเมล
 - **checklist "งานด่วน"** — แสดงอย่างเดียว กดติ๊กในนั้นไม่ได้ (เปลี่ยนสถานะได้จาก dropdown ในตารางแทน)
 - **ช่อง "วิชา" ใน modal แก้ไข** — แก้แล้วไม่มีผล `PATCH /api/assignments/:id` ยังไม่รับ `course_name`
 - **เมนู sidebar** `การบ้านทั้งหมด` / `สถิติ` — ยังไม่มี route รองรับ
 
 ## Database
 
-Database ชื่อ `assignment_hub` ถูกสร้างอัตโนมัติจาก `init.sql` ตอน start ครั้งแรก มี 7 ตาราง:
+Database ชื่อ `assignment_hub` ถูกสร้างอัตโนมัติจาก `init.sql` ตอน start ครั้งแรก มี 9 ตาราง:
 
 | ตาราง | เก็บอะไร |
 |---|---|
@@ -143,7 +160,9 @@ Database ชื่อ `assignment_hub` ถูกสร้างอัตโน�
 | `Assignment` | งาน: ชื่อ, ประเภท (`task_type`), ลิงก์ต้นทาง, วิชา |
 | `Assignment_Detail` | รายละเอียด: คำอธิบาย, deadline, สถานะ, `status_updated_at`, priority |
 | `Schedule` | ช่วงเวลาที่วางแผนทำ + เวลาที่คาดว่าจะใช้ |
-| `Notification` | การแจ้งเตือนของแต่ละงาน |
+| `Notification` | การแจ้งเตือนของแต่ละงาน — **ยังไม่มีโค้ดไหนเขียนลงตารางนี้** |
+| `Notification_Setting` | ตั้งค่าการแจ้งเตือนของนักศึกษา (เปิด/ปิด, ซ้ำรายวัน + เวลา, ค่ากำหนดเองล่าสุด) |
+| `Notification_Lead_Time` | ช่วงเวลาล่วงหน้าที่เลือกไว้ เก็บเป็นนาที 1 แถวต่อ 1 ค่า |
 
 เช็คข้อมูลใน database:
 
@@ -167,6 +186,7 @@ migrate.bat         # Windows cmd
 | `001_identity.sql` | unique `University.email_domain` + unique `Student (student_id, university_id)` |
 | `002_task_type.sql` | `Assignment.task_type` |
 | `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` — **อย่า backfill** ค่านี้ `NULL` แปลว่า "นักศึกษายังไม่เคยตั้งสถานะเอง" ถ้าใส่ค่าให้ทุกแถว ซิงก์จะหยุดอัปเดตสถานะจาก Classroom ทั้งหมด |
+| `004_notification_settings.sql` | ตาราง `Notification_Setting` + `Notification_Lead_Time` |
 
 เช็คว่าลงครบ:
 
@@ -190,6 +210,8 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assign
 | PATCH | `/api/assignments/:id/status` | ต้อง | เปลี่ยนสถานะ — **ใช้ได้กับงานที่ซิงก์มาด้วย** |
 | DELETE | `/api/assignments/:id` | ต้อง | ลบงานที่เพิ่มเอง คืน `204` (งานที่ซิงก์มาลบไม่ได้ — คืน `404`) |
 | POST | `/api/classroom/sync` | ต้อง | ดึงงานจาก Google Classroom มาลง DB |
+| GET | `/api/notification-settings` | ต้อง | ค่าตั้งการแจ้งเตือน (ยังไม่เคยบันทึก → คืนค่า default) |
+| PUT | `/api/notification-settings` | ต้อง | บันทึกค่าตั้งการแจ้งเตือนทั้งชุด |
 
 `ต้อง` = ต้องมี session ไม่งั้นได้ `401` — และทุก query ผูกกับ `student_id` จาก session
 ไม่ได้รับ id มาจาก client ผู้ใช้จึงเห็นเฉพาะข้อมูลของตัวเอง
@@ -203,6 +225,14 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assign
 `PATCH /:id/status` รับ `{ "status": "not_started" | "in_progress" | "submitted" | "completed" }`
 แล้วเขียนแบบ upsert (แถวที่ยังไม่มี `Assignment_Detail` ก็ตั้งสถานะได้) พร้อมประทับ `status_updated_at`
 ซึ่งเป็นตัวบอกให้ซิงก์รอบต่อไป **ไม่ต้องไปยุ่งกับสถานะแถวนั้นอีก**
+
+`PUT /api/notification-settings` รับ `{ enabled, lead_times, daily_repeat, daily_repeat_time, last_custom_minutes }`
+โดย `lead_times` เป็น array ของนาที (1–40320 คือ 28 วัน, ไม่เกิน 10 ค่า) และ `daily_repeat_time` เป็น `"HH:MM"`
+เขียนทับทั้งชุดใน transaction เดียว แล้วคืน payload หน้าตาเดียวกับ `GET`
+
+`GET` **ไม่สร้างแถวใน database** ถ้ายังไม่เคยบันทึก — คืนค่า default (`เปิด`, `1 วัน`, `08:00`) ไปเฉย ๆ
+แถวจะเกิดตอนกดบันทึกครั้งแรกเท่านั้น ตารางที่ว่างจึงแปลว่า "ยังไม่มีใครตั้งค่า" ได้จริง
+ทั้งสอง endpoint คืน `failed_count` / `last_failed_at` ด้วย แต่**ตอนนี้เป็น `0` เสมอ** เพราะยังไม่มีตัวส่งอีเมล
 
 `/api/classroom/sync` รับ body `{ "cutoffDate": "YYYY-MM-DD" | null }` (เอาเฉพาะงานที่กำหนดส่งตั้งแต่วันนั้น
 งานเก่ากว่านั้นที่เคยซิงก์ไว้จะถูกลบ) แล้วคืน `{ ok, coursesSynced, assignmentsSynced, deletedCount, skippedCourses }`
@@ -226,14 +256,14 @@ assignment-hub/
 ├── docker-compose.yml   # 3 services: frontend + backend + db
 ├── .env.local           # secret OAuth (git-ignored — สร้างเอง)
 ├── init.sql             # schema เปล่า ไม่มีข้อมูลตัวอย่าง (รันครั้งแรก)
-├── migrations/          # ALTER สำหรับ database ที่สร้างไปแล้ว (001–003)
+├── migrations/          # ALTER สำหรับ database ที่สร้างไปแล้ว (001–004)
 ├── migrate.sh           # รัน migration ทั้งหมดเรียงตามลำดับ (มี .bat สำหรับ Windows)
 ├── backend/             # Express API + mysql2 + OAuth + Classroom sync
 │   ├── server.js        # entry บาง ๆ — ตั้ง session แล้ว mount router
 │   └── src/
 │       ├── config.js    # รวม env var ไว้ที่เดียว
 │       ├── db.js        # mysql2 pool ตัวเดียวที่ทุก route ใช้ร่วมกัน
-│       ├── routes/      # health, auth, me, assignments, classroom
+│       ├── routes/      # health, auth, me, assignments, classroom, notifications
 │       ├── services/    # classroomSync, identity, oauthSession
 │       ├── utils/       # dueDate — แปลง datetime-local เป็น DATETIME ตามเวลาที่ผู้ใช้พิมพ์
 │       └── middleware/  # requireAuth
@@ -245,7 +275,8 @@ assignment-hub/
         ├── pages/           # LoginPage, HomePage, SettingsPage
         ├── components/      # Sidebar, StatCard, TaskRow, BarChart, DonutChart,
         │                    # MiniCalendar, DeadlineList, UrgentChecklist,
-        │                    # AddTaskModal, EditTaskModal, ProviderButton, BrandMark
+        │                    # AddTaskModal, EditTaskModal, NotificationSettings,
+        │                    # Toggle, ProviderButton, BrandMark
         └── icons/           # Google/Microsoft SVG + ไอคอน UI (index.jsx)
 ```
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
+import NotificationSettings from '../components/NotificationSettings';
 import GoogleIcon from '../icons/GoogleIcon';
 import MicrosoftIcon from '../icons/MicrosoftIcon';
 import { C, FONT, R } from '../theme';
@@ -144,6 +145,8 @@ function SettingsPage() {
                 </p>
               )}
             </div>
+
+            <NotificationSettings email={me.university_email} />
 
             <div style={styles.card}>
               <div style={styles.cardHead}>
