@@ -1,20 +1,42 @@
 import React, { useState } from 'react';
 import { C, FONT, WEEKDAYS, TH_MONTHS } from '../theme';
 
-// Component ย่อยสำหรับแต่ละช่องวันที่ เพื่อจัดการ State การ Hover
-function CalendarCell({ n, isToday, events }) {
+function CalendarEvent({ event }) {
   const [isHovered, setIsHovered] = useState(false);
 
+  return (
+    <div
+      style={{ ...styles.eventWrap, zIndex: isHovered ? 100 : 1 }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <div style={styles.eventBadge}>{event.title}</div>
+
+      {isHovered && (
+        <div style={styles.popup}>
+          <div style={styles.popupCourse}>{event.course_name || 'ไม่มีรายวิชา'}</div>
+          <div style={styles.popupTitle}>{event.title}</div>
+          <div style={styles.popupTime}>
+            กำหนดส่ง:{' '}
+            {event.due
+              ? `${String(event.due.getHours()).padStart(2, '0')}:${String(
+                  event.due.getMinutes()
+                ).padStart(2, '0')} น.`
+              : '—'}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarCell({ n, isToday, events }) {
   if (n == null) {
     return <div style={{ ...styles.cell, background: C.pageBg }} />;
   }
 
   return (
-    <div
-      style={{ ...styles.cell, background: 'white' }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
+    <div style={{ ...styles.cell, background: 'white' }}>
       <div
         style={{
           ...styles.dateNum,
@@ -26,37 +48,18 @@ function CalendarCell({ n, isToday, events }) {
         {n}
       </div>
 
-      {/* แถบชื่องานในปฏิทิน */}
       <div style={styles.eventContainer}>
         {events.slice(0, 2).map((a) => (
-          <div key={a.assignment_id} style={styles.eventBadge}>
-            {a.title}
-          </div>
+          <CalendarEvent key={a.assignment_id} event={a} />
         ))}
         {events.length > 2 && (
           <div style={styles.moreText}>+ อีก {events.length - 2} งาน</div>
         )}
       </div>
-
-      {/* Popup Details (จะโชว์ก็ต่อเมื่อ Hover และมีงาน) */}
-      {isHovered && events.length > 0 && (
-        <div style={styles.popup}>
-          {events.map((a) => (
-            <div key={a.assignment_id} style={styles.popupItem}>
-              <div style={styles.popupCourse}>{a.course_name || 'ไม่มีรายวิชา'}</div>
-              <div style={styles.popupTitle}>{a.title}</div>
-              <div style={styles.popupTime}>
-                กำหนดส่ง: {a.due ? `${String(a.due.getHours()).padStart(2, '0')}:${String(a.due.getMinutes()).padStart(2, '0')} น.` : '—'}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
-// Component หลัก
 function Calendar({ year, month, today, eventsByDate = new Map(), onPrev, onNext }) {
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -107,15 +110,23 @@ const styles = {
     justifyContent: 'space-between',
     marginBottom: 20,
   },
-  title: { fontFamily: FONT, fontWeight: 700, fontSize: 18, color: 'white' },
-  navWrap: { display: 'flex', gap: 8 },
+  title: {
+    fontFamily: FONT,
+    fontWeight: 700,
+    fontSize: 18,
+    color: C.ink,
+  },
+  navWrap: {
+    display: 'flex',
+    gap: 8,
+  },
   navBtn: {
     width: 32,
     height: 32,
     borderRadius: 8,
     border: 'none',
     background: 'rgba(255,255,255,0.2)',
-    color: 'white',
+    color: C.navy,
     fontSize: 18,
     lineHeight: 1,
     cursor: 'pointer',
@@ -123,47 +134,44 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  grid: { 
-    display: 'grid', 
-    gridTemplateColumns: 'repeat(7, 1fr)', 
-    gap: 1, 
-    background: C.line, 
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: 1,
+    background: C.line,
     border: `1px solid ${C.line}`,
     borderRadius: 8,
-    overflow: 'hidden'
   },
-  weekday: { 
-    fontSize: 13, 
-    color: '#6b8aa8', 
-    textAlign: 'center', 
+  weekday: {
+    fontSize: 13,
+    color: C.muted,
+    textAlign: 'center',
     fontWeight: 600,
     background: 'white',
-    padding: '12px 0'
+    padding: '12px 0',
   },
   cell: {
-    minHeight: 110,
+    height: 120,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-end',
-    padding: 6,
-    position: 'relative', 
-  },
-  dateNum: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 26,
-    height: 26,
-    borderRadius: '50%',
-    fontSize: 13,
-    marginBottom: 4,
+    padding: '6px 6px 2px',
+    boxSizing: 'border-box',
+    minWidth: 0,
   },
   eventContainer: {
     width: '100%',
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
-    marginTop: 'auto', 
+    marginTop: 'auto',
+    minWidth: 0,
+  },
+  eventWrap: {
+    position: 'relative',
+    cursor: 'pointer',
+    width: '100%',
+    minWidth: 0,
   },
   eventBadge: {
     fontSize: 10,
@@ -175,6 +183,8 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     fontWeight: 600,
+    width: '100%',
+    boxSizing: 'border-box',
   },
   moreText: {
     fontSize: 10,
@@ -182,7 +192,17 @@ const styles = {
     textAlign: 'left',
     paddingLeft: 2,
   },
-  // -- Popup Styles --
+  dateNum: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    fontSize: 13,
+    marginBottom: 4,
+    flexShrink: 0,
+  },
   popup: {
     position: 'absolute',
     bottom: '100%',
@@ -194,13 +214,14 @@ const styles = {
     padding: 12,
     borderRadius: 8,
     boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-    zIndex: 50,
-    marginBottom: 8, // เว้นระยะห่างจากตัวกล่องวันที่
+    zIndex: 100,
+    marginBottom: 8,
     display: 'flex',
     flexDirection: 'column',
     gap: 10,
-    pointerEvents: 'none', // ป้องกันเมาส์กระตุกเวลาไปโดน Popup
+    pointerEvents: 'none',
     fontFamily: FONT,
+    whiteSpace: 'normal',
   },
   popupItem: {
     display: 'flex',

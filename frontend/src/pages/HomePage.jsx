@@ -176,7 +176,6 @@ function HomePage() {
             </div>
 
             <div style={styles.body}>
-              {/* --- ส่วนบน: สถิติและกราฟ --- */}
               <div style={styles.topSection}>
                 <div style={styles.statGrid}>
                   <StatCard label="งานทั้งหมด" value={view.total} iconBg={C.indigoBg} icon={<PencilIcon size={16} color={C.navy} />} />
@@ -185,7 +184,6 @@ function HomePage() {
                   <StatCard label={`ด่วน ${URGENT_H} ชม.`} value={view.urgentCount} iconBg={C.navy} icon={<HourglassIcon size={16} color={C.pink} />} />
                 </div>
 
-                {/* แนะนำให้เพิ่ม List งานด่วนไว้ตรงนี้ เพื่อไม่ให้พื้นที่โล่งเกินไปและไม่ไปเบียด Calendar */}
                 <div style={styles.chartGrid}>
                   <div style={styles.card}>
                     <div style={styles.cardHead}>
@@ -246,7 +244,6 @@ function HomePage() {
                       }))}
                     />
                   </div>
-                  {/* สามารถย้าย UrgentChecklist หรือ DeadlineList มาเรียงต่อใน Grid นี้ได้ */}
                 </div>
               </div>
               <div style={styles.bottomSection}>
