@@ -90,8 +90,10 @@ This trips people up, so be precise about which file a variable belongs in:
 | `DB_NAME`               | compose          | `assignment_hub`                                 |
 | `OAUTH_REDIRECT_URL`    | compose          | derived — `${PUBLIC_URL}/api/auth/google/callback` |
 | `MS_OAUTH_REDIRECT_URL` | compose          | derived — `${PUBLIC_URL}/api/auth/microsoft/callback` |
+| `ADMIN_GOOGLE_REDIRECT_URL` | `.env.local` | optional explicit admin Google callback; defaults to `${FRONTEND_URL}/api/admin/auth/google/callback` |
+| `MS_ADMIN_OAUTH_REDIRECT_URL` | `.env.local` | optional explicit admin Microsoft callback; defaults to `${FRONTEND_URL}/api/admin/auth/microsoft/callback` |
 | `FRONTEND_URL`          | compose          | derived — `${PUBLIC_URL}`                        |
-| `PUBLIC_URL`            | **.env**         | origin the browser uses. Defaults to `http://localhost:5173`. Builds all three redirect URLs above, so it must match what is registered with Google/Azure exactly |
+| `PUBLIC_URL`            | **.env**         | origin the browser uses. Defaults to `http://localhost:5173`. Builds the default student and admin callback URLs above, so it must match what is registered with Google/Azure exactly |
 | `SITE_HOST`             | **.env**         | hostname Caddy requests a certificate for        |
 | `BIND`                  | **.env**         | interface the app ports publish on. `127.0.0.1` on a deployed host keeps frontend/backend/db off the internet; defaults to `0.0.0.0` |
 | `FRONTEND_PORT`         | **.env**         | host port mapped to Vite's 5173; defaults to `5173`. Leave it alone when Caddy is in front — Caddy owns 80/443 |
@@ -100,7 +102,8 @@ This trips people up, so be precise about which file a variable belongs in:
 | `GOOGLE_CLIENT_SECRET`  | **.env.local**   | Google OAuth client secret — must come from the *same* client as the ID |
 | `MS_CLIENT_ID`          | **.env.local**   | Azure app (application) ID                        |
 | `MS_CLIENT_SECRET`      | **.env.local**   | Azure client secret                              |
-| `MS_TENANT_ID`          | **.env.local**   | *(optional)* Azure tenant; defaults to `organizations` |
+| `MS_TENANT_ID`          | **.env.local**   | *(optional)* Azure tenant for student OAuth; defaults to `organizations` |
+| `MS_ADMIN_TENANT_IDS`   | **.env.local**   | **required for Microsoft admin OAuth** — comma-separated trusted Entra tenant GUIDs |
 | `SESSION_SECRET`        | **.env.local**   | random string that signs the session cookie. **Set this on any internet-facing host** — the fallback in `server.js` is a literal published in this repo, so leaving it empty lets anyone forge a session. Generate with `openssl rand -hex 32`; it does not need to match between machines |
 
 ## Frontend routes
@@ -108,6 +111,8 @@ This trips people up, so be precise about which file a variable belongs in:
 | Path     | Page          | Notes                                                        |
 |----------|---------------|-------------------------------------------------------------|
 | `/login` | Login screen  | Real Google / Microsoft OAuth (buttons redirect to the backend) |
+| `/admin/login` | Admin login | Separate Google / Microsoft OAuth; email must be provisioned in `Admin` |
+| `/admin/*` | Admin console | Protected admin dashboard, users, errors, system health, and business analytics |
 | `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, a month calendar, upcoming deadlines, and a 48h checklist. **Summary only — no task table** |
 | `/assignments` | All tasks | Requires a session. The task table: search, platform/status/course filters, per-row status control, edit + delete on manual tasks |
 | `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, notification preferences, and connect state for Google and Microsoft |
@@ -191,7 +196,7 @@ rather than declared in `index.html`.
 
 ## Authentication (OAuth)
 
-Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on a single origin (`localhost:5173` locally, `PUBLIC_URL` when deployed) via the Vite `/api` proxy, so the session cookie is same-host. Each flow sends a random `state` held in the session and rejects a callback that doesn't match it (`/login?error=state`). On callback the backend upserts the user into `Student` (keyed on the unique email), stores the provider's access/refresh tokens (`gg_*` for Google, `ms_*` for Microsoft), and starts an `express-session` cookie. The dashboard reads `/api/me`; a `401` bounces you to `/login`.
+Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on a single origin (`localhost:5173` locally, `PUBLIC_URL` when deployed) via the Vite `/api` proxy, so the session cookie is same-host. Each flow sends a random `state` held in the session and rejects a callback that doesn't match it (`/login?error=state`). Student callbacks upsert the user into `Student` and store provider tokens. Admin callbacks use a provider-bound state, verify the provider identity, and look up the normalized email in the manually provisioned `Admin` allowlist; they never create a `Student` row or store provider tokens. The shared session cookie has one active mode at a time: switching to admin replaces the student session, and vice versa.
 
 **Identity.** The email domain resolves to a `University` row that is *created on first sight*, so a new institution needs no seed data or code change (UR02). `student_id` is taken from the email's local part when it is all digits — the common `67050115@…` format — and is otherwise left unset for the user to fill in; it is unique per university, not globally (UR03).
 
@@ -199,8 +204,8 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 
 **Prerequisites — create OAuth apps and a `.env.local`:**
 
-1. **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External, add yourself as a Test user) → Credentials → OAuth client ID (Web application). Authorized redirect URI: `http://localhost:5173/api/auth/google/callback`. Enable the **Google Classroom API** and add the three `classroom.*.readonly` scopes below, or `/api/classroom/sync` will fail.
-2. **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration (accounts: *organizations* / work-school). Add a Web redirect URI: `http://localhost:5173/api/auth/microsoft/callback`, and create a client secret.
+1. **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External, add yourself as a Test user) → Credentials → OAuth client ID (Web application). Register both `http://localhost:5173/api/auth/google/callback` and `http://localhost:5173/api/admin/auth/google/callback`. Enable the **Google Classroom API** and add the three `classroom.*.readonly` scopes below, or `/api/classroom/sync` will fail.
+2. **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration (accounts: *organizations* / work-school). Register both `http://localhost:5173/api/auth/microsoft/callback` and `http://localhost:5173/api/admin/auth/microsoft/callback`, and create a client secret.
 3. Create **`.env.local`** at the repo root (git-ignored via `.env*`):
 
    ```env
@@ -208,10 +213,31 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
    GOOGLE_CLIENT_SECRET=...
    MS_CLIENT_ID=...
    MS_CLIENT_SECRET=...
+   MS_TENANT_ID=...             # optional; defaults to organizations
+   MS_ADMIN_TENANT_IDS=...      # required for Microsoft admin login
+   # ADMIN_GOOGLE_REDIRECT_URL=...
+   # MS_ADMIN_OAUTH_REDIRECT_URL=...
    SESSION_SECRET=<random-string>
    ```
 
-4. Recreate the backend so it picks up the env: `docker compose up -d backend`.
+4. Provision an allowlisted admin directly in MySQL; there is intentionally no public admin registration endpoint:
+
+   ```sql
+   -- Choose the provider(s) used by this admin. A single row may contain both.
+   -- Google admin (email is matched to the verified Google identity).
+   INSERT INTO Admin (email, display_name)
+   VALUES ('admin@example.edu', 'Assignment Hub Admin');
+
+   -- Microsoft admin (use immutable Entra tenant and user Object IDs).
+   INSERT INTO Admin (email, display_name, microsoft_tenant_id, microsoft_object_id)
+   VALUES ('admin@example.edu', 'Assignment Hub Admin',
+           '<tenant-guid>', '<user-object-guid>')
+   ON DUPLICATE KEY UPDATE
+     microsoft_tenant_id = VALUES(microsoft_tenant_id),
+     microsoft_object_id = VALUES(microsoft_object_id);
+   ```
+
+5. Recreate the backend so it picks up the env: `docker compose up -d backend`.
 
 > **Google scopes:** `openid email profile` plus `classroom.courses.readonly`,
 > `classroom.coursework.me.readonly`, and `classroom.student-submissions.me.readonly`.
@@ -230,6 +256,11 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | Method | Path                          | Auth | Returns / does                                       |
 |--------|-------------------------------|------|------------------------------------------------------|
 | GET    | `/api/health`                 | —    | `{ status, db }` — verifies the DB connection        |
+| GET    | `/api/admin/auth/google`      | —    | Starts allowlisted admin Google OAuth                |
+| GET    | `/api/admin/auth/microsoft`   | —    | Starts allowlisted admin Microsoft OAuth             |
+| GET    | `/api/admin/me`               | Admin | Current `Admin` identity                             |
+| POST   | `/api/admin/auth/logout`      | Admin | Destroys the admin session                           |
+| GET    | `/api/admin/*`                | Admin | Monitoring and business analytics endpoints          |
 | GET    | `/api/auth/google`            | —    | Redirects to Google's consent screen                 |
 | GET    | `/api/auth/google/callback`   | —    | Exchanges code, upserts user + tokens, starts session |
 | GET    | `/api/auth/microsoft`         | —    | Redirects to Microsoft's consent screen              |
@@ -364,7 +395,11 @@ assignment-hub/
 │   ├── 001_identity.sql      # unique email domain + (student_id, university_id)
 │   ├── 002_task_type.sql     # Assignment.task_type
 │   ├── 003_status_updated_at.sql  # Assignment_Detail.status_updated_at
-│   └── 004_notification_settings.sql  # Notification_Setting + Notification_Lead_Time
+│   ├── 004_notification_settings.sql  # Notification_Setting + Notification_Lead_Time
+│   ├── 005_admin_monitoring.sql       # monitoring tables and Student account status
+│   ├── 006_product_analytics.sql      # privacy-safe Product_Event stream
+│   ├── 007_admin_identity.sql          # separate Admin allowlist identity
+│   └── 008_admin_microsoft_identity.sql # immutable Microsoft identity columns
 ├── migrate.sh / migrate.bat  # run every migration in order (keep the two in step)
 ├── Caddyfile                 # TLS reverse proxy config (used by the `tls` profile)
 ├── .env                      # deploy settings for Compose substitution (git-ignored)
@@ -376,9 +411,11 @@ assignment-hub/
 │   └── src/
 │       ├── config.js         # env vars in one place (PORT, SESSION_SECRET, OAuth ids)
 │       ├── db.js             # the shared mysql2 pool
-│       ├── middleware/auth.js    # requireAuth — 401 without a session
-│       ├── routes/           # health, auth, me, assignments, classroom, notifications
+│       ├── middleware/auth.js    # requireAuth + requireAdmin session guards
+│       ├── routes/           # health, student auth, admin auth, app/admin APIs
 │       ├── services/
+│       │   ├── adminIdentity.js    # allowlisted Admin lookup (never creates Student)
+│       │   ├── businessMetrics.js  # aggregate adoption and usage metrics
 │       │   ├── classroomSync.js  # Classroom paging + date conversion
 │       │   ├── identity.js       # find-or-create University / upsert Student
 │       │   └── oauthSession.js   # `state` handling and the link-mode flow
@@ -390,16 +427,18 @@ assignment-hub/
     ├── index.html            # bare Vite entry (fonts are injected from GlobalStyles.jsx)
     └── src/
         ├── main.jsx          # React entry
-        ├── App.jsx           # router: /login, /home, /assignments, /settings
+        ├── App.jsx           # router: student routes + /admin/login + protected /admin/*
         ├── theme.js          # design tokens: colours, font, radii, shadows, Thai day/month names
         ├── tasks.js          # shared task model: STATUS, filters, isDone, withDerived, date fmt
         ├── useAssignments.js # shared hook: fetch + status/delete/edit handlers
         ├── GlobalStyles.jsx  # injects the Maitree webfont + base CSS, sets lang="th"
         ├── pages/
-        │   ├── LoginPage.jsx    # two-panel login screen (Google/Microsoft OAuth)
+        │   ├── LoginPage.jsx    # student Google/Microsoft OAuth
+        │   ├── AdminLoginPage.jsx # separate allowlisted admin OAuth
         │   ├── HomePage.jsx     # dashboard summary + the Classroom sync toolbar
         │   ├── AssignmentsPage.jsx # the task table
-        │   └── SettingsPage.jsx # profile, รหัสนักศึกษา, notifications, provider link state
+        │   ├── SettingsPage.jsx # profile, รหัสนักศึกษา, notifications, provider link state
+        │   └── admin/            # protected monitoring and business analytics pages
         ├── components/       # Sidebar, StatCard, AssignmentTable, TaskRow, BarChart,
         │                     # DonutChart, MiniCalendar, DeadlineList, UrgentChecklist,
         │                     # AddTaskModal, EditTaskModal, NotificationSettings, Toggle,
@@ -419,8 +458,9 @@ hex in a component, so both screens keep one palette.
 
 Auto-created on first DB start. Tables:
 
-`University` · `Student` · `Course` · `Assignment` · `Assignment_Detail` · `Schedule` ·
-`Notification` · `Notification_Setting` · `Notification_Lead_Time`
+`University` · `Student` · `Admin` · `Product_Event` · `Course` · `Assignment` · `Assignment_Detail` · `Schedule` ·
+`Notification` · `Notification_Setting` · `Notification_Lead_Time` · `System_Error_Log` ·
+`Admin_Audit_Log` · `System_Request_Metric_Hourly`
 
 `init.sql` creates the schema and **inserts nothing** — the database starts empty, so a
 new account sees an empty dashboard until it runs a Classroom sync. `University` rows are
@@ -470,8 +510,8 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e \
 ### Migrations
 
 Because `init.sql` only runs on a fresh database, an existing one never picks up schema
-changes. `migrations/` holds the equivalent `ALTER`s, applied by hand and safe to skip on
-a database built from the current `init.sql`:
+changes. `migrations/` contains one-time migrations to apply in order to an older database;
+do not rerun a migration that has already been applied.
 
 | File | Adds | For |
 |---|---|---|
@@ -479,6 +519,10 @@ a database built from the current `init.sql`:
 | `002_task_type.sql` | `Assignment.task_type` | UR06, A5.1 |
 | `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` | UC-5, A3.3, UR12 |
 | `004_notification_settings.sql` | `Notification_Setting` + `Notification_Lead_Time` tables | UC-6, UR12 |
+| `005_admin_monitoring.sql` | monitoring tables and Student account status | admin console |
+| `006_product_analytics.sql` | privacy-safe `Product_Event` stream | business analytics |
+| `007_admin_identity.sql` | separate `Admin` allowlist identity | admin login |
+| `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs | admin login |
 
 `migrate.sh` (and `migrate.bat` for cmd) runs them all in order against a running stack:
 
@@ -487,10 +531,9 @@ a database built from the current `init.sql`:
 migrate.bat         # Windows cmd
 ```
 
-Both are plain sequences of the same command, so re-running them on an up-to-date database
-just prints "Duplicate column name" / "Duplicate key name" per statement and moves on —
-there is no migration ledger and nothing tracks which ones already ran. New migrations must
-be appended to **both** scripts by hand.
+Both scripts contain the same ordered sequence, and new migrations must be appended to **both** by hand.
+Run them only against a database that has not already applied those files; a fresh database from
+current `init.sql` already contains the latest schema.
 
 Applying one on its own:
 
@@ -563,7 +606,7 @@ certificates per domain per week.
 | `docker compose logs -f frontend`| Follow frontend logs                    |
 | `docker compose --profile tls up -d` | Bring the stack up with Caddy in front (deployed hosts) |
 | `docker compose rm -fsv <service>`   | Drop a service **and its anonymous `node_modules` volume** — the fix after adding a dependency |
-| `./migrate.sh` / `migrate.bat`   | Apply every `migrations/*.sql` to an existing database (no-op errors if already applied) |
+| `./migrate.sh` / `migrate.bat`   | Apply every one-time migration to an older database |
 
 ## Troubleshooting
 

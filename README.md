@@ -165,12 +165,14 @@ db-1        | ... ready for connections
 
 ## Database
 
-Database ชื่อ `assignment_hub` ถูกสร้างอัตโนมัติจาก `init.sql` ตอน start ครั้งแรก มี 9 ตาราง:
+Database ชื่อ `assignment_hub` ถูกสร้างอัตโนมัติจาก `init.sql` ตอน start ครั้งแรก มี 14 ตาราง:
 
 | ตาราง | เก็บอะไร |
 |---|---|
 | `University` | มหาวิทยาลัย + โดเมนอีเมล |
 | `Student` | ผู้ใช้ + token สำหรับ login (Google/Microsoft) |
+| `Admin` | รายชื่อผู้ดูแลที่อนุญาตให้เข้า admin console (ไม่มี provider token) |
+| `Product_Event` | event การใช้งานแบบ metadata ปลอดภัยสำหรับ business analytics |
 | `Course` | รายวิชา + แพลตฟอร์มต้นทาง (Classroom/Teams) |
 | `Assignment` | งาน: ชื่อ, ประเภท (`task_type`), ลิงก์ต้นทาง, วิชา |
 | `Assignment_Detail` | รายละเอียด: คำอธิบาย, deadline, สถานะ, `status_updated_at`, priority |
@@ -178,6 +180,9 @@ Database ชื่อ `assignment_hub` ถูกสร้างอัตโน�
 | `Notification` | การแจ้งเตือนของแต่ละงาน — **ยังไม่มีโค้ดไหนเขียนลงตารางนี้** |
 | `Notification_Setting` | ตั้งค่าการแจ้งเตือนของนักศึกษา (เปิด/ปิด, ซ้ำรายวัน + เวลา, ค่ากำหนดเองล่าสุด) |
 | `Notification_Lead_Time` | ช่วงเวลาล่วงหน้าที่เลือกไว้ เก็บเป็นนาที 1 แถวต่อ 1 ค่า |
+| `System_Error_Log` | error log ที่ตัดข้อมูลลับออกแล้ว |
+| `Admin_Audit_Log` | ประวัติการกระทำของผู้ดูแลระบบ |
+| `System_Request_Metric_Hourly` | aggregate metrics ของ request รายชั่วโมง |
 
 เช็คข้อมูลใน database:
 
@@ -188,8 +193,8 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES; SE
 ### Migrations
 
 `init.sql` รันครั้งเดียวตอนสร้าง database ใหม่เท่านั้น **database ที่มีอยู่แล้วจะไม่ได้ schema ใหม่ตามไปด้วย**
-ไฟล์ใน `migrations/` คือ `ALTER` ที่เทียบเท่ากัน รันซ้ำได้ไม่เสียหายถ้า database สร้างจาก `init.sql` ล่าสุดอยู่แล้ว
-(จะ error ว่ามีคอลัมน์/index อยู่แล้ว แล้วผ่านไป)
+ไฟล์ใน `migrations/` ต้องรันตามลำดับกับ database เดิม และเป็น one-time migrations
+(ไม่ควรรันซ้ำบนฐานข้อมูลที่ใช้ migration นั้นไปแล้ว)
 
 ```bash
 ./migrate.sh        # macOS / Linux / Git Bash
@@ -202,6 +207,10 @@ migrate.bat         # Windows cmd
 | `002_task_type.sql` | `Assignment.task_type` |
 | `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` — **อย่า backfill** ค่านี้ `NULL` แปลว่า "นักศึกษายังไม่เคยตั้งสถานะเอง" ถ้าใส่ค่าให้ทุกแถว ซิงก์จะหยุดอัปเดตสถานะจาก Classroom ทั้งหมด |
 | `004_notification_settings.sql` | ตาราง `Notification_Setting` + `Notification_Lead_Time` |
+| `005_admin_monitoring.sql` | role/status ของ Student + system error/audit/request metric tables |
+| `006_product_analytics.sql` | ตาราง `Product_Event` สำหรับ business analytics |
+| `007_admin_identity.sql` | ตาราง `Admin` + ย้าย identity ผู้ดูแลออกจาก Student |
+| `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs สำหรับ Admin |
 
 เช็คว่าลงครบ:
 
@@ -209,11 +218,40 @@ migrate.bat         # Windows cmd
 docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assignment; DESCRIBE Assignment_Detail;"
 ```
 
+### Admin access
+
+There is no public admin registration. After applying migration `007_admin_identity.sql`, provision an allowlisted account directly:
+
+```sql
+-- Choose the provider(s) used by this admin. A single row may contain both.
+-- Google administrator (email is checked against the verified Google identity).
+INSERT INTO Admin (email, display_name)
+VALUES ('admin@example.edu', 'Assignment Hub Admin');
+
+-- Microsoft administrator: use the Entra tenant ID and user Object ID,
+-- not an email address. The tenant must also be listed in MS_ADMIN_TENANT_IDS.
+-- If the same row is also used for Microsoft, this upsert adds its immutable IDs.
+INSERT INTO Admin (email, display_name, microsoft_tenant_id, microsoft_object_id)
+VALUES ('admin@example.edu', 'Assignment Hub Admin',
+        '<tenant-guid>', '<user-object-guid>')
+ON DUPLICATE KEY UPDATE
+  microsoft_tenant_id = VALUES(microsoft_tenant_id),
+  microsoft_object_id = VALUES(microsoft_object_id);
+```
+
+Register both admin OAuth callback URLs with the provider. Admin login uses `/admin/login`, has a separate `Admin` identity/auth mode, and never creates a `Student` row. The browser uses one session cookie, so switching between student and admin login replaces the active session mode.
+
 ## API (backend)
 
 | Method | Path | ต้อง login? | คืนอะไร |
 |---|---|---|---|
 | GET | `/api/health` | — | สถานะการต่อ DB |
+| GET | `/api/admin/auth/{provider}` | — | เริ่ม OAuth สำหรับผู้ดูแล (Google/Microsoft) |
+| GET | `/api/admin/auth/{provider}/callback` | — | ตรวจ allowlist `Admin` แล้วเริ่ม admin session |
+| GET | `/api/admin/me` | ต้องเป็น admin | ข้อมูลผู้ดูแลที่ login อยู่ |
+| POST | `/api/admin/auth/logout` | ต้องเป็น admin | ออกจาก admin session |
+| GET | `/api/admin/dashboard` · `/users` · `/errors` · `/system/*` | ต้องเป็น admin | monitoring console |
+| GET | `/api/admin/business/*` | ต้องเป็น admin | business analytics แบบ aggregate |
 | GET | `/api/auth/google` · `/microsoft` | — | ส่งไปหน้า consent ของ provider |
 | GET | `/api/auth/{provider}/callback` | — | แลก code → สร้าง/อัปเดต user + token → เริ่ม session |
 | GET | `/api/me` | ต้อง | ข้อมูล user ที่ login อยู่ + สถานะเชื่อมต่อ Google/Microsoft |

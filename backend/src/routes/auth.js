@@ -48,13 +48,17 @@ router.get('/api/auth/google/callback', async (req, res) => {
     const payload = ticket.getPayload();
     const email = payload.email;
 
+    const wasLink = Boolean(req.session.linkMode);
     req.session.userId = await completeLogin({
       req,
       provider: 'google',
       email,
       name: payload.name || email,
       tokens,
+      linkMode: wasLink,
     });
+    req.session.adminId = null;
+    req.session.authType = 'student';
     finishOAuth(req, res, 'google');
   } catch (err) {
     void logError(err, req, { source: 'auth', statusCode: 500 });
@@ -103,13 +107,17 @@ router.get('/api/auth/microsoft/callback', async (req, res) => {
     const { payload } = await jwtVerify(tokens.id_token, msJwks, { audience: MS_CLIENT_ID });
     const email = payload.email || payload.preferred_username;
 
+    const wasLink = Boolean(req.session.linkMode);
     req.session.userId = await completeLogin({
       req,
       provider: 'microsoft',
       email,
       name: payload.name || email,
       tokens,
+      linkMode: wasLink,
     });
+    req.session.adminId = null;
+    req.session.authType = 'student';
     finishOAuth(req, res, 'microsoft');
   } catch (err) {
     void logError(err, req, { source: 'auth', statusCode: 500 });

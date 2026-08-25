@@ -64,6 +64,5 @@ CREATE TABLE System_Request_Metric_Hourly (
     p95_response_ms DECIMAL(10,2) NULL
 );
 
--- Promote the initial administrator manually; there is intentionally no public
--- API for role changes:
--- UPDATE Student SET role = 'admin' WHERE university_email = 'admin@example.edu';
+-- Administrator identities are migrated to the separate Admin table by 007_admin_identity.sql.
+-- Do not promote a Student row for new administrators; provision an Admin row instead.

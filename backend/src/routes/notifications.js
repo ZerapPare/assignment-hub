@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { logError } = require('../services/errorLogger');
+const { safeTrackEvent } = require('../services/analytics');
 
 const router = express.Router();
 
@@ -169,6 +170,17 @@ router.put('/api/notification-settings', requireAuth, async (req, res) => {
   } finally {
     if (conn) conn.release();
   }
+
+  void safeTrackEvent({
+    userId: req.session.userId,
+    eventName: 'notification.settings_updated',
+    result: 'success',
+    metadata: {
+      enabled,
+      daily_repeat: dailyRepeat,
+      lead_time_count: leadTimes.length,
+    },
+  });
 
   // Same shape as GET, so the panel can drop the response straight into state.
   try {

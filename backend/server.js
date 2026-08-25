@@ -28,11 +28,14 @@ app.use(
 
 app.use(require('./src/routes/health'));
 app.use(require('./src/routes/auth'));
+app.use(require('./src/routes/adminAuth'));
 app.use(require('./src/routes/me'));
 app.use(require('./src/routes/assignments'));
 app.use(require('./src/routes/classroom'));
 app.use(require('./src/routes/notifications'));
+app.use(require('./src/routes/analytics'));
 app.use(require('./src/routes/admin'));
+app.use(require('./src/routes/adminBusiness'));
 app.use((req, res, next) => {
   const error = new Error('not found');
   error.statusCode = 404;

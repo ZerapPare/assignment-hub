@@ -3,6 +3,7 @@ const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { logError } = require('../services/errorLogger');
 const { parseDueDate } = require('../utils/dueDate');
+const { safeTrackEvent } = require('../services/analytics');
 
 const router = express.Router();
 
@@ -103,6 +104,13 @@ router.post('/api/assignments', requireAuth, async (req, res) => {
 
     await conn.commit();
 
+    void safeTrackEvent({
+      userId: req.session.userId,
+      eventName: 'assignment.manual_created',
+      result: 'success',
+      ...(taskType ? { metadata: { task_type: taskType } } : {}),
+    });
+
     const [rows] = await conn.query(`${ASSIGNMENT_SELECT} WHERE a.assignment_id = ?`, [
       created.insertId,
     ]);
@@ -189,6 +197,11 @@ router.patch('/api/assignments/:id', requireAuth, async (req, res) => {
     }
 
     const [rows] = await pool.query(`${ASSIGNMENT_SELECT} WHERE a.assignment_id = ?`, [id]);
+    void safeTrackEvent({
+      userId: req.session.userId,
+      eventName: 'assignment.manual_updated',
+      result: 'success',
+    });
     res.json(rows[0]);
   } catch (err) {
     void logError(err, req, { source: 'assignments', statusCode: 503 });
@@ -216,13 +229,16 @@ router.patch('/api/assignments/:id/status', requireAuth, async (req, res) => {
 
   try {
     const [owned] = await pool.query(
-      `SELECT a.assignment_id FROM Assignment a
+      `SELECT a.assignment_id, d.status
+       FROM Assignment a
        JOIN Course c ON a.course_id = c.course_id
+       LEFT JOIN Assignment_Detail d ON d.assignment_id = a.assignment_id
        WHERE a.assignment_id = ? AND c.student_id = ?
        LIMIT 1`,
       [id, req.session.userId]
     );
     if (!owned.length) return res.status(404).json({ error: 'not found' });
+    const previousStatus = owned[0].status || 'not_started';
 
     // Upsert rather than UPDATE: the list query LEFT JOINs Assignment_Detail,
     // so a row without one is possible and a plain UPDATE would touch nothing
@@ -235,6 +251,17 @@ router.patch('/api/assignments/:id/status', requireAuth, async (req, res) => {
     );
 
     const [rows] = await pool.query(`${ASSIGNMENT_SELECT} WHERE a.assignment_id = ?`, [id]);
+    if (previousStatus !== status) {
+      void safeTrackEvent({
+        userId: req.session.userId,
+        eventName: 'assignment.status_changed',
+        result: 'success',
+        metadata: {
+          from: previousStatus,
+          to: status,
+        },
+      });
+    }
     res.json(rows[0]);
   } catch (err) {
     void logError(err, req, { source: 'assignments', statusCode: 503 });
@@ -266,6 +293,11 @@ router.delete('/api/assignments/:id', requireAuth, async (req, res) => {
       await conn.query('DELETE FROM Assignment_Detail WHERE assignment_id = ?', [id]);
       await conn.query('DELETE FROM Assignment WHERE assignment_id = ?', [id]);
       await conn.commit();
+      void safeTrackEvent({
+        userId: req.session.userId,
+        eventName: 'assignment.manual_deleted',
+        result: 'success',
+      });
       res.status(204).send(); // No content
     } catch (err) {
       await conn.rollback();

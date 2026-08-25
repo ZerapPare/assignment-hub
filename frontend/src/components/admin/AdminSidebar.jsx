@@ -1,19 +1,20 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import BrandMark from '../BrandMark';
-import { BellIcon, GearIcon, HomeIcon, PencilIcon } from '../../icons';
+import { BellIcon, GearIcon, HomeIcon, PencilIcon, SortIcon } from '../../icons';
 import { C, FONT, R } from '../../theme';
 
 const NAV_ITEMS = [
   { to: '/admin/dashboard', label: 'ภาพรวมระบบ', Icon: HomeIcon },
+  { to: '/admin/business', label: 'Business Analytics', Icon: SortIcon },
   { to: '/admin/users', label: 'ผู้ใช้งาน', Icon: PencilIcon },
   { to: '/admin/errors', label: 'บันทึกข้อผิดพลาด', Icon: BellIcon },
   { to: '/admin/system', label: 'สถานะระบบ', Icon: GearIcon },
 ];
 
 function AdminSidebar({ admin, open, onNavigate, onLogout }) {
-  const name = admin?.student_name || 'ผู้ดูแลระบบ';
-  const subtitle = admin?.university_email || admin?.university_name || 'Admin account';
+  const name = admin?.display_name || 'ผู้ดูแลระบบ';
+  const subtitle = admin?.email || 'Admin account';
 
   return (
     <aside className={`ah-admin-sidebar${open ? ' is-open' : ''}`} style={styles.rail}>

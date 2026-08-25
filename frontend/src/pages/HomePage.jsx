@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Sidebar from '../components/Sidebar';
 import StatCard from '../components/StatCard';
 import BarChart from '../components/BarChart';
@@ -8,6 +8,7 @@ import DeadlineList from '../components/DeadlineList';
 import UrgentChecklist from '../components/UrgentChecklist';
 import AddTaskModal from '../components/AddTaskModal';
 import useAssignments from '../useAssignments';
+import { trackClientEvent } from '../analytics';
 import { HOUR, URGENT_H, fmtDate, fmtTime, isDone, withDerived } from '../tasks';
 import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } from '../icons';
 import { C, FONT, R, SHADOW, WEEKDAYS } from '../theme';
@@ -25,6 +26,13 @@ function HomePage() {
     const n = new Date();
     return { year: n.getFullYear(), month: n.getMonth() };
   });
+  const dashboardTracked = useRef(false);
+
+  useEffect(() => {
+    if (!student || loading || error || dashboardTracked.current) return;
+    dashboardTracked.current = true;
+    void trackClientEvent('dashboard.viewed');
+  }, [student, loading, error]);
 
   const handleCutoffChange = (e) => {
     const val = e.target.value;

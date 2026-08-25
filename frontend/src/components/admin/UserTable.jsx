@@ -7,7 +7,7 @@ function StatusBadge({ status }) {
   return <span style={{ ...styles.status, background: suspended ? C.pinkBg : C.greenBg, color: suspended ? C.pinkDark : C.green }}>{suspended ? 'ระงับแล้ว' : 'ใช้งานอยู่'}</span>;
 }
 
-function UserTable({ users, onOpen, onChangeStatus, currentUserId }) {
+function UserTable({ users, onOpen, onChangeStatus, currentAdminEmail }) {
   if (!users.length) return <div style={styles.empty}>ไม่พบผู้ใช้ที่ตรงกับเงื่อนไข</div>;
 
   return (
@@ -17,7 +17,7 @@ function UserTable({ users, onOpen, onChangeStatus, currentUserId }) {
         <tbody>{users.map((user) => {
           const id = user.user_id || user.id;
           const suspended = user.account_status === 'suspended';
-          const isSelf = String(id) === String(currentUserId);
+          const isSelf = String(user.university_email || '').trim().toLowerCase() === String(currentAdminEmail || '').trim().toLowerCase() && Boolean(currentAdminEmail);
           return <tr key={id} style={styles.row} onClick={() => onOpen(id)} tabIndex="0" onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(id); } }}>
             <td style={styles.cell}><div style={styles.user}><span style={styles.avatar}>{String(user.student_name || user.university_email || '?').slice(0, 1)}</span><span style={styles.userCopy}><strong>{user.student_name || 'ไม่ระบุชื่อ'}</strong><small>{user.university_email || '—'}</small></span></div></td>
             <td style={styles.cell}>{user.student_id || '—'}</td><td style={styles.cell}>{user.university_name || '—'}</td><td style={styles.cell}><span style={styles.provider}>{providerLabel(user)}</span></td><td style={styles.cell}><StatusBadge status={user.account_status} /></td>

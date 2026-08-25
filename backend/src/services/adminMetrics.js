@@ -62,7 +62,8 @@ async function getDashboard(rangeDays) {
             COALESCE(SUM(last_seen_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)), 0) AS active_30d,
             COALESCE(SUM(created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)), 0) AS new_7d,
             COALESCE(SUM(created_at >= DATE_SUB(NOW(), INTERVAL ${interval} DAY)), 0) AS new_in_range
-     FROM Student`
+     FROM Student
+     WHERE role = 'student'`
   );
   const [errorRows, newUserRows, activeUserRows, sourceRows, errorCountRows, recentErrors, recentUsers, metrics] = await Promise.all([
     pool.query(
@@ -75,14 +76,16 @@ async function getDashboard(rangeDays) {
     pool.query(
       `SELECT DATE(created_at) AS date, COUNT(*) AS count
        FROM Student
-       WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${interval} DAY)
+       WHERE role = 'student'
+         AND created_at >= DATE_SUB(NOW(), INTERVAL ${interval} DAY)
        GROUP BY DATE(created_at)
        ORDER BY date`
     ),
     pool.query(
       `SELECT DATE(last_seen_at) AS date, COUNT(*) AS count
        FROM Student
-       WHERE last_seen_at >= DATE_SUB(NOW(), INTERVAL ${interval} DAY)
+       WHERE role = 'student'
+         AND last_seen_at >= DATE_SUB(NOW(), INTERVAL ${interval} DAY)
        GROUP BY DATE(last_seen_at)
        ORDER BY date`
     ),
@@ -108,7 +111,8 @@ async function getDashboard(rangeDays) {
       `SELECT user_id, student_id, student_name, university_email,
               account_status, last_seen_at
        FROM Student
-       WHERE last_seen_at IS NOT NULL
+       WHERE role = 'student'
+         AND last_seen_at IS NOT NULL
        ORDER BY last_seen_at DESC, user_id DESC LIMIT 5`
     ),
     getSystemMetrics24h(),

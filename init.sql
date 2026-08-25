@@ -3,7 +3,9 @@
 -- Generated from Assignment_Hub_drawio.xml ER Diagram
 -- =========================================================
 
+DROP TABLE IF EXISTS Product_Event;
 DROP TABLE IF EXISTS Admin_Audit_Log;
+DROP TABLE IF EXISTS Admin;
 DROP TABLE IF EXISTS System_Error_Log;
 DROP TABLE IF EXISTS System_Request_Metric_Hourly;
 DROP TABLE IF EXISTS Notification_Lead_Time;
@@ -60,6 +62,45 @@ CREATE TABLE Student (
     INDEX idx_student_created_at (created_at),
     INDEX idx_student_last_seen_at (last_seen_at),
     INDEX idx_student_university_id (university_id)
+);
+
+-- =========================================================
+-- TABLE: Admin
+-- =========================================================
+-- Admin identities are provisioned manually. OAuth tokens are intentionally
+-- not stored because the Admin console does not call provider APIs.
+CREATE TABLE Admin (
+    admin_id      INT AUTO_INCREMENT PRIMARY KEY,
+    email         VARCHAR(255) NOT NULL UNIQUE,
+    display_name  VARCHAR(255) NULL,
+    microsoft_tenant_id VARCHAR(36) NULL,
+    microsoft_object_id VARCHAR(36) NULL,
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_login_at DATETIME NULL,
+    CONSTRAINT uq_admin_microsoft_identity UNIQUE (microsoft_tenant_id, microsoft_object_id)
+);
+
+-- =========================================================
+-- TABLE: Product_Event
+-- =========================================================
+-- A privacy-conscious event stream for meaningful product actions. Metadata
+-- contains aggregate values only; OAuth credentials and coursework content are
+-- never written here.
+CREATE TABLE Product_Event (
+    event_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id       INT NOT NULL,
+    event_name    VARCHAR(100) NOT NULL,
+    feature_name  VARCHAR(80) NOT NULL,
+    event_result  VARCHAR(20) NULL,
+    metadata      JSON NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_product_event_student
+        FOREIGN KEY (user_id) REFERENCES Student(user_id) ON DELETE CASCADE,
+    INDEX idx_product_event_created (created_at),
+    INDEX idx_product_event_feature_created (feature_name, created_at),
+    INDEX idx_product_event_name_created (event_name, created_at),
+    INDEX idx_product_event_user_created (user_id, created_at)
 );
 
 -- =========================================================
@@ -205,7 +246,7 @@ CREATE TABLE Admin_Audit_Log (
     detail JSON NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_audit_log_admin
-        FOREIGN KEY (admin_user_id) REFERENCES Student(user_id),
+        FOREIGN KEY (admin_user_id) REFERENCES Admin(admin_id),
     INDEX idx_audit_log_admin_created_at (admin_user_id, created_at),
     INDEX idx_audit_log_target_created_at (target_type, target_id, created_at)
 );

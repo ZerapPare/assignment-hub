@@ -30,7 +30,7 @@ function AdminUserDetailPage() {
 
   const user = payload?.user || payload;
   const suspended = user?.account_status === 'suspended';
-  const isSelf = String(user?.user_id || user?.id) === String(admin?.user_id);
+  const isSelf = String(user?.university_email || '').trim().toLowerCase() === String(admin?.email || '').trim().toLowerCase() && Boolean(admin?.email);
   const recentErrors = listFrom(payload, ['recent_errors', 'recentErrors', 'errors']);
   const audits = listFrom(payload, ['recent_audit_actions', 'audit_actions', 'audits']);
   const usage = payload?.usage || payload?.summary || {};
