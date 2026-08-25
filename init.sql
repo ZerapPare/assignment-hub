@@ -3,6 +3,11 @@
 -- Generated from Assignment_Hub_drawio.xml ER Diagram
 -- =========================================================
 
+DROP TABLE IF EXISTS Admin_Audit_Log;
+DROP TABLE IF EXISTS System_Error_Log;
+DROP TABLE IF EXISTS System_Request_Metric_Hourly;
+DROP TABLE IF EXISTS Notification_Lead_Time;
+DROP TABLE IF EXISTS Notification_Setting;
 DROP TABLE IF EXISTS Notification;
 DROP TABLE IF EXISTS Schedule;
 DROP TABLE IF EXISTS Assignment_Detail;
@@ -40,12 +45,21 @@ CREATE TABLE Student (
     gg_refresh_token  TEXT,
     ms_access_token   TEXT,
     ms_refresh_token  TEXT,
+    role              VARCHAR(20) NOT NULL DEFAULT 'student',
+    account_status    VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_login_at     DATETIME NULL,
+    last_seen_at      DATETIME NULL,
     CONSTRAINT fk_student_university
         FOREIGN KEY (university_id) REFERENCES University(university_id),
     -- A student id must be unique within its own university, but the same
     -- number may exist at a different one. MySQL allows repeated NULLs in a
     -- unique key, so students whose id isn't known yet coexist fine.
-    CONSTRAINT uq_student_per_university UNIQUE (student_id, university_id)
+    CONSTRAINT uq_student_per_university UNIQUE (student_id, university_id),
+    INDEX idx_student_account_status (account_status),
+    INDEX idx_student_created_at (created_at),
+    INDEX idx_student_last_seen_at (last_seen_at),
+    INDEX idx_student_university_id (university_id)
 );
 
 -- =========================================================
@@ -152,6 +166,59 @@ CREATE TABLE Notification_Lead_Time (
     PRIMARY KEY (user_id, minutes),
     CONSTRAINT fk_lead_time_setting
         FOREIGN KEY (user_id) REFERENCES Notification_Setting(user_id)
+);
+
+-- =========================================================
+-- TABLE: System_Error_Log
+-- =========================================================
+CREATE TABLE System_Error_Log (
+    error_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    level VARCHAR(20) NOT NULL DEFAULT 'error',
+    source VARCHAR(100) NOT NULL,
+    method VARCHAR(10) NULL,
+    path VARCHAR(255) NULL,
+    status_code INT NULL,
+    error_code VARCHAR(100) NULL,
+    message TEXT NOT NULL,
+    user_id INT NULL,
+    request_id VARCHAR(64) NULL,
+    metadata JSON NULL,
+    CONSTRAINT fk_error_log_student
+        FOREIGN KEY (user_id) REFERENCES Student(user_id) ON DELETE SET NULL,
+    INDEX idx_error_log_occurred_at (occurred_at),
+    INDEX idx_error_log_source_occurred_at (source, occurred_at),
+    INDEX idx_error_log_status_occurred_at (status_code, occurred_at),
+    INDEX idx_error_log_user_occurred_at (user_id, occurred_at),
+    INDEX idx_error_log_request_id (request_id)
+);
+
+-- =========================================================
+-- TABLE: Admin_Audit_Log
+-- =========================================================
+CREATE TABLE Admin_Audit_Log (
+    audit_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    admin_user_id INT NOT NULL,
+    action VARCHAR(100) NOT NULL,
+    target_type VARCHAR(50) NULL,
+    target_id VARCHAR(100) NULL,
+    detail JSON NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_audit_log_admin
+        FOREIGN KEY (admin_user_id) REFERENCES Student(user_id),
+    INDEX idx_audit_log_admin_created_at (admin_user_id, created_at),
+    INDEX idx_audit_log_target_created_at (target_type, target_id, created_at)
+);
+
+-- =========================================================
+-- TABLE: System_Request_Metric_Hourly
+-- =========================================================
+CREATE TABLE System_Request_Metric_Hourly (
+    bucket_start DATETIME PRIMARY KEY,
+    request_count INT NOT NULL DEFAULT 0,
+    error_count INT NOT NULL DEFAULT 0,
+    avg_response_ms DECIMAL(10,2) NULL,
+    p95_response_ms DECIMAL(10,2) NULL
 );
 
 -- =========================================================
