@@ -110,7 +110,7 @@ function AdminBusinessPage() {
         <div>
           <div style={styles.kicker}>PRODUCT SIGNALS</div>
           <h1 style={styles.title}>Business Analytics</h1>
-          <p style={styles.subtitle}>พฤติกรรมการใช้งานจริงของนักเรียน ไม่ใช่แค่จำนวน page view</p>
+          <p style={styles.subtitle}>พฤติกรรมการใช้งานจริงของนักเรียน</p>
         </div>
         <div style={styles.actions}>
           <label style={styles.rangeLabel}>
