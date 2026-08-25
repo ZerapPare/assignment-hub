@@ -241,6 +241,16 @@ ON DUPLICATE KEY UPDATE
 
 Register both admin OAuth callback URLs with the provider. Admin login uses `/admin/login`, has a separate `Admin` identity/auth mode, and never creates a `Student` row. The browser uses one session cookie, so switching between student and admin login replaces the active session mode.
 
+### Mock users for the admin demo
+
+The development database starts empty. Apply the existing migrations first (especially `001_identity.sql` and `005_admin_monitoring.sql`), then populate the admin user directory and dashboard with safe demo records:
+
+```bash
+docker compose exec -T -e NODE_ENV=development -e ALLOW_MOCK_DATA=1 backend npm run seed:mock-users
+```
+
+The script upserts eight students under `.test` email domains with varied universities, account statuses, activity dates, and fake Google/Microsoft connection markers. It is safe to run repeatedly, preserves the original mock creation date, refreshes demo activity timestamps, and does not delete or overwrite non-mock accounts. Because `created_at` is historical, the new-user cards/trends naturally age out of the dashboard’s 30-day window; rerunning refreshes activity rather than rewriting that history. Both `NODE_ENV=development` and `ALLOW_MOCK_DATA=1` are required. The provider markers are not OAuth credentials; Classroom sync rejects them before contacting Google and they must never be used in production. The script creates neither an `Admin` identity nor an admin session; admin provisioning and OAuth login are still required to view the page.
+
 ## API (backend)
 
 | Method | Path | ต้อง login? | คืนอะไร |
@@ -313,6 +323,8 @@ assignment-hub/
 ├── migrate.sh           # รัน migration ทั้งหมดเรียงตามลำดับ (มี .bat สำหรับ Windows)
 ├── backend/             # Express API + mysql2 + OAuth + Classroom sync
 │   ├── server.js        # entry บาง ๆ — ตั้ง session แล้ว mount router
+│   ├── scripts/
+│   │   └── seedMockUsers.js # ข้อมูลผู้ใช้จำลองสำหรับเดโมหน้า admin
 │   └── src/
 │       ├── config.js    # รวม env var ไว้ที่เดียว
 │       ├── db.js        # mysql2 pool ตัวเดียวที่ทุก route ใช้ร่วมกัน

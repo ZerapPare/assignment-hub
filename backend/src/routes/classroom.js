@@ -14,6 +14,7 @@ const {
   getCreatorProfile,
 } = require('../services/classroomSync');
 const { safeTrackEvent } = require('../services/analytics');
+const { isDevSeedToken } = require('../services/devStudentSeeder');
 
 const router = express.Router();
 
@@ -40,6 +41,17 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
       });
       return res.status(400).json({
         error: 'No Google Classroom access — log out and log back in with Google to grant it.',
+      });
+    }
+    if (isDevSeedToken(refreshToken)) {
+      void safeTrackEvent({
+        userId: req.session.userId,
+        eventName: 'classroom.sync_failed',
+        result: 'failure',
+        metadata: { provider: 'google' },
+      });
+      return res.status(400).json({
+        error: 'Mock account has no Google Classroom credentials.',
       });
     }
 

@@ -4,7 +4,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "seed:mock-users": "node scripts/seedMockUsers.js"
   },
   "dependencies": {
     "express": "^4.19.0",

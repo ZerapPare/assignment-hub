@@ -19,7 +19,7 @@ function AdminSidebar({ admin, open, onNavigate, onLogout }) {
   return (
     <aside className={`ah-admin-sidebar${open ? ' is-open' : ''}`} style={styles.rail}>
       <div style={styles.brandRow}>
-        <BrandMark size={22} fontSize={17} weight={700} />
+        <BrandMark size={20} fontSize={15.5} weight={700} />
         <span style={styles.adminLabel}>ADMIN</span>
       </div>
 
@@ -68,16 +68,18 @@ const styles = {
     gap: 28,
     zIndex: 20,
   },
-  brandRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' },
+  brandRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '0 4px' },
   adminLabel: {
     border: `1px solid ${C.lineInput}`,
     borderRadius: 99,
     color: C.navy,
     fontFamily: FONT,
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: 700,
-    letterSpacing: '0.08em',
-    padding: '3px 7px',
+    letterSpacing: '0.06em',
+    padding: '2.5px 6px',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
   },
   nav: { display: 'flex', flexDirection: 'column', gap: 3 },
   navItem: {

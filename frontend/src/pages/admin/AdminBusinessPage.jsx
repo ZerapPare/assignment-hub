@@ -144,7 +144,7 @@ function AdminBusinessPage() {
         <div style={styles.cardHead}>
           <div>
             <h2 style={styles.cardTitle}>Feature Adoption</h2>
-            <p style={styles.cardSub}>เรียงตามผู้ใช้ที่ลงมือทำจริง · ไม่รวม dashboard view และ login</p>
+            <p style={styles.cardSub}>เรียงตามผู้ใช้ที่ลงมือทำจริง</p>
           </div>
         </div>
         <div className="ah-admin-table-wrap">
