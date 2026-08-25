@@ -20,6 +20,7 @@ function AssignmentTable({
             <th style={styles.th}>ชื่องาน</th>
             <th style={styles.th}>วิชา</th>
             <th style={styles.th}>กำหนดส่ง</th>
+            <th style={styles.th}>คะแนน</th>
             <th style={styles.th}>สถานะ</th>
             <th style={{ ...styles.th, textAlign: 'right' }}>จัดการ</th>
           </tr>
@@ -27,7 +28,7 @@ function AssignmentTable({
         <tbody>
           {assignments.length === 0 ? (
             <tr>
-              <td colSpan={5} style={styles.emptyTd}>
+              <td colSpan={6} style={styles.emptyTd}>
                 ไม่มีรายการงาน
               </td>
             </tr>
@@ -38,7 +39,6 @@ function AssignmentTable({
 
               return (
                 <tr key={a.assignment_id} style={styles.tr}>
-                  {/* Clickable Title */}
                   <td style={styles.td}>
                     <span
                       style={styles.titleLink}
@@ -60,7 +60,12 @@ function AssignmentTable({
                       : '-'}
                   </td>
 
-                  {/* Status Selector */}
+                  <td style={styles.td}>
+                    {a.max_points 
+                      ? `${a.assigned_grade !== null ? a.assigned_grade : '-'}/${a.max_points}` 
+                      : '-'}
+                  </td>
+
                   <td style={styles.td}>
                     <div style={styles.statusCell}>
                       <select
@@ -81,7 +86,6 @@ function AssignmentTable({
                     </div>
                   </td>
 
-                  {/* Actions & External Classroom Link */}
                   <td style={{ ...styles.td, textAlign: 'right' }}>
                     <div style={styles.actionsGroup}>
                       {a.origin_link && (
@@ -146,11 +150,7 @@ const styles = {
     cursor: 'pointer',
     textDecoration: 'none',
   },
-  statusCell: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-  },
+  statusCell: { display: 'flex', alignItems: 'center', gap: 6 },
   selectStatus: {
     padding: '6px 10px',
     borderRadius: R.pill,
@@ -161,9 +161,7 @@ const styles = {
     fontSize: 13,
     cursor: 'pointer',
   },
-  errorText: {
-    fontSize: 12,
-  },
+  errorText: { fontSize: 12 },
   actionsGroup: {
     display: 'inline-flex',
     alignItems: 'center',

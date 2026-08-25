@@ -1,3 +1,4 @@
+// services/classroomSync.js[cite: 13]
 function toMysqlDateTime(dueDate, dueTime) {
   if (!dueDate) return null;
   const { year, month, day } = dueDate;
@@ -7,7 +8,6 @@ function toMysqlDateTime(dueDate, dueTime) {
   return `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:00`;
 }
 
-// Convert ISO strings (e.g. announcement.creationTime) to MySQL DATETIME
 function isoToMysqlDateTime(isoString) {
   if (!isoString) return null;
   return new Date(isoString).toISOString().slice(0, 19).replace('T', ' ');
@@ -65,7 +65,6 @@ async function listAnnouncementsSince(classroom, courseId, cutoffDate) {
   return results;
 }
 
-// Helper to fetch user profiles with in-memory caching per sync execution
 async function getCreatorProfile(classroom, userId, profileCache) {
   if (!userId) return { name: null, email: null };
   if (profileCache.has(userId)) return profileCache.get(userId);
