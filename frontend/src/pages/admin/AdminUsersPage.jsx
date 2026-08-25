@@ -94,7 +94,7 @@ function AdminUsersPage() {
       {error && <div role="alert" style={styles.alert}>ดำเนินการไม่สำเร็จ: {error} <button type="button" onClick={load} style={styles.linkButton}>ลองอีกครั้ง</button></div>}
 
       <section style={styles.card}>
-        {loading ? <div style={styles.loading}>กำลังโหลดรายชื่อผู้ใช้…</div> : <UserTable users={users} currentUserId={admin?.user_id} onOpen={(id) => navigate(`/admin/users/${id}`)} onChangeStatus={setTarget} />}
+        {loading ? <div style={styles.loading}>กำลังโหลดรายชื่อผู้ใช้…</div> : <UserTable users={users} currentAdminEmail={admin?.email} onOpen={(id) => navigate(`/admin/users/${id}`)} onChangeStatus={setTarget} />}
         <Pagination pagination={pagination} onPage={(nextPage) => setFilter({ page: String(nextPage) })} />
       </section>
 

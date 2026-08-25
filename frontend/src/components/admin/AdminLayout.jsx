@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Navigate, Outlet, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Outlet, useNavigate, useOutletContext } from 'react-router-dom';
 import { C, FONT, R } from '../../theme';
 import AdminSidebar from './AdminSidebar';
-import { adminRequest } from './adminApi';
 
 const RESPONSIVE_CSS = `
   .ah-admin-main { flex: 1; min-width: 0; padding: 26px 28px 44px; }
@@ -30,69 +29,19 @@ const RESPONSIVE_CSS = `
   @media (prefers-reduced-motion: reduce) { .ah-admin-sidebar, .ah-admin-nav-link { transition: none !important; } }
 `;
 
-function AccessMessage({ title, detail, action }) {
-  return (
-    <div style={styles.accessPage}>
-      <div style={styles.accessCard}>
-        <div style={styles.accessKicker}>ASSIGNMENT HUB</div>
-        <h1 style={styles.accessTitle}>{title}</h1>
-        <p style={styles.accessDetail}>{detail}</p>
-        {action}
-      </div>
-    </div>
-  );
-}
-
 function AdminLayout() {
   const navigate = useNavigate();
-  const [admin, setAdmin] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const parentContext = useOutletContext() || {};
+  const { admin, reloadAdmin } = parentContext;
   const [menuOpen, setMenuOpen] = useState(false);
-
-  const loadAdmin = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const me = await adminRequest('/api/me');
-      setAdmin(me);
-    } catch (err) {
-      if (err.status === 401) {
-        navigate('/login', { replace: true });
-        return;
-      }
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [navigate]);
-
-  useEffect(() => { loadAdmin(); }, [loadAdmin]);
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await fetch('/api/admin/auth/logout', { method: 'POST', credentials: 'same-origin' });
     } finally {
-      navigate('/login');
+      navigate('/admin/login', { replace: true });
     }
   };
-
-  if (loading) return <AccessMessage title="กำลังตรวจสอบสิทธิ์" detail="กำลังโหลดพื้นที่ผู้ดูแลระบบ…" />;
-  if (error === 'account suspended') {
-    return <AccessMessage title="บัญชีนี้ถูกระงับ" detail="บัญชีผู้ดูแลนี้ไม่สามารถเข้าถึงระบบได้ในขณะนี้" action={<button type="button" onClick={logout} style={styles.primaryButton}>ออกจากระบบ</button>} />;
-  }
-  if (error === 'forbidden') {
-    return <AccessMessage title="ไม่มีสิทธิ์เข้าถึง" detail="หน้านี้สงวนไว้สำหรับผู้ดูแลระบบเท่านั้น" action={<Navigate to="/home" replace />} />;
-  }
-  if (error) {
-    return <AccessMessage title="เปิดพื้นที่ผู้ดูแลไม่ได้" detail={error} action={<button type="button" onClick={loadAdmin} style={styles.primaryButton}>ลองอีกครั้ง</button>} />;
-  }
-  if (admin?.account_status === 'suspended') {
-    return <AccessMessage title="บัญชีนี้ถูกระงับ" detail="บัญชีผู้ดูแลนี้ไม่สามารถเข้าถึงระบบได้ในขณะนี้" action={<button type="button" onClick={logout} style={styles.primaryButton}>ออกจากระบบ</button>} />;
-  }
-  if (admin?.role !== 'admin') {
-    return <AccessMessage title="ไม่มีสิทธิ์เข้าถึง" detail="หน้านี้สงวนไว้สำหรับผู้ดูแลระบบเท่านั้น" action={<Navigate to="/home" replace />} />;
-  }
 
   return (
     <div style={styles.shell}>
@@ -104,7 +53,7 @@ function AdminLayout() {
           <button type="button" onClick={() => setMenuOpen(true)} style={styles.menuButton} aria-label="เปิดเมนูผู้ดูแล">เมนู</button>
           <span style={styles.mobileAdmin}>ADMIN</span>
         </div>
-        <Outlet context={{ admin, reloadAdmin: loadAdmin }} />
+        <Outlet context={{ admin, reloadAdmin }} />
       </main>
     </div>
   );
@@ -115,12 +64,6 @@ const styles = {
   main: { boxSizing: 'border-box' },
   menuButton: { border: `1px solid ${C.lineInput}`, borderRadius: R.pill, background: C.card, color: C.navy, cursor: 'pointer', fontFamily: FONT, fontSize: 12.5, fontWeight: 700, padding: '7px 11px' },
   mobileAdmin: { color: C.navy, fontFamily: FONT, fontSize: 11, fontWeight: 700, letterSpacing: '.1em' },
-  accessPage: { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20, background: C.pageBg, fontFamily: FONT },
-  accessCard: { maxWidth: 440, padding: '30px 32px', borderRadius: 12, background: C.card, boxShadow: '0 16px 42px rgba(20,40,63,.08)', textAlign: 'center' },
-  accessKicker: { color: C.pinkDark, fontSize: 11, fontWeight: 700, letterSpacing: '.12em' },
-  accessTitle: { color: C.ink, fontSize: 24, margin: '10px 0 7px' },
-  accessDetail: { color: C.muted, fontSize: 14, lineHeight: 1.7, margin: 0 },
-  primaryButton: { marginTop: 20, border: 0, borderRadius: R.pill, background: C.navy, color: 'white', cursor: 'pointer', fontFamily: FONT, fontSize: 13, fontWeight: 700, padding: '10px 18px' },
 };
 
 export default AdminLayout;

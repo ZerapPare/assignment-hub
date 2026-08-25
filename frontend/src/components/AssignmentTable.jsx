@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import TaskRow, { GRID } from './TaskRow';
+import { trackClientEvent } from '../analytics';
 import { C, FONT, R } from '../theme';
 import { PLATFORM_FILTERS, STATUS, STATUS_OPTIONS, fmtDate, isUrgent } from '../tasks';
 
@@ -18,6 +19,15 @@ function AssignmentTable({
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [courseFilter, setCourseFilter] = useState('all');
+
+  useEffect(() => {
+    const keyword = search.trim();
+    if (!keyword) return undefined;
+    const timer = setTimeout(() => {
+      void trackClientEvent('assignment.search_used', { has_query: true });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const courses = useMemo(
     () => [...new Set(assignments.map((a) => a.course_name))].sort(),
@@ -54,7 +64,13 @@ function AssignmentTable({
           {PLATFORM_FILTERS.map((f) => (
             <span
               key={f.key}
-              onClick={() => setPlatform(f.key)}
+              onClick={() => {
+                setPlatform(f.key);
+                void trackClientEvent('assignment.filter_used', {
+                  filter_type: 'platform',
+                  filter_value: f.key,
+                });
+              }}
               style={{
                 ...styles.tab,
                 background: platform === f.key ? C.pinkBg : 'transparent',
@@ -82,7 +98,14 @@ function AssignmentTable({
         <select
           value={statusFilter}
           style={styles.filterSelect}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => {
+            const value = e.target.value;
+            setStatusFilter(value);
+            void trackClientEvent('assignment.filter_used', {
+              filter_type: 'status',
+              filter_value: value,
+            });
+          }}
         >
           <option value="all">ทุกสถานะ</option>
           {STATUS_OPTIONS.map((s) => (

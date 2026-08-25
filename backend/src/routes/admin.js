@@ -79,7 +79,7 @@ function userSelect() {
           ) ac ON ac.student_id = s.user_id`;
 }
 
-router.use(requireAdmin);
+router.use('/api/admin', requireAdmin);
 
 router.get('/api/admin/dashboard', asyncRoute(async (req, res) => {
   const rangeDays = normalizeRange(req.query.range);
@@ -90,8 +90,8 @@ router.get('/api/admin/users', asyncRoute(async (req, res) => {
   const page = pagination(req.query, 25);
   if (!page) return res.status(400).json({ error: 'invalid pagination', request_id: req.requestId });
 
-  const clauses = [];
-  const params = [];
+  const clauses = ['s.role = ?'];
+  const params = ['student'];
   const search = String(req.query.search || '').trim().slice(0, 100);
   const status = String(req.query.status || '').trim();
   const provider = String(req.query.provider || '').trim();
@@ -142,7 +142,7 @@ router.get('/api/admin/users/:id', asyncRoute(async (req, res) => {
 
   const [userResult, courseResult, statusResult, errorsResult, auditsResult] = await Promise.all([
     pool.query(
-      `${userSelect()} WHERE s.user_id = ?`,
+      `${userSelect()} WHERE s.role = 'student' AND s.user_id = ?`,
       [userId]
     ),
     pool.query('SELECT COUNT(*) AS course_count FROM Course WHERE student_id = ?', [userId]),
@@ -179,7 +179,7 @@ router.get('/api/admin/users/:id', asyncRoute(async (req, res) => {
   const statusTotals = Object.fromEntries(
     assignmentStatusCounts.map((row) => [row.status, row.count])
   );
-  await writeAudit(pool, req.session.userId, 'USER_VIEW_DETAIL', 'user', userId);
+  await writeAudit(pool, req.session.adminId, 'USER_VIEW_DETAIL', 'user', userId);
   res.json({
     user: booleanFields(userResult[0][0]),
     usage: {
@@ -203,26 +203,26 @@ router.patch('/api/admin/users/:id/status', asyncRoute(async (req, res) => {
   if (!USER_STATUSES.has(status)) {
     return res.status(400).json({ error: 'status must be active or suspended', request_id: req.requestId });
   }
-  if (userId === Number(req.session.userId)) {
-    return res.status(400).json({ error: 'administrators cannot change their own status', request_id: req.requestId });
-  }
-
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     const [users] = await conn.query(
-      'SELECT account_status FROM Student WHERE user_id = ? FOR UPDATE',
+      'SELECT account_status, university_email FROM Student WHERE role = \'student\' AND user_id = ? FOR UPDATE',
       [userId]
     );
     if (!users.length) {
       await conn.rollback();
       return res.status(404).json({ error: 'not found', request_id: req.requestId });
     }
+    if (String(users[0].university_email || '').toLowerCase() === String(req.admin?.email || '').toLowerCase()) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'administrators cannot change their own status', request_id: req.requestId });
+    }
     const previousStatus = users[0].account_status;
     await conn.query('UPDATE Student SET account_status = ? WHERE user_id = ?', [status, userId]);
     await writeAudit(
       conn,
-      req.session.userId,
+      req.session.adminId,
       status === 'suspended' ? 'USER_SUSPEND' : 'USER_UNSUSPEND',
       'user',
       userId,
@@ -330,7 +330,7 @@ router.get('/api/admin/errors/:id', asyncRoute(async (req, res) => {
   );
   if (!rows.length) return res.status(404).json({ error: 'not found', request_id: req.requestId });
 
-  await writeAudit(pool, req.session.userId, 'ERROR_VIEW_DETAIL', 'error', errorId);
+  await writeAudit(pool, req.session.adminId, 'ERROR_VIEW_DETAIL', 'error', errorId);
   res.json({ error: sanitizeErrorLog(rows[0]) });
 }));
 

@@ -16,6 +16,9 @@ function updateLastSeen(userId) {
 }
 
 async function requireAuth(req, res, next) {
+  if (req.session?.authType === 'admin' || req.session?.adminId) {
+    return res.status(401).json({ error: 'not authenticated', request_id: req.requestId });
+  }
   const userId = Number(req.session?.userId);
   if (!Number.isInteger(userId) || userId <= 0) {
     return res.status(401).json({ error: 'not authenticated', request_id: req.requestId });
@@ -46,6 +49,39 @@ async function requireAuth(req, res, next) {
   }
 }
 
+async function requireAdmin(req, res, next) {
+  const hasStudentSession = Number.isSafeInteger(Number(req.session?.userId)) && Number(req.session.userId) > 0;
+  const hasAdminSession = req.session?.authType === 'admin' || req.session?.adminId;
+  if (!hasAdminSession && !hasStudentSession) {
+    return res.status(401).json({ error: 'not authenticated', request_id: req.requestId });
+  }
+
+  const adminId = Number(req.session?.adminId);
+  if (
+    req.session?.authType !== 'admin'
+    || hasStudentSession
+    || !Number.isSafeInteger(adminId)
+    || adminId <= 0
+  ) {
+    return res.status(403).json({ error: 'admin only', request_id: req.requestId });
+  }
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT admin_id, email, display_name, is_active
+       FROM Admin WHERE admin_id = ? LIMIT 1`,
+      [adminId]
+    );
+    if (!rows.length || Number(rows[0].is_active) !== 1) {
+      return res.status(403).json({ error: 'admin only', request_id: req.requestId });
+    }
+    req.admin = rows[0];
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
 const requireActiveAccount = requireAuth;
 
-module.exports = { requireAuth, requireActiveAccount };
+module.exports = { requireAuth, requireActiveAccount, requireAdmin };

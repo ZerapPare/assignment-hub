@@ -6,10 +6,16 @@ const { requireAuth } = require('../middleware/auth');
 const { logError } = require('../services/errorLogger');
 const { CLIENT_ID, CLIENT_SECRET } = require('../config');
 const { toMysqlDateTime, listCourseWorkSince } = require('../services/classroomSync');
+const { safeTrackEvent } = require('../services/analytics');
 
 const router = express.Router();
 
 router.post('/api/classroom/sync', requireAuth, async (req, res) => {
+  void safeTrackEvent({
+    userId: req.session.userId,
+    eventName: 'classroom.sync_requested',
+    metadata: { provider: 'google' },
+  });
   try {
     const cutoffDate = req.body?.cutoffDate ? new Date(req.body.cutoffDate) : null;
 
@@ -19,6 +25,12 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
     );
     const refreshToken = rows[0]?.gg_refresh_token;
     if (!refreshToken) {
+      void safeTrackEvent({
+        userId: req.session.userId,
+        eventName: 'classroom.sync_failed',
+        result: 'failure',
+        metadata: { provider: 'google' },
+      });
       return res.status(400).json({
         error: 'No Google Classroom access — log out and log back in with Google to grant it.',
       });
@@ -52,6 +64,8 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
 
     let coursesSynced = 0;
     let assignmentsSynced = 0;
+    let assignmentsImported = 0;
+    let assignmentsUpdated = 0;
     const skippedCourses = [];
 
     for (const course of courses) {
@@ -126,6 +140,7 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
               ['submitted', assignmentId]
             );
           }
+          assignmentsUpdated++;
         } else {
           // TURNED_IN / RETURNED both mean the student handed it in, which is
           // 'submitted' — not 'completed'. Only the student sets 'completed'.
@@ -141,13 +156,32 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
              VALUES (?, ?, ?, ?, 0)`,
             [ins.insertId, work.description || null, dueDateTime, initialStatus]
           );
+          assignmentsImported++;
         }
         assignmentsSynced++;
       }
     }
 
+    const syncWasPartial = skippedCourses.length > 0;
+    void safeTrackEvent({
+      userId: req.session.userId,
+      eventName: syncWasPartial ? 'classroom.sync_failed' : 'classroom.sync_success',
+      result: syncWasPartial ? 'failure' : 'success',
+      metadata: {
+        provider: 'google',
+        imported_count: assignmentsImported,
+        updated_count: assignmentsUpdated,
+        skipped_count: skippedCourses.length,
+      },
+    });
     res.json({ ok: true, coursesSynced, assignmentsSynced, deletedCount, skippedCourses });
   } catch (err) {
+    void safeTrackEvent({
+      userId: req.session.userId,
+      eventName: 'classroom.sync_failed',
+      result: 'failure',
+      metadata: { provider: 'google' },
+    });
     const googleDetail = err.response?.data?.error || err.errors || null;
     void logError(err, req, {
       source: 'classroom-sync',

@@ -55,7 +55,7 @@ function TrendChart({ title, labels = [], series = [], valueLabel = 'ราย�
             setActiveIndex(Math.round(fraction * (points - 1)));
           }}
         >
-          {steps.map((step) => <g key={step}><line x1={LEFT} x2={CHART_W - RIGHT} y1={y(step)} y2={y(step)} stroke={C.line} strokeWidth="1" /><text x={LEFT - 8} y={y(step) + 4} textAnchor="end" fill={C.mutedLight} fontSize="10" fontFamily={FONT}>{step}</text></g>)}
+          {steps.map((step, index) => <g key={`grid-${index}-${step}`}><line x1={LEFT} x2={CHART_W - RIGHT} y1={y(step)} y2={y(step)} stroke={C.line} strokeWidth="1" /><text x={LEFT - 8} y={y(step) + 4} textAnchor="end" fill={C.mutedLight} fontSize="10" fontFamily={FONT}>{step}</text></g>)}
           {activeIndex !== null && <line x1={x(activeIndex)} x2={x(activeIndex)} y1={TOP} y2={TOP + graphHeight} stroke={C.lineBtnHover} strokeWidth="1" strokeDasharray="3 3" />}
           {series.map((item) => {
             const pointString = (item.values || []).map((value, index) => `${x(index)},${y(value)}`).join(' ');
