@@ -71,6 +71,9 @@ const styles = {
     flexDirection: 'column',
     gap: 24,
     boxSizing: 'border-box',
+    position: 'sticky',
+    top: 0,
+    height: '100vh',
   },
   nav: { display: 'flex', flexDirection: 'column', gap: 2 },
   navItem: {

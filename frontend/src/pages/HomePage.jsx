@@ -147,6 +147,7 @@ function HomePage() {
         {error && <p style={styles.error}>⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>}
 
         {!loading && !error && (
+          
           <>
             <div style={styles.header}>
               <h1 style={styles.title}>แดชบอร์ด</h1>
@@ -273,12 +274,33 @@ function HomePage() {
 }
 
 const styles = {
-  page: { minHeight: '100vh', width: '100%', fontFamily: FONT, background: C.pageBg, display: 'flex' },
-  main: { flex: 1, minWidth: 0, padding: '26px 28px 40px', boxSizing: 'border-box' },
-  
-  muted: { color: C.mutedLight, fontSize: 13, margin: '8px 0 0' },
-  error: { color: C.pinkDark, fontSize: 14 },
-
+  page: {
+    minHeight: '100vh',
+    width: '100%',
+    fontFamily: FONT,
+    background: C.pageBg,
+    display: 'flex',
+    overflow: 'hidden'
+  },
+  main: { 
+    flex: 1, 
+    minWidth: 0, 
+    padding: '26px 28px 40px', 
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100vh',
+    overflowY: 'auto'
+  },
+  muted: { 
+    color: C.mutedLight,
+    fontSize: 13,
+    margin: '8px 0 0' 
+  },
+  error: { 
+    color: C.pinkDark,
+    fontSize: 14 
+  },
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -286,9 +308,22 @@ const styles = {
     gap: 16,
     marginBottom: 22,
     flexWrap: 'wrap',
+    flexShrink: 0,
+    background: C.pageBg,
+    zIndex: 10,
+    paddingBottom: 4,
   },
-  title: { fontSize: 22, fontWeight: 700, color: C.ink, margin: 0 },
-  toolbar: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  title: {
+    fontSize: 22,
+    fontWeight: 700,
+    color: C.ink,
+    margin: 0 
+  },
+  toolbar: { display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap'
+  },
   cutoff: {
     display: 'flex',
     alignItems: 'center',
@@ -297,7 +332,11 @@ const styles = {
     borderRadius: R.pill,
     padding: '9px 14px',
   },
-  cutoffText: { fontSize: 13, color: C.muted, whiteSpace: 'nowrap' },
+  cutoffText: {
+    fontSize: 13,
+    color: C.muted,
+    whiteSpace: 'nowrap'
+  },
   cutoffInput: {
     border: 'none',
     fontSize: 13,
@@ -387,4 +426,3 @@ const styles = {
 };
 
 export default HomePage;
-
