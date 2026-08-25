@@ -3,6 +3,7 @@ const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
 const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { logError } = require('../services/errorLogger');
 const { CLIENT_ID, CLIENT_SECRET } = require('../config');
 const {
   toMysqlDateTime,
@@ -208,11 +209,15 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
     res.json({ ok: true, coursesSynced, assignmentsSynced, announcementsSynced, deletedCount, skippedCourses });
   } catch (err) {
     const googleDetail = err.response?.data?.error || err.errors || null;
-    console.error('[classroom] sync error:', err.message, googleDetail ? JSON.stringify(googleDetail) : '');
+    void logError(err, req, {
+      source: 'classroom-sync',
+      statusCode: 500,
+      metadata: { provider_error_code: googleDetail?.code || err.code || null },
+    });
+    console.error('[classroom] sync failed:', req.requestId, googleDetail?.code || err.code || 'unknown');
     res.status(500).json({
       error: 'Classroom sync failed',
-      message: err.message,
-      detail: googleDetail,
+      request_id: req.requestId,
     });
   }
 });

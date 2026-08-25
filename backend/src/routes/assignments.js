@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { logError } = require('../services/errorLogger');
 const { parseDueDate } = require('../utils/dueDate');
 
 const router = express.Router();
@@ -44,7 +45,8 @@ router.get('/api/assignments', requireAuth, async (req, res) => {
     ]);
     res.json(rows);
   } catch (err) {
-    res.status(503).json({ error: 'Database not ready', message: err.message });
+    void logError(err, req, { source: 'assignments', statusCode: 503 });
+    res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
   }
 });
 
@@ -68,8 +70,9 @@ router.post('/api/assignments', requireAuth, async (req, res) => {
 
   // The two inserts go together: the schema has no ON DELETE actions, so an
   // Assignment left without its Detail would have to be cleaned up by hand.
-  const conn = await pool.getConnection();
+  let conn;
   try {
+    conn = await pool.getConnection();
     await conn.beginTransaction();
 
     // A manual course is one with no platform_source — exactly what the
@@ -105,11 +108,14 @@ router.post('/api/assignments', requireAuth, async (req, res) => {
     ]);
     res.status(201).json(rows[0]);
   } catch (err) {
-    await conn.rollback();
-    console.error('[assignments] create failed:', err.message);
-    res.status(500).json({ error: 'เพิ่มงานไม่สำเร็จ', message: err.message });
+    if (conn) {
+      try { await conn.rollback(); } catch (_) { /* connection may not have started a transaction */ }
+    }
+    void logError(err, req, { source: 'assignments', statusCode: 500 });
+    console.error('[assignments] create failed:', req.requestId, err.code || 'unknown');
+    res.status(500).json({ error: 'เพิ่มงานไม่สำเร็จ', request_id: req.requestId });
   } finally {
-    conn.release();
+    if (conn) conn.release();
   }
 });
 
@@ -185,8 +191,9 @@ router.patch('/api/assignments/:id', requireAuth, async (req, res) => {
     const [rows] = await pool.query(`${ASSIGNMENT_SELECT} WHERE a.assignment_id = ?`, [id]);
     res.json(rows[0]);
   } catch (err) {
-    console.error('[assignments] update failed:', err.message);
-    res.status(503).json({ error: 'Database not ready', message: err.message });
+    void logError(err, req, { source: 'assignments', statusCode: 503 });
+    console.error('[assignments] update failed:', req.requestId, err.code || 'unknown');
+    res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
   }
 });
 
@@ -230,8 +237,9 @@ router.patch('/api/assignments/:id/status', requireAuth, async (req, res) => {
     const [rows] = await pool.query(`${ASSIGNMENT_SELECT} WHERE a.assignment_id = ?`, [id]);
     res.json(rows[0]);
   } catch (err) {
-    console.error('[assignments] status update failed:', err.message);
-    res.status(503).json({ error: 'Database not ready', message: err.message });
+    void logError(err, req, { source: 'assignments', statusCode: 503 });
+    console.error('[assignments] status update failed:', req.requestId, err.code || 'unknown');
+    res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
   }
 });
 
@@ -266,8 +274,9 @@ router.delete('/api/assignments/:id', requireAuth, async (req, res) => {
       conn.release();
     }
   } catch (err) {
-    console.error('[assignments] delete failed:', err.message);
-    res.status(503).json({ error: 'Database not ready', message: err.message });
+    void logError(err, req, { source: 'assignments', statusCode: 503 });
+    console.error('[assignments] delete failed:', req.requestId, err.code || 'unknown');
+    res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
   }
 });
 
