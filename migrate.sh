@@ -4,4 +4,5 @@ docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/001
 docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/002_task_type.sql
 docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/003_status_updated_at.sql
 docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/004_notification_settings.sql
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/005_announcement.sql
 echo "Migrations complete!"
