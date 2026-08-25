@@ -1,12 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import Sidebar from '../components/Sidebar';
-import StatCard from '../components/StatCard';
-import BarChart from '../components/BarChart';
-import DonutChart from '../components/DonutChart';
-import MiniCalendar from '../components/MiniCalendar';
-import DeadlineList from '../components/DeadlineList';
-import UrgentChecklist from '../components/UrgentChecklist';
 import AddTaskModal from '../components/AddTaskModal';
+import BarChart from '../components/BarChart';
+import Calendar from '../components/Calendar';
+import DeadlineList from '../components/DeadlineList';
+import DonutChart from '../components/DonutChart';
+import Sidebar from '../components/Sidebar';
+import EditTaskModal from '../components/EditTaskModal';
+import StatCard from '../components/StatCard';
+import UrgentChecklist from '../components/UrgentChecklist';
 import useAssignments from '../useAssignments';
 import { HOUR, URGENT_H, fmtDate, fmtTime, isDone, withDerived } from '../tasks';
 import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } from '../icons';
@@ -116,15 +117,17 @@ function HomePage() {
     };
   }, [assignments]);
 
-  const busyDays = useMemo(
-    () =>
-      new Set(
-        view.withDate
-          .filter((a) => a.due && a.due.getFullYear() === cal.year && a.due.getMonth() === cal.month)
-          .map((a) => a.due.getDate())
-      ),
-    [view.withDate, cal.year, cal.month]
-  );
+  const eventsByDate = useMemo(() => {
+    const map = new Map();
+    view.withDate
+      .filter((a) => a.due && a.due.getFullYear() === cal.year && a.due.getMonth() === cal.month)
+      .forEach((a) => {
+        const d = a.due.getDate();
+        if (!map.has(d)) map.set(d, []);
+        map.get(d).push(a);
+      });
+    return map;
+  }, [view.withDate, cal.year, cal.month]);
 
   const isCurrentMonth = cal.year === view.now.getFullYear() && cal.month === view.now.getMonth();
 
@@ -166,34 +169,16 @@ function HomePage() {
             </div>
 
             <div style={styles.body}>
-              <div style={styles.leftCol}>
+              {/* --- ส่วนบน: สถิติและกราฟ --- */}
+              <div style={styles.topSection}>
                 <div style={styles.statGrid}>
-                  <StatCard
-                    label="งานทั้งหมด"
-                    value={view.total}
-                    iconBg={C.indigoBg}
-                    icon={<PencilIcon size={16} color={C.navy} />}
-                  />
-                  <StatCard
-                    label="กำลังทำ"
-                    value={view.inProgress}
-                    iconBg={C.pinkBg}
-                    icon={<SpinnerIcon size={16} color={C.pink} />}
-                  />
-                  <StatCard
-                    label="ส่ง/เสร็จ"
-                    value={view.submitted + view.completed}
-                    iconBg={C.blueBg}
-                    icon={<CheckCircleIcon size={16} color="#3b82f6" />}
-                  />
-                  <StatCard
-                    label={`ด่วน ${URGENT_H} ชม.`}
-                    value={view.urgentCount}
-                    iconBg={C.navy}
-                    icon={<HourglassIcon size={16} color={C.pink} />}
-                  />
+                  <StatCard label="งานทั้งหมด" value={view.total} iconBg={C.indigoBg} icon={<PencilIcon size={16} color={C.navy} />} />
+                  <StatCard label="กำลังทำ" value={view.inProgress} iconBg={C.pinkBg} icon={<SpinnerIcon size={16} color={C.pink} />} />
+                  <StatCard label="ส่ง/เสร็จ" value={view.submitted + view.completed} iconBg={C.blueBg} icon={<CheckCircleIcon size={16} color="#3b82f6" />} />
+                  <StatCard label={`ด่วน ${URGENT_H} ชม.`} value={view.urgentCount} iconBg={C.navy} icon={<HourglassIcon size={16} color={C.pink} />} />
                 </div>
 
+                {/* แนะนำให้เพิ่ม List งานด่วนไว้ตรงนี้ เพื่อไม่ให้พื้นที่โล่งเกินไปและไม่ไปเบียด Calendar */}
                 <div style={styles.chartGrid}>
                   <div style={styles.card}>
                     <div style={styles.cardHead}>
@@ -215,7 +200,6 @@ function HomePage() {
                       notStarted={view.notStarted}
                       total={view.total}
                     />
-
                     <div style={styles.progressWrap}>
                       <div style={styles.progressTrack}>
                         <div style={{ ...styles.progressFill, width: `${view.progressPct}%` }} />
@@ -223,52 +207,50 @@ function HomePage() {
                       <span style={styles.progressLabel}>{view.progressPct}% สำเร็จ</span>
                     </div>
                   </div>
-                </div>
-              </div>
-
-              <div style={styles.rightCol}>
-                <div style={{ ...styles.card, background: C.blue }}>
-                  <MiniCalendar
-                    year={cal.year}
-                    month={cal.month}
-                    today={isCurrentMonth ? view.now.getDate() : null}
-                    busyDays={busyDays}
-                    onPrev={() => shiftMonth(-1)}
-                    onNext={() => shiftMonth(1)}
-                  />
-                </div>
-
-                <div style={styles.card}>
+                  <div style={styles.card}>
+                    <div style={styles.cardHead}>
+                      <span style={styles.cardTitle}>งานด่วน</span>
+                      {view.checklist.length > 0 && (
+                        <span style={styles.badgeFaint}>
+                          เหลือ {view.checklist.filter((a) => !isDone(a)).length} จาก{' '}
+                          {view.checklist.length}
+                        </span>
+                      )}
+                    </div>
+                    <UrgentChecklist
+                      items={view.checklist.map((a) => ({
+                        id: a.assignment_id,
+                        title: a.title,
+                        done: isDone(a),
+                      }))}
+                    />
+                  </div>
+                  <div style={styles.card}>
                   <div style={styles.cardHead}>
                     <span style={styles.cardTitle}>กำหนดส่งใกล้ถึง</span>
                   </div>
-                  <DeadlineList
-                    items={view.urgentList.map((a) => ({
-                      id: a.assignment_id,
-                      dateText: a.due ? fmtDate(a.due) : '—',
-                      timeText: a.due ? fmtTime(a.due) : '',
-                      title: a.title,
-                      source: a.platform_source || 'เพิ่มเอง',
-                    }))}
-                  />
-                </div>
-
-                <div style={styles.card}>
-                  <div style={styles.cardHead}>
-                    <span style={styles.cardTitle}>งานด่วน</span>
-                    {view.checklist.length > 0 && (
-                      <span style={styles.badgeFaint}>
-                        เหลือ {view.checklist.filter((a) => !isDone(a)).length} จาก{' '}
-                        {view.checklist.length}
-                      </span>
-                    )}
+                    <DeadlineList
+                      items={view.urgentList.map((a) => ({
+                        id: a.assignment_id,
+                        dateText: a.due ? fmtDate(a.due) : '—',
+                        timeText: a.due ? fmtTime(a.due) : '',
+                        title: a.title,
+                        source: a.platform_source || 'เพิ่มเอง',
+                      }))}
+                    />
                   </div>
-                  <UrgentChecklist
-                    items={view.checklist.map((a) => ({
-                      id: a.assignment_id,
-                      title: a.title,
-                      done: isDone(a),
-                    }))}
+                  {/* สามารถย้าย UrgentChecklist หรือ DeadlineList มาเรียงต่อใน Grid นี้ได้ */}
+                </div>
+              </div>
+              <div style={styles.bottomSection}>
+                <div style={{ ...styles.card, background: C.blue, padding: 24 }}>
+                  <Calendar
+                    year={cal.year}
+                    month={cal.month}
+                    today={isCurrentMonth ? view.now.getDate() : null}
+                    eventsByDate={eventsByDate}
+                    onPrev={() => shiftMonth(-1)}
+                    onNext={() => shiftMonth(1)}
                   />
                 </div>
               </div>
@@ -289,7 +271,7 @@ function HomePage() {
 const styles = {
   page: { minHeight: '100vh', width: '100%', fontFamily: FONT, background: C.pageBg, display: 'flex' },
   main: { flex: 1, minWidth: 0, padding: '26px 28px 40px', boxSizing: 'border-box' },
-
+  
   muted: { color: C.mutedLight, fontSize: 13, margin: '8px 0 0' },
   error: { color: C.pinkDark, fontSize: 14 },
 
@@ -348,12 +330,14 @@ const styles = {
     boxShadow: SHADOW.primaryBtn,
   },
 
-  body: { display: 'grid', gridTemplateColumns: 'minmax(0,1.7fr) minmax(0,1fr)', gap: 18 },
+  body: { display: 'flex', flexDirection: 'column', gap: 24 },
   leftCol: { display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 },
   rightCol: { display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 },
 
+  topSection: { display: 'flex', flexDirection: 'column', gap: 18 },
+  bottomSection: { display: 'flex', flexDirection: 'column', minWidth: 0 },
   statGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 10 },
-  chartGrid: { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14 },
+  chartGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 },
 
   card: { background: C.card, borderRadius: R.card, padding: 20, minWidth: 0 },
   cardHead: {
@@ -399,3 +383,4 @@ const styles = {
 };
 
 export default HomePage;
+
