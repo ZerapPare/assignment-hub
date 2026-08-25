@@ -1,3 +1,4 @@
+// routes/classroom.js[cite: 12]
 const express = require('express');
 const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
@@ -36,7 +37,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
 
     let deletedCount = 0;
     if (cutoffDate) {
-      // 1. Purge old assignments
       const [toDelete] = await pool.query(
         `SELECT a.assignment_id
          FROM Assignment a
@@ -54,7 +54,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
         deletedCount = ids.length;
       }
 
-      // 2. Purge old announcements
       await pool.query(
         `DELETE an FROM Announcement an
          JOIN Course c ON an.course_id = c.course_id
@@ -91,7 +90,6 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
       }
       coursesSynced++;
 
-      // Sync CourseWork
       let courseWork = [];
       try {
         courseWork = await listCourseWorkSince(classroom, course.id, cutoffDate);
@@ -104,6 +102,7 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
 
       for (const work of courseWork) {
         let submissionState = null;
+        let assignedGrade = null;
         try {
           const { data: { studentSubmissions = [] } } = await classroom.courses.courseWork.studentSubmissions.list({
             courseId: course.id,
@@ -111,11 +110,13 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
             userId: 'me',
           });
           submissionState = studentSubmissions[0]?.state || null;
+          assignedGrade = studentSubmissions[0]?.assignedGrade ?? null;
         } catch (subErr) {
           console.warn('[classroom] could not read submission state for', work.id, subErr.message);
         }
         const isFinished = submissionState === 'TURNED_IN' || submissionState === 'RETURNED';
         const dueDateTime = toMysqlDateTime(work.dueDate, work.dueTime);
+        const maxPoints = work.maxPoints ?? null;
 
         const [existingAssignment] = await pool.query(
           'SELECT assignment_id FROM Assignment WHERE external_assignment_id = ? AND course_id = ? LIMIT 1',
@@ -129,8 +130,8 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
             [work.title, work.alternateLink || null, assignmentId]
           );
           await pool.query(
-            'UPDATE Assignment_Detail SET description = ?, due_date = ? WHERE assignment_id = ?',
-            [work.description || null, dueDateTime, assignmentId]
+            'UPDATE Assignment_Detail SET description = ?, due_date = ?, max_points = ?, assigned_grade = ? WHERE assignment_id = ?',
+            [work.description || null, dueDateTime, maxPoints, assignedGrade, assignmentId]
           );
           if (isFinished) {
             await pool.query(
@@ -147,15 +148,14 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
             [work.id, work.title, work.alternateLink || null, courseId]
           );
           await pool.query(
-            `INSERT INTO Assignment_Detail (assignment_id, description, due_date, status, priority_score)
-             VALUES (?, ?, ?, ?, 0)`,
-            [ins.insertId, work.description || null, dueDateTime, initialStatus]
+            `INSERT INTO Assignment_Detail (assignment_id, description, due_date, status, priority_score, max_points, assigned_grade)
+             VALUES (?, ?, ?, ?, 0, ?, ?)`,
+            [ins.insertId, work.description || null, dueDateTime, initialStatus, maxPoints, assignedGrade]
           );
         }
         assignmentsSynced++;
       }
 
-      // Sync Announcements
       let announcements = [];
       try {
         announcements = await listAnnouncementsSince(classroom, course.id, cutoffDate);
