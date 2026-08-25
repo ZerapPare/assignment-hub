@@ -39,7 +39,9 @@ async function completeLogin({ req, provider, email, name, tokens }) {
       [userId]
     );
     await pool.query(
-      `UPDATE Student SET ${accessCol} = ?, ${refreshCol} = ? WHERE user_id = ?`,
+      `UPDATE Student
+       SET ${accessCol} = ?, ${refreshCol} = ?, last_login_at = NOW(), last_seen_at = NOW()
+       WHERE user_id = ?`,
       [access, tokens.refresh_token || existing.refresh || null, userId]
     );
     return userId;
@@ -59,14 +61,17 @@ async function completeLogin({ req, provider, email, name, tokens }) {
     // their University row existed get backfilled instead of staying NULL.
     // The refresh token is kept when the provider doesn't return a new one.
     await pool.query(
-      `UPDATE Student SET student_name = ?, university_id = ?, ${accessCol} = ?, ${refreshCol} = ?
+      `UPDATE Student
+       SET student_name = ?, university_id = ?, ${accessCol} = ?, ${refreshCol} = ?,
+           last_login_at = NOW(), last_seen_at = NOW()
        WHERE user_id = ?`,
       [name, universityId, access, tokens.refresh_token || rows[0].refresh || null, userId]
     );
   } else {
     const [ins] = await pool.query(
-      `INSERT INTO Student (student_name, university_email, university_id, ${accessCol}, ${refreshCol})
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO Student
+         (student_name, university_email, university_id, ${accessCol}, ${refreshCol}, last_login_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
       [name, email, universityId, access, tokens.refresh_token || null]
     );
     userId = ins.insertId;

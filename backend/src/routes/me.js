@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { logError } = require('../services/errorLogger');
 
 const router = express.Router();
 
@@ -10,6 +11,7 @@ router.get('/api/me', requireAuth, async (req, res) => {
     // future syncing possible. The token values themselves never leave here.
     const [rows] = await pool.query(
       `SELECT s.user_id, s.student_id, s.student_name, s.university_email,
+              s.role, s.account_status,
               u.university_name,
               s.gg_refresh_token IS NOT NULL AS google_connected,
               s.ms_refresh_token IS NOT NULL AS microsoft_connected
@@ -18,14 +20,15 @@ router.get('/api/me', requireAuth, async (req, res) => {
        WHERE s.user_id = ? LIMIT 1`,
       [req.session.userId]
     );
-    if (!rows.length) return res.status(401).json({ error: 'not authenticated' });
+    if (!rows.length) return res.status(401).json({ error: 'not authenticated', request_id: req.requestId });
     res.json({
       ...rows[0],
       google_connected: Boolean(rows[0].google_connected),
       microsoft_connected: Boolean(rows[0].microsoft_connected),
     });
   } catch (err) {
-    res.status(503).json({ error: 'Database not ready', message: err.message });
+    void logError(err, req, { source: 'me', statusCode: 503 });
+    res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
   }
 });
 
@@ -45,7 +48,8 @@ router.patch('/api/me', requireAuth, async (req, res) => {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'รหัสนักศึกษานี้ถูกใช้แล้วในมหาวิทยาลัยเดียวกัน' });
     }
-    res.status(503).json({ error: 'Database not ready', message: err.message });
+    void logError(err, req, { source: 'me', statusCode: 503 });
+    res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
   }
 });
 
