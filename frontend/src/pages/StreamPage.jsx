@@ -30,8 +30,23 @@ function StreamPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState(null);
 
+  const [announcementCourseFilter, setAnnouncementCourseFilter] = useState('all');
+
   const rows = useMemo(() => withDerived(assignments), [assignments]);
   const now = new Date();
+
+  const announcementCourses = useMemo(
+    () => [...new Set(announcements.map(a => a.course_name))],
+    [announcements]
+  );
+
+  const filteredAnnouncements = useMemo(
+    () =>
+      announcements.filter(
+        (a) => announcementCourseFilter === 'all' || a.course_name === announcementCourseFilter
+      ),
+    [announcements, announcementCourseFilter]
+  );
 
   // Fetch announcements from DB
   useEffect(() => {
@@ -91,6 +106,21 @@ function StreamPage() {
         <div style={styles.section}>
           <h2 style={styles.sectionTitle}>📢 ประกาศล่าสุด</h2>
 
+          {!announcementsLoading && !announcementsError && announcements.length > 0 && (
+            <select
+              value={announcementCourseFilter}
+              style={styles.filterSelect}
+              onChange={(e) => setAnnouncementCourseFilter(e.target.value)}
+            >
+              <option value="all">ทุกรายวิชา</option>
+              {announcementCourses.map((course) => (
+                <option key={course} value={course}>
+                  {course}
+                </option>
+              ))}
+            </select>
+          )}
+
           {announcementsLoading && <p style={styles.muted}>กำลังโหลดประกาศ…</p>}
           {announcementsError && (
             <p style={styles.error}>⚠️ ไม่สามารถโหลดประกาศได้: {announcementsError}</p>
@@ -100,9 +130,13 @@ function StreamPage() {
             <p style={styles.muted}>ไม่มีประกาศในขณะนี้</p>
           )}
 
-          {!announcementsLoading && !announcementsError && announcements.length > 0 && (
+          {!announcementsLoading && !announcementsError && announcements.length > 0 && filteredAnnouncements.length === 0 && (
+            <p style={styles.muted}>ไม่มีประกาศของรายวิชานี้</p>
+          )}
+
+          {!announcementsLoading && !announcementsError && filteredAnnouncements.length > 0 && (
             <div style={styles.announcementList}>
-              {announcements.map((ann) => (
+              {filteredAnnouncements.map((ann) => (
                 <div key={ann.announcement_id} style={styles.announcementCard}>
                   <div style={styles.cardHeader}>
                     <span style={styles.courseBadge}>{ann.course_name}</span>
@@ -255,6 +289,22 @@ const styles = {
 
   muted: { color: C.mutedLight || '#888', fontSize: 13, margin: '8px 0 0' },
   error: { color: C.pinkDark || '#d9381e', fontSize: 14 },
+
+  filterSelect: {
+    minWidth: 200,
+    height: 40,
+    padding: '0 14px',
+    marginBottom: 12,
+    borderRadius: 10,
+    border: `1px solid ${C.lineInput || '#ddd'}`,
+    background: '#fff',
+    color: C.ink,
+    fontFamily: FONT,
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: 'pointer',
+    outline: 'none',
+  },
 };
 
 export default StreamPage;
