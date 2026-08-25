@@ -13,6 +13,7 @@ const {
   msJwks,
 } = require('../config');
 const { beginOAuth, checkState, completeLogin, finishOAuth } = require('../services/oauthSession');
+const { logError } = require('../services/errorLogger');
 
 const router = express.Router();
 
@@ -57,7 +58,8 @@ router.get('/api/auth/google/callback', async (req, res) => {
     });
     finishOAuth(req, res, 'google');
   } catch (err) {
-    console.error('[auth] callback error:', err.message);
+    void logError(err, req, { source: 'auth', statusCode: 500 });
+    console.error('[auth] callback failed:', req.requestId, err.code || 'unknown');
     res.redirect(`${FRONTEND_URL}/login?error=oauth`);
   }
 });
@@ -111,7 +113,8 @@ router.get('/api/auth/microsoft/callback', async (req, res) => {
     });
     finishOAuth(req, res, 'microsoft');
   } catch (err) {
-    console.error('[auth] microsoft callback error:', err.message);
+    void logError(err, req, { source: 'auth', statusCode: 500 });
+    console.error('[auth] microsoft callback failed:', req.requestId, err.code || 'unknown');
     res.redirect(`${FRONTEND_URL}/login?error=oauth`);
   }
 });

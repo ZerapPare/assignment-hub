@@ -6,6 +6,12 @@ import HomePage from './pages/HomePage';
 import AssignmentsPage from './pages/AssignmentsPage';
 import StreamPage from './pages/StreamPage';
 import SettingsPage from './pages/SettingsPage';
+import AdminLayout from './components/admin/AdminLayout';
+import AdminDashboardPage from './pages/admin/AdminDashboardPage';
+import AdminUsersPage from './pages/admin/AdminUsersPage';
+import AdminUserDetailPage from './pages/admin/AdminUserDetailPage';
+import AdminErrorsPage from './pages/admin/AdminErrorsPage';
+import AdminSystemPage from './pages/admin/AdminSystemPage';
 
 function App() {
   return (
@@ -17,6 +23,14 @@ function App() {
         <Route path="/assignments" element={<AssignmentsPage />} />
         <Route path="/stream" element={<StreamPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<AdminDashboardPage />} />
+          <Route path="users" element={<AdminUsersPage />} />
+          <Route path="users/:id" element={<AdminUserDetailPage />} />
+          <Route path="errors" element={<AdminErrorsPage />} />
+          <Route path="system" element={<AdminSystemPage />} />
+        </Route>
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>

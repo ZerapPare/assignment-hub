@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { logError } = require('../services/errorLogger');
 
 const router = express.Router();
 
@@ -84,7 +85,8 @@ router.get('/api/notification-settings', requireAuth, async (req, res) => {
   try {
     res.json(await readSettings(req.session.userId));
   } catch (err) {
-    res.status(503).json({ error: 'Database not ready', message: err.message });
+    void logError(err, req, { source: 'notifications', statusCode: 503 });
+    res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
   }
 });
 
@@ -132,8 +134,9 @@ router.put('/api/notification-settings', requireAuth, async (req, res) => {
 
   // Both tables move together: a settings row whose lead times half-applied
   // would silently change when the student gets reminded.
-  const conn = await pool.getConnection();
+  let conn;
   try {
+    conn = await pool.getConnection();
     await conn.beginTransaction();
 
     await conn.query(
@@ -157,18 +160,22 @@ router.put('/api/notification-settings', requireAuth, async (req, res) => {
 
     await conn.commit();
   } catch (err) {
-    await conn.rollback();
-    console.error('[notifications] save failed:', err.message);
-    return res.status(503).json({ error: 'บันทึกการตั้งค่าไม่สำเร็จ', message: err.message });
+    if (conn) {
+      try { await conn.rollback(); } catch (_) { /* connection may not have started a transaction */ }
+    }
+    void logError(err, req, { source: 'notifications', statusCode: 503 });
+    console.error('[notifications] save failed:', req.requestId, err.code || 'unknown');
+    return res.status(503).json({ error: 'บันทึกการตั้งค่าไม่สำเร็จ', request_id: req.requestId });
   } finally {
-    conn.release();
+    if (conn) conn.release();
   }
 
   // Same shape as GET, so the panel can drop the response straight into state.
   try {
     res.json(await readSettings(req.session.userId));
   } catch (err) {
-    res.status(503).json({ error: 'Database not ready', message: err.message });
+    void logError(err, req, { source: 'notifications', statusCode: 503 });
+    res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
   }
 });
 
