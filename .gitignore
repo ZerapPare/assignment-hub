@@ -1,3 +1,9 @@
 node_modules/
 .env*
 !.env.example
+# Private & Public Keys
+*.key
+*.pub
+*.pem
+id_rsa*
+gcp_*
