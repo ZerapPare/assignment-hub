@@ -26,7 +26,6 @@ function AssignmentDetailPage() {
       <Sidebar active="all" student={student} onLogout={logout} />
 
       <div style={styles.main}>
-        {/* Top Bar */}
         <button type="button" style={styles.backBtn} onClick={() => navigate(-1)}>
           ← กลับไปหน้างานทั้งหมด
         </button>
@@ -38,7 +37,6 @@ function AssignmentDetailPage() {
 
         {!loading && assignment && (
           <div style={styles.card}>
-            {/* Header section */}
             <div style={styles.header}>
               <div>
                 <span style={styles.badge}>{assignment.course_name}</span>
@@ -64,11 +62,19 @@ function AssignmentDetailPage() {
 
             <hr style={styles.divider} />
 
-            {/* Metadata Section */}
             <div style={styles.grid}>
               <div style={styles.metaItem}>
                 <span style={styles.metaLabel}>📅 กำหนดส่ง</span>
                 <span style={styles.metaValue}>{formatDate(assignment.due_date)}</span>
+              </div>
+
+              <div style={styles.metaItem}>
+                <span style={styles.metaLabel}>💯 คะแนน</span>
+                <span style={styles.metaValue}>
+                  {assignment.max_points 
+                    ? `${assignment.assigned_grade !== null ? assignment.assigned_grade : '-'}/${assignment.max_points}` 
+                    : 'ไม่มีการให้คะแนน'}
+                </span>
               </div>
 
               <div style={styles.metaItem}>
@@ -93,7 +99,6 @@ function AssignmentDetailPage() {
               )}
             </div>
 
-            {/* Description Section */}
             <div style={styles.descSection}>
               <h3 style={styles.descTitle}>รายละเอียด</h3>
               <div style={styles.descContent}>
@@ -186,7 +191,7 @@ const styles = {
 
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
     gap: 16,
     marginBottom: 24,
   },
