@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/Sidebar';
 import AssignmentTable from '../components/AssignmentTable';
 import AddTaskModal from '../components/AddTaskModal';
 import EditTaskModal from '../components/EditTaskModal';
 import useAssignments from '../useAssignments';
+import { trackClientEvent } from '../analytics';
 import { withDerived } from '../tasks';
 import { C, FONT, R, SHADOW } from '../theme';
 
@@ -26,6 +27,18 @@ function AssignmentsPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState(null);
 
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [courseFilter, setCourseFilter] = useState("all");
+
+  useEffect(() => {
+    if (!search.trim()) return undefined;
+    const timer = setTimeout(() => {
+      void trackClientEvent('assignment.search_used', { has_query: true });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const rows = useMemo(() => withDerived(assignments), [assignments]);
   // One `now` per render, so every row's urgency is measured against the same
   // instant. Nothing memoises on it, so a fresh value each time costs nothing.
@@ -35,6 +48,20 @@ function AssignmentsPage() {
     setEditing(a);
     setEditOpen(true);
   };
+
+  const filteredTasks = rows
+    .filter(a => statusFilter === "all" || a.status === statusFilter)
+    .filter(a => courseFilter === "all" || a.course_name === courseFilter)
+    .filter((a) => {
+      if (!search) return true;
+      const keyword = search.toLowerCase();
+      return (
+        a.title.toLowerCase().includes(keyword) ||
+        a.course_name.toLowerCase().includes(keyword) ||
+        (a.description || "").toLowerCase().includes(keyword)
+      );
+    });
+
 
   return (
     <div style={styles.page}>
@@ -51,9 +78,58 @@ function AssignmentsPage() {
         {loading && <p style={styles.muted}>กำลังโหลด…</p>}
         {error && <p style={styles.error}>⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>}
 
+        <div style={styles.searchBar}>
+          <input
+            type="text"
+            placeholder="ค้นหางาน..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={styles.searchInput}
+          />
+        </div>
+
+        <div style={styles.filterBar}>
+
+          <select
+            value={statusFilter}
+            style={styles.filterSelect}
+            onChange={(e) => {
+              const value = e.target.value;
+              setStatusFilter(value);
+              void trackClientEvent('assignment.filter_used', {
+                filter_type: 'status',
+                filter_value: value,
+              });
+            }}
+          >
+            <option value="all">ทุกสถานะ</option>
+            <option value="not_started">ยังไม่เริ่ม</option>
+            <option value="in_progress">กำลังทำ</option>
+            <option value="submitted">ส่งแล้ว</option>
+            <option value="completed">เสร็จสิ้น</option>
+          </select>
+
+          <select
+            value={courseFilter}
+            style={styles.filterSelect}
+            onChange={(e) => setCourseFilter(e.target.value)}
+          >
+            <option value="all">ทุกรายวิชา</option>
+
+            {[...new Set(assignments.map(a => a.course_name))].map(course => (
+              <option key={course} value={course}>
+                {course}
+              </option>
+            ))}
+
+          </select>
+
+        </div>
+
         {!loading && !error && (
           <AssignmentTable
-            assignments={rows}
+            // assignments={rows}
+            assignments={filteredTasks}
             now={now}
             statusPending={statusPending}
             statusErrors={statusErrors}
@@ -115,6 +191,60 @@ const styles = {
 
   muted: { color: C.mutedLight, fontSize: 13, margin: '8px 0 0' },
   error: { color: C.pinkDark, fontSize: 14 },
+
+  searchBar: {
+    marginBottom: 15,
+  },
+
+  searchInput: {
+    width: '100%',
+    padding: '10px 14px',
+    borderRadius: 8,
+    border: '1px solid #ddd',
+    fontSize: 14,
+  },
+
+  filterBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+    marginBottom: 18,
+  },
+
+  filterSelect: {
+    minWidth: 200,
+    height: 40,
+
+    padding: "0 14px",
+
+    borderRadius: 10,
+    border: `1px solid ${C.lineInput}`,
+
+    background: "#fff",
+    color: C.ink,
+
+    fontFamily: FONT,
+    fontSize: 13,
+    fontWeight: 500,
+
+    cursor: "pointer",
+    outline: "none",
+
+    transition: "border-color .2s ease, box-shadow .2s ease",
+
+    appearance: "none",
+    WebkitAppearance: "none",
+    MozAppearance: "none",
+
+    backgroundImage: `
+    linear-gradient(45deg, transparent 50%, ${C.muted} 50%),
+    linear-gradient(135deg, ${C.muted} 50%, transparent 50%)
+  `,
+    backgroundPosition:
+      "calc(100% - 18px) calc(50% - 2px), calc(100% - 12px) calc(50% - 2px)",
+    backgroundSize: "6px 6px, 6px 6px",
+    backgroundRepeat: "no-repeat",
+  },
 };
 
 export default AssignmentsPage;

@@ -1,3 +1,4 @@
+// services/classroomSync.js[cite: 13]
 function toMysqlDateTime(dueDate, dueTime) {
   if (!dueDate) return null;
   const { year, month, day } = dueDate;
@@ -5,6 +6,11 @@ function toMysqlDateTime(dueDate, dueTime) {
   const minutes = dueTime?.minutes ?? 59;
   const pad = (n) => String(n).padStart(2, '0');
   return `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:00`;
+}
+
+function isoToMysqlDateTime(isoString) {
+  if (!isoString) return null;
+  return new Date(isoString).toISOString().slice(0, 19).replace('T', ' ');
 }
 
 async function listCourseWorkSince(classroom, courseId, cutoffDate) {
@@ -34,4 +40,53 @@ async function listCourseWorkSince(classroom, courseId, cutoffDate) {
   return results;
 }
 
-module.exports = { toMysqlDateTime, listCourseWorkSince };
+async function listAnnouncementsSince(classroom, courseId, cutoffDate) {
+  const results = [];
+  let pageToken;
+  do {
+    const { data } = await classroom.courses.announcements.list({
+      courseId,
+      pageSize: 50,
+      pageToken,
+    });
+    const items = data.announcements || [];
+
+    for (const ann of items) {
+      if (ann.state !== 'PUBLISHED') continue;
+      if (cutoffDate && ann.creationTime) {
+        if (new Date(ann.creationTime) < cutoffDate) return results;
+      }
+      results.push(ann);
+    }
+
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return results;
+}
+
+async function getCreatorProfile(classroom, userId, profileCache) {
+  if (!userId) return { name: null, email: null };
+  if (profileCache.has(userId)) return profileCache.get(userId);
+
+  try {
+    const { data } = await classroom.userProfiles.get({ userId });
+    const profile = {
+      name: data.name?.fullName || null,
+      email: data.emailAddress || null,
+    };
+    profileCache.set(userId, profile);
+    return profile;
+  } catch (err) {
+    console.warn('[classroom] failed to fetch profile for user %s: %s', userId, err.message);
+    return { name: null, email: null };
+  }
+}
+
+module.exports = {
+  toMysqlDateTime,
+  isoToMysqlDateTime,
+  listCourseWorkSince,
+  listAnnouncementsSince,
+  getCreatorProfile,
+};

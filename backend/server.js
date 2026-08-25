@@ -30,6 +30,7 @@ app.use(require('./src/routes/health'));
 app.use(require('./src/routes/auth'));
 app.use(require('./src/routes/adminAuth'));
 app.use(require('./src/routes/me'));
+app.use(require('./src/routes/announcements'));
 app.use(require('./src/routes/assignments'));
 app.use(require('./src/routes/classroom'));
 app.use(require('./src/routes/notifications'));

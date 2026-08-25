@@ -5,6 +5,8 @@ import LoginPage from './pages/LoginPage';
 import AdminLoginPage from './pages/AdminLoginPage';
 import HomePage from './pages/HomePage';
 import AssignmentsPage from './pages/AssignmentsPage';
+import AssignmentDetailPage from './pages/AssignmentDetailPage';
+import StreamPage from './pages/StreamPage';
 import SettingsPage from './pages/SettingsPage';
 import AdminLayout from './components/admin/AdminLayout';
 import AdminRoute from './components/admin/AdminRoute';
@@ -24,6 +26,8 @@ function App() {
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/home" element={<HomePage />} />
         <Route path="/assignments" element={<AssignmentsPage />} />
+        <Route path="/assignments/:id" element={<AssignmentDetailPage />} />
+        <Route path="/stream" element={<StreamPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/admin" element={<AdminRoute />}>
           <Route element={<AdminLayout />}>

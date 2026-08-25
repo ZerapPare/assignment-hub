@@ -32,6 +32,7 @@ router.get('/api/auth/google', (req, res) => {
       // scopes from grants — the app itself never writes coursework
       'https://www.googleapis.com/auth/classroom.coursework.me',
       'https://www.googleapis.com/auth/classroom.student-submissions.me.readonly',
+      'https://www.googleapis.com/auth/classroom.announcements.readonly'
     ],
   });
   res.redirect(url);
