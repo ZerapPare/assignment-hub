@@ -30,6 +30,8 @@ The frontend never talks to MySQL directly — it calls `/api/*`, which Vite pro
 | Auth      | Google + Microsoft OAuth 2.0 — `google-auth-library`, `jose`, `express-session` |
 | DB Driver | mysql2                                              |
 | Database  | MySQL 8.0                                           |
+| Sync      | `googleapis` — Google Classroom coursework, grades, and announcements |
+| Tests     | `node:test` (backend only, no runner dependency)    |
 | Container | Docker + Docker Compose                             |
 
 ## Prerequisites
@@ -43,11 +45,19 @@ The frontend never talks to MySQL directly — it calls `/api/*`, which Vite pro
 git clone https://github.com/ZerapPare/assignment-hub.git
 cd assignment-hub
 docker compose up --build
+
+# once MySQL is up — init.sql is behind these two, even on a brand-new database
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_announcement.sql
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_score.sql
 ```
 
 Then open **http://localhost:5173**.
 
 > First run: MySQL takes ~10–20s to initialize. If the page shows a "waiting for database" warning, wait and refresh.
+
+> **Those two migrations are not optional.** `init.sql` does not yet create `Announcement`
+> or the score columns, so without them `/stream` and `/api/assignments` both fail. See
+> [Migrations](#migrations).
 
 > **Login needs OAuth credentials.** The stack runs without them, but clicking "เข้าสู่ระบบด้วย Google/Microsoft" will fail until you create a `.env.local` (see [Authentication](#authentication-oauth)).
 
@@ -113,14 +123,26 @@ This trips people up, so be precise about which file a variable belongs in:
 | `/login` | Login screen  | Real Google / Microsoft OAuth (buttons redirect to the backend) |
 | `/admin/login` | Admin login | Separate Google / Microsoft OAuth; email must be provisioned in `Admin` |
 | `/admin/*` | Admin console | Protected admin dashboard, users, errors, system health, and business analytics |
-| `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, a month calendar, upcoming deadlines, and a 48h checklist. **Summary only — no task table** |
-| `/assignments` | All tasks | Requires a session. The task table: search, platform/status/course filters, per-row status control, edit + delete on manual tasks |
+| `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, a month calendar with per-day hover details, upcoming deadlines, and a 48h checklist. **Summary only — no task table** |
+| `/assignments` | All tasks | Requires a session. The task table: search, platform/status/course filters, score column, per-row status control, edit + delete on manual tasks |
+| `/assignments/:id` | Task detail | Requires a session. One task in full — description, course, score, status control, and a link back to Google Classroom. Reached by clicking a title in the table |
+| `/stream` | Announcements | Requires a session. Classroom announcements (`GET /api/announcements`) with a course filter, beside the same task table |
 | `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, notification preferences, and connect state for Google and Microsoft |
 | `*`      | →             | Redirects to `/login`                                       |
 
+The sidebar (`Sidebar.jsx`, `position: sticky`) links four of these: หน้าแรก · งานทั้งหมด · ประกาศ · ตั้งค่า. `/assignments/:id` has no nav entry — it is reached from the table only.
+
+**`/assignments/:id` has no endpoint of its own.** `AssignmentDetailPage` calls the same
+`useAssignments` hook every other page uses and `find`s the id in the already-fetched list,
+so deep-linking to a detail page costs one `/api/assignments` request and works offline of
+any new route. The trade-off is that a task id that isn't in the student's list renders
+"ไม่พบข้อมูลงานนี้" rather than a `404` from the server.
+
 Every figure on the dashboard is derived in a single `useMemo` over the `/api/assignments`
-response — there is no seeded or placeholder data anywhere in the UI. A freshly
-logged-in account (before its first sync) renders zeros and empty states.
+response — there is no seeded or placeholder data anywhere in the student UI. A freshly
+logged-in account (before its first sync) renders zeros and empty states. (The admin
+console *can* show demo records, but only ones written to the database on purpose — see
+[Mock data for the admin console](#mock-data-for-the-admin-console).)
 
 **`+ เพิ่มงานใหม่`** (on both the dashboard and the assignments page) opens `AddTaskModal`
 and `POST`s to `/api/assignments`. The created row is appended to the same `assignments`
@@ -189,7 +211,6 @@ Still inert:
 - **`EditTaskModal`'s course field** posts `course_name`, which `PATCH /api/assignments/:id`
   does not accept — the value is silently dropped. Either add it to the handler or remove
   the input; right now it looks editable and isn't.
-- The **`สถิติ` sidebar item** has no route, so it carries no pointer cursor.
 
 Fonts and base CSS are injected by `src/GlobalStyles.jsx` (mounted once in `App.jsx`)
 rather than declared in `index.html`.
@@ -273,7 +294,9 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | PATCH  | `/api/assignments/:id`        | Yes  | Edits a **manual** task; `404` for synced or other users' rows |
 | PATCH  | `/api/assignments/:id/status` | Yes  | Sets the task's status — allowed on **synced** rows too |
 | DELETE | `/api/assignments/:id`        | Yes  | Deletes a **manual** task; `204` on success, `404` for synced or other users' rows |
-| POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework into the DB      |
+| GET    | `/api/announcements`          | Yes  | The session user's Classroom announcements, newest first |
+| POST   | `/api/analytics/events`       | Yes  | Records one allow-listed client event; best effort   |
+| POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework **and announcements** into the DB |
 | GET    | `/api/notification-settings`  | Yes  | Reminder preferences; **defaults without writing** when never saved |
 | PUT    | `/api/notification-settings`  | Yes  | Replaces the whole preference set in one transaction |
 
@@ -324,9 +347,11 @@ handed in is something Google can observe, finished is a judgement only the stud
 you must change the other.
 
 `POST /api/classroom/sync` takes `{ "cutoffDate": "YYYY-MM-DD" | null }` and returns
-`{ ok, coursesSynced, assignmentsSynced, deletedCount, skippedCourses }`. The cutoff both
+`{ ok, coursesSynced, assignmentsSynced, announcementsSynced, deletedCount, skippedCourses }`.
+The cutoff both
 limits what is imported and deletes previously-synced rows that now fall before it, so
-moving the date forward prunes old semesters. A re-sync updates rather than duplicates,
+moving the date forward prunes old semesters — announcements posted before the cutoff are
+deleted in the same pass. A re-sync updates rather than duplicates,
 and never touches a status the student set by hand — see [Status is the student's, not the
 platform's](#status-is-the-students-not-the-platforms).
 A course whose coursework can't be read is pushed onto `skippedCourses` instead of
@@ -353,6 +378,47 @@ matching entry under [Troubleshooting](#troubleshooting).
 Neither key is enforced by a database constraint (`external_assignment_id` is
 deliberately **not** unique — several students legitimately hold the same one), so
 correctness here rests entirely on the queries in `routes/classroom.js`.
+
+`Announcement` follows the same rule for the same reason: its upsert key is
+`(external_announcement_id, course_id)`, and `course_id` is already scoped to the student.
+
+### Announcements
+
+The Classroom sync imports each course's announcements alongside its coursework, and
+`GET /api/announcements` reads them back joined through `Course` so a student only ever
+sees their own. Two things about the shape:
+
+- **`Announcement.title` is never written.** Classroom announcements carry no title — only
+  `text`. The column exists for a future manual or Teams-sourced announcement; today every
+  synced row leaves it `NULL` and `StreamPage` renders the body.
+- **A course whose announcements can't be read does not fail the sync.** `listAnnouncementsSince`
+  is wrapped in its own `try`, so a permission error logs a warning and the course's
+  coursework still imports — unlike the coursework failure, which pushes onto `skippedCourses`.
+
+`StreamPage` filters client-side by `course_name` over the fetched list; there is no
+per-course query parameter.
+
+### Scores
+
+The sync also copies Classroom's `maxPoints` and the student's `assignedGrade` into
+`Assignment_Detail.max_points` / `assigned_grade`, and `GET /api/assignments` returns both.
+The table's คะแนน column shows `assigned_grade/max_points`, falling back to `-/max_points`
+while ungraded and to `—` for work Classroom scores out of nothing.
+
+Unlike `status`, these are **overwritten on every sync without a guard** — they are the
+platform's number, not the student's, so there is no `status_updated_at` equivalent and
+nothing in the UI writes them.
+
+### Client analytics
+
+`POST /api/analytics/events` accepts a short allow-list of browser-side events
+(`dashboard.viewed`, `assignment.search_used`, `assignment.filter_used`) into `Product_Event`,
+which feeds the admin business pages. Everything else about it is defensive: the body may
+carry no keys beyond `event_name` and `metadata`, an unknown name is `400`, and a database
+failure answers `202 {ok:false}` rather than an error — a dropped metric must never surface
+as a broken screen. `frontend/src/analytics.js` mirrors the same allow-list and swallows
+every rejection, so instrumentation can be added to a component without a failure path.
+Server-side events are recorded directly by the routes through `safeTrackEvent`.
 
 ### Notification preferences
 
@@ -391,6 +457,7 @@ curl -i http://localhost:3000/api/auth/google  # 302 to accounts.google.com
 assignment-hub/
 ├── docker-compose.yml        # defines frontend + backend + db
 ├── init.sql                  # schema only, no seed data (runs on first DB start)
+│                             # NOTE: behind migrations 006_announcement + 007_score
 ├── migrations/               # ALTERs for databases created before a schema change
 │   ├── 001_identity.sql      # unique email domain + (student_id, university_id)
 │   ├── 002_task_type.sql     # Assignment.task_type
@@ -398,7 +465,9 @@ assignment-hub/
 │   ├── 004_notification_settings.sql  # Notification_Setting + Notification_Lead_Time
 │   ├── 005_admin_monitoring.sql       # monitoring tables and Student account status
 │   ├── 006_product_analytics.sql      # privacy-safe Product_Event stream
+│   ├── 006_announcement.sql           # Announcement table (Classroom stream)
 │   ├── 007_admin_identity.sql          # separate Admin allowlist identity
+│   ├── 007_score.sql                   # Assignment_Detail.max_points + assigned_grade
 │   └── 008_admin_microsoft_identity.sql # immutable Microsoft identity columns
 ├── migrate.sh / migrate.bat  # run every migration in order (keep the two in step)
 ├── Caddyfile                 # TLS reverse proxy config (used by the `tls` profile)
@@ -407,16 +476,30 @@ assignment-hub/
 ├── backend/
 │   ├── Dockerfile
 │   ├── package.json          # express, mysql2, express-session, google-auth-library, googleapis, jose
-│   ├── server.js             # thin entry: session middleware, then mounts the routers
+│   ├── server.js             # thin entry: context/metrics/session middleware, routers, errorHandler
+│   ├── scripts/seedMockUsers.js  # `npm run seed:mock-users` — demo data for the admin console
+│   ├── test/                 # node:test suites (`npm test`)
 │   └── src/
 │       ├── config.js         # env vars in one place (PORT, SESSION_SECRET, OAuth ids)
 │       ├── db.js             # the shared mysql2 pool
-│       ├── middleware/auth.js    # requireAuth + requireAdmin session guards
-│       ├── routes/           # health, student auth, admin auth, app/admin APIs
+│       ├── middleware/
+│       │   ├── auth.js           # requireAuth session guard
+│       │   ├── adminAuth.js      # requireAdmin session guard
+│       │   ├── requestContext.js # per-request id, attached to logs and error bodies
+│       │   ├── requestMetrics.js # hourly request counters (System_Request_Metric_Hourly)
+│       │   └── errorHandler.js   # terminal handler; logs to System_Error_Log
+│       ├── routes/           # health, student auth, admin auth, me, announcements,
+│       │                     # assignments, classroom, notifications, analytics,
+│       │                     # admin, adminBusiness
 │       ├── services/
 │       │   ├── adminIdentity.js    # allowlisted Admin lookup (never creates Student)
+│       │   ├── adminMetrics.js     # monitoring dashboard aggregates
+│       │   ├── analytics.js        # Product_Event validation + safeTrackEvent
 │       │   ├── businessMetrics.js  # aggregate adoption and usage metrics
-│       │   ├── classroomSync.js  # Classroom paging + date conversion
+│       │   ├── classroomSync.js  # Classroom paging (coursework + announcements), date conversion
+│       │   ├── devStudentSeeder.js           # mock students — dev-guarded
+│       │   ├── devBusinessAnalyticsSeeder.js # mock Product_Event stream — dev-guarded
+│       │   ├── errorLogger.js      # writes System_Error_Log
 │       │   ├── identity.js       # find-or-create University / upsert Student
 │       │   └── oauthSession.js   # `state` handling and the link-mode flow
 │       └── utils/dueDate.js  # datetime-local → DATETIME, kept in wall-clock time
@@ -431,18 +514,21 @@ assignment-hub/
         ├── theme.js          # design tokens: colours, font, radii, shadows, Thai day/month names
         ├── tasks.js          # shared task model: STATUS, filters, isDone, withDerived, date fmt
         ├── useAssignments.js # shared hook: fetch + status/delete/edit handlers
+        ├── analytics.js      # trackClientEvent — allow-listed, failure-swallowing
         ├── GlobalStyles.jsx  # injects the Maitree webfont + base CSS, sets lang="th"
         ├── pages/
         │   ├── LoginPage.jsx    # student Google/Microsoft OAuth
         │   ├── AdminLoginPage.jsx # separate allowlisted admin OAuth
         │   ├── HomePage.jsx     # dashboard summary + the Classroom sync toolbar
         │   ├── AssignmentsPage.jsx # the task table
+        │   ├── AssignmentDetailPage.jsx # one task in full, resolved from the same list
+        │   ├── StreamPage.jsx   # Classroom announcements + course filter
         │   ├── SettingsPage.jsx # profile, รหัสนักศึกษา, notifications, provider link state
         │   └── admin/            # protected monitoring and business analytics pages
         ├── components/       # Sidebar, StatCard, AssignmentTable, TaskRow, BarChart,
-        │                     # DonutChart, MiniCalendar, DeadlineList, UrgentChecklist,
+        │                     # DonutChart, Calendar, DeadlineList, UrgentChecklist,
         │                     # AddTaskModal, EditTaskModal, NotificationSettings, Toggle,
-        │                     # ProviderButton, BrandMark
+        │                     # ProviderButton, BrandMark, admin/
         └── icons/            # GoogleIcon, MicrosoftIcon + index.jsx (UI icon set, inline SVG)
 ```
 
@@ -461,6 +547,13 @@ Auto-created on first DB start. Tables:
 `University` · `Student` · `Admin` · `Product_Event` · `Course` · `Assignment` · `Assignment_Detail` · `Schedule` ·
 `Notification` · `Notification_Setting` · `Notification_Lead_Time` · `System_Error_Log` ·
 `Admin_Audit_Log` · `System_Request_Metric_Hourly`
+
+> ⚠️ **`init.sql` is currently behind the migrations.** It does not create `Announcement`
+> and does not add `Assignment_Detail.max_points` / `assigned_grade`. A *fresh* database
+> therefore still needs `006_announcement.sql` and `007_score.sql` applied, or
+> `/api/announcements`, `/api/assignments` and the Classroom sync all fail on a missing
+> table or column. Run `./migrate.sh` after the first `docker compose up`, or fold the two
+> into `init.sql`. See [Migrations](#migrations).
 
 `init.sql` creates the schema and **inserts nothing** — the database starts empty, so a
 new account sees an empty dashboard until it runs a Classroom sync. `University` rows are
@@ -489,6 +582,12 @@ has to `JOIN` on them to find which assignments are due. `last_custom_minutes` o
 is only a UI convenience — it remembers the last value typed under `+ กำหนดเอง` so the hint
 line can offer it again, and being set there does **not** mean it is currently selected.
 `Notification` itself is still written by nothing.
+
+`Announcement` (migration `006`) hangs off `Course` with `ON DELETE CASCADE` — the only
+cascade in the schema, and the reason the sync's announcement pruning can delete by join
+without cleaning up a child table the way assignment deletion has to. `max_points` and
+`assigned_grade` on `Assignment_Detail` (migration `007`) are the mirror image of
+`status`: written by every sync, never by the app, `NULL` for manual work.
 
 Two *absent* constraints are just as deliberate: `Course.external_course_id` and
 `Assignment.external_assignment_id` carry no unique index, because classmates share those
@@ -521,8 +620,15 @@ do not rerun a migration that has already been applied.
 | `004_notification_settings.sql` | `Notification_Setting` + `Notification_Lead_Time` tables | UC-6, UR12 |
 | `005_admin_monitoring.sql` | monitoring tables and Student account status | admin console |
 | `006_product_analytics.sql` | privacy-safe `Product_Event` stream | business analytics |
+| `006_announcement.sql` | `Announcement` table | `/stream`, Classroom announcements |
 | `007_admin_identity.sql` | separate `Admin` allowlist identity | admin login |
+| `007_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` | the คะแนน column |
 | `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs | admin login |
+
+**Two pairs share a number** (`006_product_analytics` / `006_announcement`, and
+`007_admin_identity` / `007_score`) because the features landed on separate branches. They
+touch different tables, so either order works; `migrate.sh` fixes one anyway. Pick `009`
+for the next migration rather than adding a third to either pair.
 
 `migrate.sh` (and `migrate.bat` for cmd) runs them all in order against a running stack:
 
@@ -532,8 +638,22 @@ migrate.bat         # Windows cmd
 ```
 
 Both scripts contain the same ordered sequence, and new migrations must be appended to **both** by hand.
-Run them only against a database that has not already applied those files; a fresh database from
-current `init.sql` already contains the latest schema.
+Run them only against a database that has not already applied those files.
+
+A fresh database from current `init.sql` is **not** fully up to date: it is missing
+`006_announcement.sql` and `007_score.sql`. Those two are the exception to "only for older
+databases" — apply them after a first `docker compose up` too:
+
+```bash
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_announcement.sql
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_score.sql
+```
+
+Running the whole of `./migrate.sh` against a fresh database also works, but every other
+file is plain `ALTER TABLE` with no `IF NOT EXISTS` guard, so each one MySQL has already
+applied prints a `Duplicate column name` / `Duplicate key name` error. The script does not
+stop on error, so **the two that matter still land** — the noise is expected, not a failed
+run. Nothing is corrupted either way; a duplicate `ALTER` is rejected outright.
 
 Applying one on its own:
 
@@ -552,6 +672,49 @@ docker compose exec db mysql -uroot -proot123 assignment_hub \
 > `status_updated_at` `NULL` everywhere. Filling it in — for instance to "record" when rows
 > were imported — permanently stops the Classroom sync from updating any status, because
 > non-`NULL` is exactly the signal that the student has taken the field over.
+
+## Mock data for the admin console
+
+The database starts empty, which leaves the admin user directory and the business analytics
+pages with nothing to render. A seeder fills them with demo records:
+
+```bash
+docker compose exec -T -e NODE_ENV=development -e ALLOW_MOCK_DATA=1 backend npm run seed:mock-users
+```
+
+It upserts eight students across two `.test` universities — varied account statuses,
+creation and activity dates, and fake Google/Microsoft connection markers — then a matching
+`Product_Event` stream so the feature-adoption charts have shape.
+
+What makes it safe to keep in the repo:
+
+- **Both env vars are required.** `devStudentSeeder` throws unless `NODE_ENV=development`
+  *and* `ALLOW_MOCK_DATA=1`; neither is set in `docker-compose.yml`, so the command above is
+  the only way to run it. Passing them on the `exec` rather than baking them into the
+  service is the point.
+- **Every fixture is unmistakably fake.** Emails must end in `.test` (a reserved TLD that
+  cannot resolve) and student ids in `MOCK-`, both validated before any write.
+- **The provider tokens are markers, not credentials** (`dev-seed:` prefixed). Classroom
+  sync rejects them before it contacts Google.
+- **Re-running is safe.** It upserts: original `created_at` is preserved, activity
+  timestamps are refreshed, and non-mock accounts are never touched. Because `created_at`
+  is historical, the seeded users age out of the dashboard's 30-day new-user window on
+  their own — rerunning refreshes activity rather than rewriting that history.
+
+It creates **no `Admin` row and no admin session.** Provisioning an admin and logging in
+through OAuth is still required to see any of it — see [Authentication](#authentication-oauth).
+
+## Tests
+
+The backend has `node:test` suites in `backend/test/` covering the pieces worth testing
+away from HTTP — `adminIdentity`, `analytics` validation, and the mock seeder's fixture
+guards:
+
+```bash
+docker compose exec backend npm test
+```
+
+No database is needed: each suite passes a fake `db` object. There are no frontend tests.
 
 ## Deploying over HTTPS
 
@@ -607,6 +770,8 @@ certificates per domain per week.
 | `docker compose --profile tls up -d` | Bring the stack up with Caddy in front (deployed hosts) |
 | `docker compose rm -fsv <service>`   | Drop a service **and its anonymous `node_modules` volume** — the fix after adding a dependency |
 | `./migrate.sh` / `migrate.bat`   | Apply every one-time migration to an older database |
+| `docker compose exec backend npm test` | Run the backend `node:test` suites (no DB needed) |
+| `docker compose exec -T -e NODE_ENV=development -e ALLOW_MOCK_DATA=1 backend npm run seed:mock-users` | Fill the admin console with demo users and analytics |
 
 ## Troubleshooting
 
@@ -631,6 +796,17 @@ certificates per domain per week.
 - **Code changed on disk but the backend still runs the old version** — `node --watch` uses `fs.watch`, which frequently misses writes arriving through a Docker bind mount (the same reason Vite needs `usePolling`). `docker compose exec backend grep …` will show the new source while the running process still holds the old one in memory. `docker compose restart backend` after a `git pull` on a deployed host.
 - **`redirect_uri` is correct but login still fails on a deployed host while localhost works** — the two hosts are probably using different OAuth clients. Compare `GOOGLE_CLIENT_ID` in each machine's `.env.local`; `.env.local` is git-ignored, so a deployed checkout never inherits the one you use locally. Copy the ID **and** secret together — a mixed pair fails with `invalid_client`.
 - **`Unknown column 'status_updated_at' in 'field list'`** (or `'task_type'`) — the database predates the schema change and `init.sql` does not re-run on an existing volume. Apply the migrations: `./migrate.sh`, or the single file with `docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/003_status_updated_at.sql`. Every `/api/assignments` read fails with this, so the dashboard shows the DB-not-ready state rather than an empty list.
+- **`Unknown column 'd.max_points'` or `Table 'assignment_hub.Announcement' doesn't exist` — on a database you just created** — this is not a stale volume. `init.sql` is behind migrations `006_announcement.sql` and `007_score.sql`, so a first `docker compose up` produces a schema the code has already moved past. Apply just those two:
+
+  ```bash
+  docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_announcement.sql
+  docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_score.sql
+  ```
+
+  The score column takes out the whole assignments list (the dashboard falls back to "waiting for database"); the missing table takes out `/stream` and the announcement half of a Classroom sync only.
+- **`./migrate.sh` prints a wall of `Duplicate column name` errors** — expected on a database that already has those columns. The migrations are unguarded `ALTER`s and the script doesn't stop on error, so the files that *are* missing still apply. Check the schema rather than the output: `docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assignment_Detail; SHOW TABLES LIKE 'Announcement';"`.
+- **`Refusing to seed mock users: set NODE_ENV=development and ALLOW_MOCK_DATA=1`** — the guard is working. Both must be passed on the `exec` itself (`-e NODE_ENV=development -e ALLOW_MOCK_DATA=1`); setting them in `.env.local` does not reach the seeder's environment check the same way, and they are deliberately absent from `docker-compose.yml`.
+- **Mock users seed, but the admin dashboard still shows nothing** — the seeder creates no `Admin` row and no session, and the admin pages `401` without one. Provision an admin in MySQL and log in at `/admin/login` — see [Authentication](#authentication-oauth). If the user *table* is populated but the trend cards read zero, the fixtures' `created_at` has aged past the 30-day window, which is by design.
 - **A status set by hand reverts after the next Classroom sync** — the sync only skips rows whose `status_updated_at` is non-`NULL`, so a status that keeps getting overwritten means the column never got stamped. Check the row directly:
 
   ```bash
