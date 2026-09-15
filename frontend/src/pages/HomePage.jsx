@@ -12,6 +12,7 @@ import { trackClientEvent } from '../analytics';
 import { HOUR, URGENT_H, fmtDate, fmtTime, isDone, withDerived } from '../tasks';
 import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } from '../icons';
 import { C, FONT, R, SHADOW, WEEKDAYS } from '../theme';
+import AdPopup from '../components/AdPopup';
 
 function HomePage() {
   const { student, assignments, setAssignments, loading, error, setError, logout } =
@@ -40,9 +41,15 @@ function HomePage() {
     localStorage.setItem('classroomSyncCutoff', val);
   };
 
+  //ad
+  const [showAd, setShowAd] = useState(false);
+
   const handleSync = async () => {
     setSyncing(true);
     setError(null);
+    //ad
+    setShowAd(true);
+    
     try {
       const r = await fetch('/api/classroom/sync', {
         method: 'POST',
@@ -137,7 +144,7 @@ function HomePage() {
   }, [view.withDate, cal.year, cal.month]);
 
   const isCurrentMonth = cal.year === view.now.getFullYear() && cal.month === view.now.getMonth();
-
+  
   return (
     <div style={styles.page}>
       <Sidebar active="home" student={student} onLogout={logout} />
@@ -268,6 +275,9 @@ function HomePage() {
           onClose={() => setAddOpen(false)}
           onCreated={(a) => setAssignments((prev) => [...prev, a])}
         />
+
+        <AdPopup open={showAd} onClose={() => setShowAd(false)} />
+
       </div>
     </div>
   );
