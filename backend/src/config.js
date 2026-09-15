@@ -41,6 +41,19 @@ if (!MS_CLIENT_ID || !MS_CLIENT_SECRET) {
   console.warn('[auth] MS_CLIENT_ID/SECRET not set — Microsoft login will fail until .env.local is filled.');
 }
 
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_PORT = Number(process.env.SMTP_PORT) || 587;
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+// Port 465 is implicit TLS; 587 and everything else upgrade with STARTTLS.
+// SMTP_SECURE=1 forces it on for a provider that wants implicit TLS elsewhere.
+const SMTP_SECURE = process.env.SMTP_SECURE === '1' || SMTP_PORT === 465;
+const MAIL_FROM = process.env.MAIL_FROM || 'Assignment Hub <no-reply@assignment-hub.local>';
+
+if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+  console.warn('[mailer] SMTP_HOST/USER/PASS not set — reminder emails will be logged instead of sent.');
+}
+
 module.exports = {
   PORT,
   FRONTEND_URL,
@@ -60,4 +73,10 @@ module.exports = {
   MS_AUTHORIZE_URL,
   MS_TOKEN_URL,
   msJwks,
+  SMTP_HOST,
+  SMTP_PORT,
+  SMTP_USER,
+  SMTP_PASS,
+  SMTP_SECURE,
+  MAIL_FROM,
 };

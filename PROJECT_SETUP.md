@@ -31,6 +31,7 @@ The frontend never talks to MySQL directly — it calls `/api/*`, which Vite pro
 | DB Driver | mysql2                                              |
 | Database  | MySQL 8.0                                           |
 | Sync      | `googleapis` — Google Classroom coursework, grades, and announcements |
+| Email     | `nodemailer` over SMTP — deadline reminders (FR-07)  |
 | Tests     | `node:test` (backend only, no runner dependency)    |
 | Container | Docker + Docker Compose                             |
 
@@ -114,6 +115,10 @@ This trips people up, so be precise about which file a variable belongs in:
 | `MS_CLIENT_SECRET`      | **.env.local**   | Azure client secret                              |
 | `MS_TENANT_ID`          | **.env.local**   | *(optional)* Azure tenant for student OAuth; defaults to `organizations` |
 | `MS_ADMIN_TENANT_IDS`   | **.env.local**   | **required for Microsoft admin OAuth** — comma-separated trusted Entra tenant GUIDs |
+| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` | **.env.local** | SMTP account the reminder sender uses. Leave empty and mail is logged, not sent — the pipeline still runs |
+| `MAIL_FROM`             | **.env.local**   | sender address shown to the recipient. Gmail rewrites it to the authenticated account |
+| `SMTP_SECURE`           | **.env.local**   | *(optional)* `1` forces implicit TLS. Port `465` turns it on by itself; `587` uses STARTTLS |
+| `APP_TZ`                | **.env**         | timezone for the `backend` and `db` containers; defaults to `Asia/Bangkok`. Reminder scheduling compares wall-clock `due_date` against `NOW()`, so both must agree |
 | `SESSION_SECRET`        | **.env.local**   | random string that signs the session cookie. **Set this on any internet-facing host** — the fallback in `server.js` is a literal published in this repo, so leaving it empty lets anyone forge a session. Generate with `openssl rand -hex 32`; it does not need to match between machines |
 
 ## Frontend routes
@@ -199,13 +204,11 @@ still works while off — turning notifications off must not discard the schedul
 The save button stays disabled until something actually changes, compared against a snapshot
 of what was loaded.
 
-**No email is sent yet.** There is no scheduler, no SMTP, and nothing writes the
-`Notification` table, so `ส่งอีเมลทดสอบ` is disabled and the failure banner never appears
-(`failed_count` is structurally 0 — see [API Endpoints](#api-endpoints-backend)).
+**Email reminders are live** — see [Email reminders](#email-reminders-fr-07). `ส่งอีเมลทดสอบ`
+now posts to `/api/notification-settings/test`, and the failure banner reports real rows.
 
 Still inert:
 
-- The **`ส่งอีเมลทดสอบ` button** — disabled until a sender exists.
 - The **48h checklist** is display-only. `Assignment_Detail.status` is writable now, but
   `UrgentChecklist` takes no `onToggle` — status changes go through the table's dropdown.
 - **`EditTaskModal`'s course field** posts `course_name`, which `PATCH /api/assignments/:id`
@@ -299,6 +302,7 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework **and announcements** into the DB |
 | GET    | `/api/notification-settings`  | Yes  | Reminder preferences; **defaults without writing** when never saved |
 | PUT    | `/api/notification-settings`  | Yes  | Replaces the whole preference set in one transaction |
+| POST   | `/api/notification-settings/test` | Yes | Sends one reminder to the session user's own address |
 
 `Yes` = requires a logged-in session (returns `401` otherwise).
 
@@ -440,8 +444,123 @@ Two behaviours are deliberate:
 
 Both responses also carry `failed_count` and `last_failed_at`, counted from `Notification`
 rows where `is_sent = FALSE AND sent_at IS NOT NULL`, scoped to the student by walking
-`Assignment_Detail → Assignment → Course`. **Nothing writes `Notification`, so this is always
-`0`** — it exists so the failure banner has a real source the moment a sender lands.
+`Assignment_Detail → Assignment → Course`. That pair of conditions is the sender's
+"failed for good" state, so the banner in the panel lights up on its own.
+
+### Email reminders (FR-07)
+
+`services/notificationSender.js` runs a pass every 5 minutes, started from `server.js` next
+to `startMetricFlush()` and built the same way — one `setInterval`, `.unref()`'d, errors
+logged and swallowed so a bad pass never takes the process down.
+
+Each pass: cancel unsent reminders for tasks that were finished in the meantime, select what
+is due, claim it, send it, record the outcome.
+
+**Every time comparison is done by MySQL**, never in JS. `due_date` is stored as wall-clock
+time (`utils/dueDate.js`), so the two only agree if the containers share the app's timezone —
+which is why `docker-compose.yml` sets `TZ` on **both** `backend` and `db`. Left at the
+default UTC, reminders fire 7 hours out and `daily_repeat_time` of `08:00` means mid-afternoon.
+
+A reminder is due when `NOW()` has passed `due_date - lead_minutes` and the deadline itself
+has **not** passed — a "1 day left" mail arriving after the deadline is worse than none.
+Tasks that are `submitted` or `completed` are excluded (FR-07.4), as are suspended accounts.
+
+#### `trigger_type` is the deduplication key
+
+`Notification` had no unique constraint, so migration `009` adds
+`UNIQUE (assignment_id, trigger_type)` and the sender claims work with `INSERT IGNORE`:
+
+```sql
+INSERT IGNORE INTO Notification (assignment_id, trigger_type, ...) VALUES (...)
+```
+
+`affectedRows = 1` means this pass owns the send; `0` means someone else already does. That
+one index is what stops every pass from re-mailing the same reminder — and it holds across
+processes, unlike the metrics flush, which has no locking at all.
+
+The key encodes **which** reminder a row is, and includes the due date:
+
+| Form | Example |
+|---|---|
+| `lead:<minutes>:<due date>` | `lead:1440:2026-09-20 23:59` |
+| `daily:<YYYY-MM-DD>` | `daily:2026-09-16` *(not sent yet — see below)* |
+
+The due date is in the key because **moving a deadline has to re-arm the reminder**. With a
+bare `lead:1440`, pushing a deadline out by a week would stay silent forever on the grounds
+that it had already been sent once (UR07 makes moving deadlines routine).
+
+#### Four states on three columns
+
+| State | `sent_at` | `is_sent` | `attempt_count` |
+|---|---|---|---|
+| claimed / sending | `NULL` | `FALSE` | 0 |
+| retrying | `NULL` | `FALSE` | 1–2 |
+| sent | set | `TRUE` | — |
+| **failed for good** | set | `FALSE` | — |
+
+Only the last row is what `readFailures()` counts, which is what makes the retry ladder
+invisible to the student until it has actually given up (UC-8 7a.3). `next_attempt_at` is
+set 5 minutes ahead when a row is claimed, so it doubles as a lease: a pass that dies
+mid-send leaves the claim behind and a later pass can reclaim it.
+
+#### The retry ladder
+
+A failed send waits **5, then 30, then 120 minutes** (`RETRY_MINUTES`) before being tried
+again — four attempts in total. Each pass sweeps expired rows *before* looking for fresh
+candidates, since a claimed row is work the system already promised to finish.
+
+`attempt_count = 0` rows are swept too. That is a claim whose pass died before it could
+send, and it deserves the same second chance as a send that actually failed — which is why
+the lease and the first retry delay are the same five minutes.
+
+A retry rebuilds its mail from the row, and the **trigger key** is what says which mail it
+was — `Notification_Lead_Time` may no longer contain that lead time, since the student is
+free to deselect it while a retry is pending.
+
+The countdown line is measured from the **due date**, not from the lead time that fired the
+mail. At the first send the two agree, but a retry going out two hours later would otherwise
+still claim "1 day left" when 22 hours remain. It is floor-based (`humanizeGap`), so 26 hours
+reads as "1 วัน" rather than a spurious "1.08".
+
+#### Daily repeat
+
+With `daily_repeat` on, every unfinished task gets one mail a day once the student's chosen
+hour has passed, keyed `daily:<YYYY-MM-DD>` so the date itself is the deduplication.
+
+It only covers work due within **7 days either side of today** (`DAILY_WINDOW_DAYS`).
+Without a window, a student carrying thirty unfinished tasks would get thirty mails every
+morning, which is how people learn to filter the sender away entirely. Overdue work stays in
+range for a week because it can usually still be handed in — and it gets different wording,
+since telling someone a deadline they already missed is "coming up" is worse than not
+writing at all.
+
+`CURDATE()` comes back with the rows rather than being read from the process clock, so a
+pass running across midnight cannot straddle two dates.
+
+Which mail gets built is decided by the **trigger key's shape**, not by which pass claimed
+it — a `lead:` key rebuilds the countdown mail, a `daily:` key the standing reminder. That
+is what lets a retry reconstruct the right message hours later.
+
+#### SMTP
+
+`services/mailer.js` wraps nodemailer over `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` /
+`SMTP_PASS` / `MAIL_FROM`. With none of them set it **logs the mail instead of sending it**
+and reports success, taking the same line `config.js` takes on missing OAuth credentials:
+warn, keep running. That is deliberate — the whole pipeline (claiming, marking, cancelling)
+stays exercisable in dev without an SMTP account, and a dev database does not fill with
+failures no student caused.
+
+`POST /api/notification-settings/test` builds its mail with the same `buildSubject` /
+`buildBody` the scheduler uses, against the student's nearest real deadline, so a test that
+arrives proves the real thing will too. It writes **no** `Notification` row: it is not a
+reminder for any task, and `assignment_id` is `NOT NULL`. The response carries `delivered`,
+which is `false` when no SMTP account is configured — the panel says so rather than
+reporting a success that never left the building.
+
+The settings panel also lists the unfinished tasks these preferences apply to (UC-8 step 2).
+It is read-only and reads `GET /api/assignments`, the same endpoint the rest of the app
+uses — no route was added for it — and filters with `withDerived` / `isDone` from
+[`tasks.js`](frontend/src/tasks.js), so it previews exactly what the sender will pick up.
 
 Quick check:
 
@@ -468,7 +587,8 @@ assignment-hub/
 │   ├── 006_announcement.sql           # Announcement table (Classroom stream)
 │   ├── 007_admin_identity.sql          # separate Admin allowlist identity
 │   ├── 007_score.sql                   # Assignment_Detail.max_points + assigned_grade
-│   └── 008_admin_microsoft_identity.sql # immutable Microsoft identity columns
+│   ├── 008_admin_microsoft_identity.sql # immutable Microsoft identity columns
+│   └── 009_notification_delivery.sql    # Notification dedupe key + retry columns
 ├── migrate.sh / migrate.bat  # run every migration in order (keep the two in step)
 ├── Caddyfile                 # TLS reverse proxy config (used by the `tls` profile)
 ├── .env                      # deploy settings for Compose substitution (git-ignored)
@@ -492,6 +612,8 @@ assignment-hub/
 │       │                     # assignments, classroom, notifications, analytics,
 │       │                     # admin, adminBusiness
 │       ├── services/
+│       │   ├── mailer.js           # nodemailer over SMTP; logs instead when unconfigured
+│       │   ├── notificationSender.js # the 5-minute reminder pass (FR-07)
 │       │   ├── adminIdentity.js    # allowlisted Admin lookup (never creates Student)
 │       │   ├── adminMetrics.js     # monitoring dashboard aggregates
 │       │   ├── analytics.js        # Product_Event validation + safeTrackEvent
@@ -581,7 +703,9 @@ a child table rather than a CSV column because a student picks several and the f
 has to `JOIN` on them to find which assignments are due. `last_custom_minutes` on the parent
 is only a UI convenience — it remembers the last value typed under `+ กำหนดเอง` so the hint
 line can offer it again, and being set there does **not** mean it is currently selected.
-`Notification` itself is still written by nothing.
+`Notification` is written by the reminder sender — see
+[Email reminders](#email-reminders-fr-07) for what its `trigger_type`, `attempt_count` and
+`next_attempt_at` columns carry.
 
 `Announcement` (migration `006`) hangs off `Course` with `ON DELETE CASCADE` — the only
 cascade in the schema, and the reason the sync's announcement pruning can delete by join
@@ -624,6 +748,7 @@ do not rerun a migration that has already been applied.
 | `007_admin_identity.sql` | separate `Admin` allowlist identity | admin login |
 | `007_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` | the คะแนน column |
 | `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs | admin login |
+| `009_notification_delivery.sql` | `Notification` unique key + retry columns | FR-07 email reminders |
 
 **Two pairs share a number** (`006_product_analytics` / `006_announcement`, and
 `007_admin_identity` / `007_score`) because the features landed on separate branches. They

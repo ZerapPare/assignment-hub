@@ -169,11 +169,23 @@ CREATE TABLE Schedule (
 CREATE TABLE Notification (
     notification_id  INT AUTO_INCREMENT PRIMARY KEY,
     assignment_id    INT NOT NULL,
-    trigger_type     VARCHAR(50),  -- derived attribute in diagram
+    -- Which reminder this row is: 'lead:<minutes>:<due date>' for an advance
+    -- reminder, 'daily:<YYYY-MM-DD>' for a daily repeat. The due date is part
+    -- of the key so moving a deadline re-arms the reminder instead of staying
+    -- quiet — see backend/src/services/notificationSender.js.
+    trigger_type     VARCHAR(50) NOT NULL,
     sent_at          DATETIME,
     is_sent          BOOLEAN DEFAULT FALSE,
+    -- Retry ladder. sent_at stays NULL while attempts remain, so the settings
+    -- banner only counts a send that failed for good.
+    attempt_count    INT NOT NULL DEFAULT 0,
+    next_attempt_at  DATETIME NULL,
     CONSTRAINT fk_notification_detail
-        FOREIGN KEY (assignment_id) REFERENCES Assignment_Detail(assignment_id)
+        FOREIGN KEY (assignment_id) REFERENCES Assignment_Detail(assignment_id),
+    -- The claiming INSERT relies on this to decide who sends; without it every
+    -- pass would mail the same reminder again.
+    CONSTRAINT uq_notification_trigger UNIQUE (assignment_id, trigger_type),
+    INDEX idx_notification_retry (next_attempt_at, is_sent)
 );
 
 -- =========================================================

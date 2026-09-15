@@ -3,6 +3,8 @@ const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { logError } = require('../services/errorLogger');
 const { safeTrackEvent } = require('../services/analytics');
+const { sendMail } = require('../services/mailer');
+const { buildSubject, buildBody } = require('../services/notificationSender');
 
 const router = express.Router();
 
@@ -189,6 +191,73 @@ router.put('/api/notification-settings', requireAuth, async (req, res) => {
     void logError(err, req, { source: 'notifications', statusCode: 503 });
     res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
   }
+});
+
+// Sends one reminder to the address the student logged in with, built by the
+// same two functions the scheduler uses — so a test that arrives proves the
+// real thing will too. Deliberately writes no Notification row: this is not a
+// reminder for any task, and assignment_id is NOT NULL.
+router.post('/api/notification-settings/test', requireAuth, async (req, res) => {
+  let student;
+  let sample;
+  try {
+    const [students] = await pool.query(
+      'SELECT student_name, university_email FROM Student WHERE user_id = ? LIMIT 1',
+      [req.session.userId]
+    );
+    student = students[0];
+    if (!student) return res.status(404).json({ error: 'ไม่พบบัญชีผู้ใช้' });
+
+    // The nearest real deadline makes the test mail look like the real one.
+    const [samples] = await pool.query(
+      `SELECT a.assignment_id, a.title, a.origin_link, c.course_name, d.due_date
+       FROM Course c
+       JOIN Assignment a        ON a.course_id = c.course_id
+       JOIN Assignment_Detail d ON d.assignment_id = a.assignment_id
+       WHERE c.student_id = ? AND d.due_date IS NOT NULL AND d.due_date > NOW()
+       ORDER BY d.due_date
+       LIMIT 1`,
+      [req.session.userId]
+    );
+    sample = samples[0];
+  } catch (err) {
+    void logError(err, req, { source: 'notifications', statusCode: 503 });
+    return res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
+  }
+
+  // An account that has synced nothing yet still gets a realistic-looking mail.
+  const task = sample || {
+    assignment_id: 0,
+    title: 'ตัวอย่างงาน — ทดสอบการแจ้งเตือน',
+    course_name: 'วิชาตัวอย่าง',
+    due_date: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    origin_link: null,
+  };
+
+  let delivery;
+  try {
+    delivery = await sendMail({
+      to: student.university_email,
+      subject: buildSubject({ title: task.title, dueDate: task.due_date }),
+      text: buildBody({
+        studentName: student.student_name,
+        title: task.title,
+        courseName: task.course_name,
+        dueDate: task.due_date,
+        assignmentId: task.assignment_id,
+        originLink: task.origin_link,
+      }),
+    });
+  } catch (err) {
+    void logError(err, req, { source: 'notifications', statusCode: 502, level: 'warn' });
+    console.error('[notifications] test email failed:', req.requestId, err.code || 'unknown');
+    return res.status(502).json({ error: 'ส่งอีเมลทดสอบไม่สำเร็จ', request_id: req.requestId });
+  }
+
+  // delivered:false means no SMTP account is configured and the mail was only
+  // written to the log. Passing that through matters — a panel that says "sent"
+  // when nothing left the building sends people looking through an empty inbox.
+  res.json({ ok: true, to: student.university_email, delivered: delivery.delivered !== false });
 });
 
 module.exports = router;
