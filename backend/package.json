@@ -8,6 +8,7 @@
     "seed:mock-users": "node scripts/seedMockUsers.js"
   },
   "dependencies": {
+	"axios": "^1.7.7",
     "express": "^4.19.0",
     "express-session": "^1.18.0",
     "google-auth-library": "^9.11.0",

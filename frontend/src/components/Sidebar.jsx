@@ -2,12 +2,13 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { C, FONT, R } from '../theme';
 import BrandMark from './BrandMark';
-import { HomeIcon, PencilIcon, CalendarIcon, GearIcon } from '../icons';
+import { HomeIcon, PencilIcon, MegaphoneIcon, GearIcon , ClockIcon, GridIcon, BellIcon} from '../icons';
 
 const NAV = [
   { key: 'home', label: 'หน้าแรก', Icon: HomeIcon, path: '/home' },
   { key: 'all', label: 'งานทั้งหมด', Icon: PencilIcon, path: '/assignments' },
-  { key: 'stream', label: 'ประกาศ', Icon: CalendarIcon, path: '/stream' },
+  { key: 'schedule', label: 'จัดตาราง',        Icon: ClockIcon,    path: '/schedule' },
+  { key: 'stream', label: 'ประกาศ', Icon: MegaphoneIcon, path: '/stream' },
   { key: 'settings', label: 'ตั้งค่า', Icon: GearIcon, path: '/settings' },
 ];
 

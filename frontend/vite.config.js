@@ -15,13 +15,16 @@ export default defineConfig({
     // guard). localhost / 127.0.0.1 are always allowed; any other hostname the dev
     // server is reached through has to be listed here.
     allowedHosts: ['assignment-hubb.duckdns.org'],
-    hmr: hmrClientPort ? { clientPort: hmrClientPort, protocol: 'wss' } : true,
+    hmr: hmrClientPort ? { clientPort: hmrClientPort, protocol: 'wss' } : {},
     watch: {
       usePolling: true, // needed for hot reload to detect file changes in Docker on Windows
     },
     proxy: {
       // forward API calls to the backend service (same Docker network)
-      '/api': 'http://backend:3000',
+      '/api': {
+        target: 'http://backend:3000',
+        changeOrigin: true,
+      },
     },
   },
 });

@@ -16,6 +16,8 @@ import AdminUserDetailPage from './pages/admin/AdminUserDetailPage';
 import AdminErrorsPage from './pages/admin/AdminErrorsPage';
 import AdminSystemPage from './pages/admin/AdminSystemPage';
 import AdminBusinessPage from './pages/admin/AdminBusinessPage';
+import Schedule from './pages/Schedule';
+import WeeklyView from './pages/WeeklyView';
 
 function App() {
   return (
@@ -29,6 +31,8 @@ function App() {
         <Route path="/assignments/:id" element={<AssignmentDetailPage />} />
         <Route path="/stream" element={<StreamPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/schedule" element={<Schedule />} />
+        <Route path="/weekly" element={<WeeklyView />} />
         <Route path="/admin" element={<AdminRoute />}>
           <Route element={<AdminLayout />}>
             <Route index element={<Navigate to="dashboard" replace />} />
@@ -40,6 +44,7 @@ function App() {
             <Route path="business" element={<AdminBusinessPage />} />
           </Route>
         </Route>
+
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
