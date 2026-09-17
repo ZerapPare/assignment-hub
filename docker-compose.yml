@@ -35,7 +35,6 @@ services:
       OAUTH_REDIRECT_URL: ${PUBLIC_URL:-http://localhost:5173}/api/auth/google/callback
       MS_OAUTH_REDIRECT_URL: ${PUBLIC_URL:-http://localhost:5173}/api/auth/microsoft/callback
       FRONTEND_URL: ${PUBLIC_URL:-http://localhost:5173}
-      TZ: Asia/Bangkok 
     volumes:
       - ./backend:/app          # mount source for hot reload
       - /app/node_modules       # keep container's installed modules
