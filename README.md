@@ -152,16 +152,29 @@ db-1        | ... ready for connections
 
 ทุกค่าเก็บเป็น**นาที** ทั้ง preset และค่ากำหนดเอง จึงไม่ต้องมีคอลัมน์หน่วย และเทียบกับ `due_date` ได้ตรง ๆ
 
-> **ยังไม่มีตัวส่งอีเมลจริง** รอบนี้ทำแค่ UI + บันทึกค่า ยังไม่มี scheduler และไม่มีอะไรเขียนตาราง `Notification`
-> ปุ่ม `ส่งอีเมลทดสอบ` จึงถูก disable ไว้ และแบนเนอร์ "ส่งอีเมลไม่สำเร็จ" จะไม่ขึ้นเลยเพราะยังไม่มี log
-> เมื่อทำตัวส่งจริงจะใช้ nodemailer + SMTP
+### ตัวส่งอีเมล (FR-07)
+
+`backend/src/services/notificationSender.js` เดินรอบละ 5 นาที ส่งอีเมลเตือนล่วงหน้าตาม lead time
+ที่ตั้งไว้ ข้ามงานที่ `submitted` / `completed` และไม่ส่งถ้าเลยกำหนดไปแล้ว ปุ่ม `ส่งอีเมลทดสอบ`
+ใช้งานได้แล้วผ่าน `POST /api/notification-settings/test`
+
+ตั้งค่า SMTP ใน `.env.local` (`SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `MAIL_FROM`)
+**ถ้าไม่ตั้ง ระบบจะพิมพ์อีเมลลง log แทนการส่งจริง** ทำให้รันทดสอบได้โดยไม่ต้องมีบัญชี SMTP
+ดูรายละเอียดที่ [PROJECT_SETUP.md](PROJECT_SETUP.md#email-reminders-fr-07)
+
+ถ้าส่งไม่สำเร็จ ระบบจะลองใหม่ **3 ครั้ง ห่าง 5 / 30 / 120 นาที** ระหว่างนั้นแบนเนอร์ "ส่งอีเมลไม่สำเร็จ"
+จะยังไม่ขึ้น — ขึ้นต่อเมื่อลองครบแล้วยังไม่สำเร็จ ทุกครั้งที่ล้มเหลวบันทึกลง `System_Error_Log`
+
+**แจ้งเตือนซ้ำรายวัน** (FR-07.2) เปิดได้ที่หน้าตั้งค่า ส่ง 1 ฉบับต่องานที่ยังไม่เสร็จ วันละครั้งตามเวลาที่เลือก
+เฉพาะงานที่ครบกำหนด**ภายใน 7 วัน** (รวมที่เลยกำหนดมาแล้วไม่เกิน 7 วัน ซึ่งจะใช้ข้อความคนละแบบ)
+กรอบนี้มีไว้กันไม่ให้คนมีงานค้าง 30 ชิ้นได้เมล 30 ฉบับทุกเช้า
+
+หน้าตั้งค่ายังแสดง**รายการงานที่จะได้รับการแจ้งเตือน** แบบอ่านอย่างเดียว เพื่อให้เห็นว่าค่าที่ตั้งไว้มีผลกับงานไหนบ้าง
 
 ส่วนที่ยังไม่พร้อมใช้:
 
-- **ปุ่ม "ส่งอีเมลทดสอบ"** — disable ไว้ ยังไม่ได้ต่อระบบส่งอีเมล
 - **checklist "งานด่วน"** — แสดงอย่างเดียว กดติ๊กในนั้นไม่ได้ (เปลี่ยนสถานะได้ที่หน้า `งานทั้งหมด`)
 - **ช่อง "วิชา" ใน modal แก้ไข** — แก้แล้วไม่มีผล `PATCH /api/assignments/:id` ยังไม่รับ `course_name`
-- **เมนู sidebar** `สถิติ` — ยังไม่มี route รองรับ
 
 ## Database
 
@@ -209,8 +222,11 @@ migrate.bat         # Windows cmd
 | `004_notification_settings.sql` | ตาราง `Notification_Setting` + `Notification_Lead_Time` |
 | `005_admin_monitoring.sql` | role/status ของ Student + system error/audit/request metric tables |
 | `006_product_analytics.sql` | ตาราง `Product_Event` สำหรับ business analytics |
+| `006_announcement.sql` | ตาราง `Announcement` (ประกาศจาก Classroom) |
 | `007_admin_identity.sql` | ตาราง `Admin` + ย้าย identity ผู้ดูแลออกจาก Student |
+| `007_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` |
 | `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs สำหรับ Admin |
+| `009_notification_delivery.sql` | unique key กันส่งอีเมลซ้ำ + คอลัมน์ retry บน `Notification` |
 
 เช็คว่าลงครบ:
 
@@ -295,7 +311,7 @@ The script upserts eight students under `.test` email domains with varied univer
 
 `GET` **ไม่สร้างแถวใน database** ถ้ายังไม่เคยบันทึก — คืนค่า default (`เปิด`, `1 วัน`, `08:00`) ไปเฉย ๆ
 แถวจะเกิดตอนกดบันทึกครั้งแรกเท่านั้น ตารางที่ว่างจึงแปลว่า "ยังไม่มีใครตั้งค่า" ได้จริง
-ทั้งสอง endpoint คืน `failed_count` / `last_failed_at` ด้วย แต่**ตอนนี้เป็น `0` เสมอ** เพราะยังไม่มีตัวส่งอีเมล
+ทั้งสอง endpoint คืน `failed_count` / `last_failed_at` ด้วย นับจากแถว `Notification` ที่ตัวส่งอีเมลบันทึกว่าล้มเหลว (`is_sent = FALSE` และมี `sent_at`)
 
 `/api/classroom/sync` รับ body `{ "cutoffDate": "YYYY-MM-DD" | null }` (เอาเฉพาะงานที่กำหนดส่งตั้งแต่วันนั้น
 งานเก่ากว่านั้นที่เคยซิงก์ไว้จะถูกลบ) แล้วคืน `{ ok, coursesSynced, assignmentsSynced, deletedCount, skippedCourses }`

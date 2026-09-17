@@ -4,6 +4,7 @@ const { PORT, SESSION_SECRET } = require('./src/config');
 const { requestContext } = require('./src/middleware/requestContext');
 const { requestMetrics, startMetricFlush } = require('./src/middleware/requestMetrics');
 const { errorHandler } = require('./src/middleware/errorHandler');
+const { startNotificationSender } = require('./src/services/notificationSender');
 
 const app = express();
 
@@ -50,6 +51,7 @@ app.use((req, res, next) => {
 app.use(errorHandler);
 
 startMetricFlush();
+startNotificationSender();
 
 app.listen(PORT, () => {
   console.log(`Backend API running on http://localhost:${PORT}`);

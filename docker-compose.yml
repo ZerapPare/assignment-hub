@@ -7,7 +7,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root123
       MYSQL_DATABASE: assignment_hub
-      TZ: Asia/Bangkok 
+      TZ: ${APP_TZ:-Asia/Bangkok}
     ports:
       - "${BIND:-0.0.0.0}:3306:3306"
     volumes:
@@ -25,6 +25,7 @@ services:
       - .env.local              # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / SESSION_SECRET (git-ignored)
     environment:
       NODE_ENV: development
+      TZ: ${APP_TZ:-Asia/Bangkok}   # must match the db service — see the note there
       DB_HOST: db
       DB_USER: root
       DB_PASSWORD: root123

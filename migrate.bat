@@ -12,4 +12,5 @@ docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007
 docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_score.sql
 docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/008_admin_microsoft_identity.sql
 docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/010_schedule_setting.sql
+docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/009_notification_delivery.sql
 echo Migrations complete!

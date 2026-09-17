@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Toggle from './Toggle';
 import { BellIcon } from '../icons';
+import { fmtDate, fmtTime, isDone, withDerived } from '../tasks';
 import { C, FONT, R, TH_MONTHS_SHORT } from '../theme';
 
 // Minutes, matching what the API stores. Presets and custom values share one
@@ -67,6 +68,13 @@ function NotificationSettings({ email }) {
   const [customUnit, setCustomUnit] = useState(60);
   const [customError, setCustomError] = useState(null);
 
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null); // { ok, message }
+
+  // UC-8 step 2: the tasks these settings actually apply to. Read-only — every
+  // way of changing a task already lives on the assignments pages.
+  const [tasks, setTasks] = useState([]);
+
   const apply = (data) => {
     setEnabled(data.enabled);
     setLeadTimes(data.lead_times);
@@ -98,6 +106,25 @@ function NotificationSettings({ email }) {
       .catch((e) => setLoadError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  // Reuses the list endpoint the rest of the app already reads; nothing here
+  // needs its own route. A failure is silent — the panel's job is the settings,
+  // and the same list is one click away under งานทั้งหมด.
+  useEffect(() => {
+    fetch('/api/assignments')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => setTasks(Array.isArray(rows) ? rows : []))
+      .catch(() => setTasks([]));
+  }, []);
+
+  // Unfinished work with a real deadline, soonest first — the same shape the
+  // sender picks from, so the list previews what will actually be mailed.
+  const upcoming = useMemo(
+    () => withDerived(tasks)
+      .filter((t) => t.due && !isDone(t))
+      .sort((a, b) => a.due - b.due),
+    [tasks]
+  );
 
   const current = snapshot({ enabled, leadTimes, dailyRepeat, dailyRepeatTime, lastCustom });
   const dirty = saved !== null && current !== saved;
@@ -162,6 +189,31 @@ function NotificationSettings({ email }) {
       setSaveError(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Sends to the address of the logged-in account, so there is nothing to ask
+  // for here. The reply carries it back only to confirm where it went.
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await fetch('/api/notification-settings/test', { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'ส่งอีเมลทดสอบไม่สำเร็จ');
+      setTestResult(
+        data.delivered
+          ? { ok: true, message: `ส่งอีเมลทดสอบไปที่ ${data.to} แล้ว` }
+          : {
+              ok: false,
+              message: 'ยังไม่ได้ตั้งค่า SMTP — อีเมลถูกเขียนลง log ของ backend แทนการส่งจริง '
+                + '(ตั้งค่า SMTP_HOST / SMTP_USER / SMTP_PASS ใน .env.local)',
+            }
+      );
+    } catch (err) {
+      setTestResult({ ok: false, message: err.message });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -305,6 +357,34 @@ function NotificationSettings({ email }) {
             />
           </div>
 
+          <div style={styles.taskBlock}>
+            <div style={styles.taskHead}>
+              งานที่จะได้รับการแจ้งเตือน
+              {upcoming.length > 0 && <span style={styles.taskCount}>{upcoming.length}</span>}
+            </div>
+
+            {upcoming.length === 0 ? (
+              <p style={styles.taskEmpty}>
+                ยังไม่มีงานค้างที่มีกำหนดส่ง — ซิงก์จาก Google Classroom หรือเพิ่มงานเองที่หน้างานทั้งหมด
+              </p>
+            ) : (
+              <ul style={styles.taskList}>
+                {upcoming.slice(0, 5).map((t) => (
+                  <li key={t.assignment_id} style={styles.taskItem}>
+                    <span style={styles.taskTitle}>{t.title}</span>
+                    <span style={styles.taskMeta}>
+                      {t.course_name} · {fmtDate(t.due)} {fmtTime(t.due)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {upcoming.length > 5 && (
+              <p style={styles.taskMore}>และอีก {upcoming.length - 5} งาน</p>
+            )}
+          </div>
+
           {failures.failed_count > 0 && (
             <div style={styles.failBox}>
               <div style={styles.failTitle}>⚠️ ส่งอีเมลไม่สำเร็จ {failures.failed_count} รายการ</div>
@@ -326,16 +406,21 @@ function NotificationSettings({ email }) {
             </button>
             <button
               type="button"
-              disabled
-              title="ยังไม่ได้ต่อระบบส่งอีเมล"
-              style={{ ...styles.ghostBtn, opacity: 0.5, cursor: 'default' }}
+              onClick={handleTest}
+              disabled={testing}
+              style={{ ...styles.ghostBtn, opacity: testing ? 0.6 : 1 }}
             >
-              ส่งอีเมลทดสอบ
+              {testing ? 'กำลังส่ง…' : 'ส่งอีเมลทดสอบ'}
             </button>
           </div>
 
           {saveError && <p style={styles.error}>⚠️ {saveError}</p>}
           {justSaved && <p style={styles.success}>บันทึกการตั้งค่าแล้ว</p>}
+          {testResult && (
+            <p style={testResult.ok ? styles.success : styles.error}>
+              {testResult.ok ? testResult.message : `⚠️ ${testResult.message}`}
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -410,6 +495,25 @@ const styles = {
   },
   repeatText: { flex: '1 1 220px', minWidth: 0 },
   repeatTitle: { fontSize: 13.5, fontWeight: 700, color: C.ink },
+
+  taskBlock: { padding: 14, borderRadius: R.card, background: C.indigoBg },
+  taskHead: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    fontSize: 13, fontWeight: 700, color: C.navy,
+  },
+  taskCount: {
+    fontSize: 11.5, fontWeight: 700, color: C.card, background: C.navy,
+    borderRadius: 999, padding: '1px 8px',
+  },
+  taskList: { listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'grid', gap: 8 },
+  taskItem: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 },
+  taskTitle: {
+    fontSize: 13, color: C.navy, fontWeight: 600,
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
+  taskMeta: { fontSize: 12, color: C.muted },
+  taskEmpty: { fontSize: 12.5, color: C.muted, margin: '8px 0 0', lineHeight: 1.6 },
+  taskMore: { fontSize: 12, color: C.muted, margin: '10px 0 0' },
 
   failBox: { padding: 14, borderRadius: R.card, background: C.pinkBg },
   failTitle: { fontSize: 13, fontWeight: 700, color: C.pinkDark },
