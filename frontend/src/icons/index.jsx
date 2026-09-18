@@ -144,7 +144,7 @@ export const ClockIcon = ({ size = 16, color = 'currentColor' }) => (
   </svg>
 );
 
-export const GridIcon = ({ size = 16, color = 'currentColor' }) => (
+export const GridIcon = ({ size = 16, color = "#e8a6b8" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
        stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="3" width="7" height="7" />

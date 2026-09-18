@@ -1,12 +1,20 @@
 import { useState } from 'react';
 import axios from 'axios';
 
-export default function AutoScheduleButton({ onGenerated }) {
+export default function AutoScheduleButton({ onBeforeGenerate, onGenerated }) {
 	const [loading, setLoading] = useState(false);
 
-	const generate = async () => {
+	const handleClick = async () => {
 		setLoading(true);
 		try {
+			if (onBeforeGenerate) {
+				const saved = await onBeforeGenerate();
+				if (saved === false) {
+					setLoading(false);
+					return;
+				}
+			}
+
 			const { data } = await axios.post('/api/schedule/generate');
 			onGenerated?.(data);
 		} catch (err) {
@@ -21,14 +29,12 @@ export default function AutoScheduleButton({ onGenerated }) {
 	};
 
 	return (
-		<div className="auto-schedule-wrapper">
-			<button
-				className="auto-schedule-button"
-				onClick={generate}
-				disabled={loading}
-			>
-				{loading ? 'กำลังจัดตาราง...' : 'จัดตารางอัตโนมัติ'}
-			</button>
-		</div>
+		<button
+			className="auto-schedule-button"
+			onClick={handleClick}
+			disabled={loading}
+		>
+			{loading ? 'กำลังจัดตาราง...' : 'จัดตารางอัตโนมัติ'}
+		</button>
 	);
 }
