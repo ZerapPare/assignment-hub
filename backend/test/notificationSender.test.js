@@ -45,8 +45,7 @@ function retryRow(overrides = {}) {
   };
 }
 
-// Same hand-written stub style as devStudentSeeder.test.js: dispatch on a
-// distinctive fragment of each statement, return the mysql2 [rows, fields]
+// Dispatch on a distinctive fragment of each statement, return the mysql2 [rows, fields]
 // tuple, and throw on anything unrecognised so query drift is caught loudly.
 function dailyRow(overrides = {}) {
   const { minutes, ...rest } = candidate();

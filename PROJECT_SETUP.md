@@ -138,9 +138,7 @@ any new route. The trade-off is that a task id that isn't in the student's list 
 
 Every figure on the dashboard is derived in a single `useMemo` over the `/api/assignments`
 response — there is no seeded or placeholder data anywhere in the student UI. A freshly
-logged-in account (before its first sync) renders zeros and empty states. (The admin
-console *can* show demo records, but only ones written to the database on purpose — see
-[Mock data for the admin console](#mock-data-for-the-admin-console).)
+logged-in account (before its first sync) renders zeros and empty states.
 
 **`+ เพิ่มงานใหม่`** (on both the dashboard and the assignments page) opens `AddTaskModal`
 and `POST`s to `/api/assignments`. The created row is appended to the same `assignments`
@@ -582,7 +580,6 @@ assignment-hub/
 │   ├── Dockerfile
 │   ├── package.json          # express, mysql2, express-session, google-auth-library, googleapis, jose
 │   ├── server.js             # thin entry: context/metrics/session middleware, routers, errorHandler
-│   ├── scripts/seedMockUsers.js  # `npm run seed:mock-users` — demo data for the admin console
 │   ├── test/                 # node:test suites (`npm test`)
 │   └── src/
 │       ├── config.js         # env vars in one place (PORT, SESSION_SECRET, OAuth ids)
@@ -604,8 +601,6 @@ assignment-hub/
 │       │   ├── analytics.js        # Product_Event validation + safeTrackEvent
 │       │   ├── businessMetrics.js  # aggregate adoption and usage metrics
 │       │   ├── classroomSync.js  # Classroom paging (coursework + announcements), date conversion
-│       │   ├── devStudentSeeder.js           # mock students — dev-guarded
-│       │   ├── devBusinessAnalyticsSeeder.js # mock Product_Event stream — dev-guarded
 │       │   ├── errorLogger.js      # writes System_Error_Log
 │       │   ├── identity.js       # find-or-create University / upsert Student
 │       │   └── oauthSession.js   # `state` handling and the link-mode flow
@@ -809,42 +804,10 @@ docker compose exec db mysql -uroot -proot123 assignment_hub \
 > were imported — permanently stops the Classroom sync from updating any status, because
 > non-`NULL` is exactly the signal that the student has taken the field over.
 
-## Mock data for the admin console
-
-The database starts empty, which leaves the admin user directory and the business analytics
-pages with nothing to render. A seeder fills them with demo records:
-
-```bash
-docker compose exec -T -e NODE_ENV=development -e ALLOW_MOCK_DATA=1 backend npm run seed:mock-users
-```
-
-It upserts eight students across two `.test` universities — varied account statuses,
-creation and activity dates, and fake Google/Microsoft connection markers — then a matching
-`Product_Event` stream so the feature-adoption charts have shape.
-
-What makes it safe to keep in the repo:
-
-- **Both env vars are required.** `devStudentSeeder` throws unless `NODE_ENV=development`
-  *and* `ALLOW_MOCK_DATA=1`; neither is set in `docker-compose.yml`, so the command above is
-  the only way to run it. Passing them on the `exec` rather than baking them into the
-  service is the point.
-- **Every fixture is unmistakably fake.** Emails must end in `.test` (a reserved TLD that
-  cannot resolve) and student ids in `MOCK-`, both validated before any write.
-- **The provider tokens are markers, not credentials** (`dev-seed:` prefixed). Classroom
-  sync rejects them before it contacts Google.
-- **Re-running is safe.** It upserts: original `created_at` is preserved, activity
-  timestamps are refreshed, and non-mock accounts are never touched. Because `created_at`
-  is historical, the seeded users age out of the dashboard's 30-day new-user window on
-  their own — rerunning refreshes activity rather than rewriting that history.
-
-It creates **no `Admin` row and no admin session.** Provisioning an admin and logging in
-through OAuth is still required to see any of it — see [Authentication](#authentication-oauth).
-
 ## Tests
 
 The backend has `node:test` suites in `backend/test/` covering the pieces worth testing
-away from HTTP — `adminIdentity`, `analytics` validation, and the mock seeder's fixture
-guards:
+away from HTTP — including `adminIdentity` and `analytics` validation:
 
 ```bash
 docker compose exec backend npm test
@@ -907,7 +870,6 @@ certificates per domain per week.
 | `docker compose rm -fsv <service>`   | Drop a service **and its anonymous `node_modules` volume** — the fix after adding a dependency |
 | `./migrate.sh` / `migrate.bat`   | Apply every one-time migration to an older database |
 | `docker compose exec backend npm test` | Run the backend `node:test` suites (no DB needed) |
-| `docker compose exec -T -e NODE_ENV=development -e ALLOW_MOCK_DATA=1 backend npm run seed:mock-users` | Fill the admin console with demo users and analytics |
 
 ## Troubleshooting
 
@@ -941,8 +903,6 @@ certificates per domain per week.
 
   The score column takes out the whole assignments list (the dashboard falls back to "waiting for database"); the missing table takes out `/stream` and the announcement half of a Classroom sync only.
 - **`./migrate.sh` prints a wall of `Duplicate column name` errors** — expected on a database that already has those columns. The migrations are unguarded `ALTER`s and the script doesn't stop on error, so the files that *are* missing still apply. Check the schema rather than the output: `docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assignment_Detail; SHOW TABLES LIKE 'Announcement';"`.
-- **`Refusing to seed mock users: set NODE_ENV=development and ALLOW_MOCK_DATA=1`** — the guard is working. Both must be passed on the `exec` itself (`-e NODE_ENV=development -e ALLOW_MOCK_DATA=1`); setting them in `.env.local` does not reach the seeder's environment check the same way, and they are deliberately absent from `docker-compose.yml`.
-- **Mock users seed, but the admin dashboard still shows nothing** — the seeder creates no `Admin` row and no session, and the admin pages `401` without one. Provision an admin in MySQL and log in at `/admin/login` — see [Authentication](#authentication-oauth). If the user *table* is populated but the trend cards read zero, the fixtures' `created_at` has aged past the 30-day window, which is by design.
 - **A status set by hand reverts after the next Classroom sync** — the sync only skips rows whose `status_updated_at` is non-`NULL`, so a status that keeps getting overwritten means the column never got stamped. Check the row directly:
 
   ```bash

@@ -4,8 +4,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test",
-    "seed:mock-users": "node scripts/seedMockUsers.js"
+    "test": "node --test"
   },
   "dependencies": {
 	"axios": "^1.7.7",

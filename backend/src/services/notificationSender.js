@@ -338,7 +338,7 @@ async function deliver({ db, sendMail, logFailure, row, triggerType, attemptsSoF
 }
 
 // db, sendMail and logFailure are all injected so the pass can be tested
-// without a database or an SMTP account — the same shape devStudentSeeder uses.
+// without a database or an SMTP account.
 async function runNotificationPass({
   db = pool,
   sendMail = mailerSendMail,
