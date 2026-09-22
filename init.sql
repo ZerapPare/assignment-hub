@@ -1,9 +1,22 @@
 USE assignment_hub;
 
+-- The seed data below contains Thai text. Without this the mysql client reads
+-- these UTF-8 bytes as latin1 and stores double-encoded mojibake — and it also
+-- decides the character set of the string literals inside CHECK constraints,
+-- so the same file produces subtly different schema depending on how it is fed
+-- in. Declaring it here keeps the result identical for docker-entrypoint,
+-- migrate.sh and a manual pipe alike.
+SET NAMES utf8mb4;
+
 SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS Product_Event;
 DROP TABLE IF EXISTS Admin_Audit_Log;
+DROP TABLE IF EXISTS Role_Permission;
+DROP TABLE IF EXISTS User_Role;
+DROP TABLE IF EXISTS Permission;
+DROP TABLE IF EXISTS Role;
+DROP TABLE IF EXISTS User_Account;
 DROP TABLE IF EXISTS Admin;
 DROP TABLE IF EXISTS System_Error_Log;
 DROP TABLE IF EXISTS System_Request_Metric_Hourly;
@@ -78,6 +91,198 @@ CREATE TABLE Admin (
     last_login_at DATETIME NULL,
     CONSTRAINT uq_admin_microsoft_identity UNIQUE (microsoft_tenant_id, microsoft_object_id)
 );
+
+-- =========================================================
+-- RBAC — User–Role–Permission
+--
+--   User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
+--        │
+--        ├── Student   (subtype: OAuth tokens, student_id, account_status)
+--        └── Admin     (subtype: microsoft identity, is_active)
+--
+-- Student and Admin stay as subtype tables rather than being folded into
+-- User_Account: six tables carry a foreign key to Student(user_id) and
+-- Admin_Audit_Log carries one to Admin(admin_id), and keeping both primary keys
+-- means none of those references have to move.
+--
+-- This whole block is duplicated verbatim in migrations/012_rbac.sql, which
+-- adds a backfill on top for databases that already hold rows. Keep the two in
+-- step — test/rbacSchema.test.js fails if they drift.
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS User_Account (
+    user_id       INT AUTO_INCREMENT PRIMARY KEY,
+    email         VARCHAR(255) NOT NULL,
+    display_name  VARCHAR(255) NULL,
+    user_type     VARCHAR(20)  NOT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_account_email UNIQUE (email),
+    CONSTRAINT ck_user_account_type  CHECK (user_type IN ('student', 'admin')),
+    INDEX idx_user_account_type (user_type)
+);
+
+CREATE TABLE IF NOT EXISTS Role (
+    role_id     INT AUTO_INCREMENT PRIMARY KEY,
+    role_code   VARCHAR(50)  NOT NULL,
+    role_name   VARCHAR(100) NOT NULL,
+    description VARCHAR(255) NULL,
+    is_system   BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_role_code UNIQUE (role_code)
+);
+
+CREATE TABLE IF NOT EXISTS Permission (
+    permission_id   INT AUTO_INCREMENT PRIMARY KEY,
+    permission_code VARCHAR(80)  NOT NULL,
+    permission_name VARCHAR(120) NOT NULL,
+    resource        VARCHAR(50)  NOT NULL,
+    action          VARCHAR(50)  NOT NULL,
+    description     VARCHAR(255) NULL,
+    CONSTRAINT uq_permission_code            UNIQUE (permission_code),
+    CONSTRAINT uq_permission_resource_action UNIQUE (resource, action)
+);
+
+CREATE TABLE IF NOT EXISTS Role_Permission (
+    role_id       INT NOT NULL,
+    permission_id INT NOT NULL,
+    granted_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (role_id, permission_id),
+    CONSTRAINT fk_role_permission_role
+        FOREIGN KEY (role_id) REFERENCES Role(role_id) ON DELETE CASCADE,
+    CONSTRAINT fk_role_permission_permission
+        FOREIGN KEY (permission_id) REFERENCES Permission(permission_id) ON DELETE CASCADE,
+    INDEX idx_role_permission_permission (permission_id)
+);
+
+CREATE TABLE IF NOT EXISTS User_Role (
+    user_id            INT NOT NULL,
+    role_id            INT NOT NULL,
+    granted_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    granted_by_user_id INT NULL,
+    PRIMARY KEY (user_id, role_id),
+    CONSTRAINT fk_user_role_user
+        FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE,
+    -- No ON DELETE here on purpose: a role that is still assigned to somebody
+    -- must not be silently deletable.
+    CONSTRAINT fk_user_role_role
+        FOREIGN KEY (role_id) REFERENCES Role(role_id),
+    CONSTRAINT fk_user_role_granted_by
+        FOREIGN KEY (granted_by_user_id) REFERENCES User_Account(user_id) ON DELETE SET NULL,
+    INDEX idx_user_role_role (role_id)
+);
+
+-- Admin gains its link column. Guarded with an information_schema lookup so the
+-- identical statement in 012_rbac.sql is a no-op when re-run over an
+-- already-migrated database. Nullable because the migration adds it to a table
+-- that already holds rows; its backfill fills every one.
+
+SET @has_admin_user_column = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Admin'
+      AND COLUMN_NAME = 'user_id'
+);
+SET @admin_user_column_sql = IF(
+    @has_admin_user_column = 0,
+    'ALTER TABLE Admin ADD COLUMN user_id INT NULL AFTER admin_id, ADD CONSTRAINT uq_admin_user_account UNIQUE (user_id)',
+    'SELECT 1'
+);
+PREPARE admin_user_column_stmt FROM @admin_user_column_sql;
+EXECUTE admin_user_column_stmt;
+DEALLOCATE PREPARE admin_user_column_stmt;
+
+-- Reference data.
+--
+-- super_admin holds exactly the seven capabilities the single requireAdmin
+-- guard granted before RBAC, so an administrator on that role can do precisely
+-- what every administrator could do — no more, no less.
+
+INSERT INTO Role (role_code, role_name, description, is_system) VALUES
+    ('super_admin',      'ผู้ดูแลระบบสูงสุด',     'สิทธิ์ทั้งหมดของ admin console',        TRUE),
+    ('support_admin',    'ผู้ดูแลผู้ใช้งาน',      'ดูและระงับบัญชีผู้ใช้',                 FALSE),
+    ('analytics_viewer', 'ผู้ดูข้อมูลเชิงธุรกิจ', 'ดูภาพรวมและ business analytics อย่างเดียว', FALSE),
+    ('student',          'นักศึกษา',              'สิทธิ์ผู้ใช้งานทั่วไป',                 TRUE)
+ON DUPLICATE KEY UPDATE
+    role_name   = VALUES(role_name),
+    description = VALUES(description),
+    is_system   = VALUES(is_system);
+
+INSERT INTO Permission (permission_code, permission_name, resource, action, description) VALUES
+    ('dashboard.view',          'ดูแดชบอร์ดผู้ดูแล',     'dashboard',          'view',    'GET /api/admin/dashboard'),
+    ('user.read',               'ดูข้อมูลผู้ใช้',        'user',               'read',    'GET /api/admin/users[/:id]'),
+    ('user.suspend',            'ระงับ/ปลดระงับผู้ใช้',  'user',               'suspend', 'PATCH /api/admin/users/:id/status'),
+    ('error_log.read',          'ดูบันทึกข้อผิดพลาด',    'error_log',          'read',    'GET /api/admin/errors[/:id]'),
+    ('system.health.read',      'ดูสถานะระบบ',           'system_health',      'read',    'GET /api/admin/system/health'),
+    ('business.analytics.read', 'ดู business analytics', 'business_analytics', 'read',    'GET /api/admin/business/*'),
+    ('audit_log.read',          'ดูประวัติผู้ดูแล',      'audit_log',          'read',    'recent_audit_actions ใน user detail'),
+    ('assignment.manage',       'จัดการงานของตนเอง',     'assignment',         'manage',  'student scope'),
+    ('schedule.manage',         'จัดการตารางของตนเอง',   'schedule',           'manage',  'student scope'),
+    ('notification.manage',     'จัดการการแจ้งเตือน',    'notification',       'manage',  'student scope'),
+    ('profile.manage',          'จัดการโปรไฟล์ของตนเอง', 'profile',            'manage',  'student scope')
+ON DUPLICATE KEY UPDATE
+    permission_name = VALUES(permission_name),
+    description     = VALUES(description);
+
+INSERT IGNORE INTO Role_Permission (role_id, permission_id)
+SELECT r.role_id, p.permission_id
+FROM Role r
+CROSS JOIN Permission p
+WHERE (r.role_code, p.permission_code) IN (
+    ('super_admin', 'dashboard.view'),
+    ('super_admin', 'user.read'),
+    ('super_admin', 'user.suspend'),
+    ('super_admin', 'error_log.read'),
+    ('super_admin', 'system.health.read'),
+    ('super_admin', 'business.analytics.read'),
+    ('super_admin', 'audit_log.read'),
+    ('support_admin', 'dashboard.view'),
+    ('support_admin', 'user.read'),
+    ('support_admin', 'user.suspend'),
+    ('analytics_viewer', 'dashboard.view'),
+    ('analytics_viewer', 'business.analytics.read'),
+    ('student', 'assignment.manage'),
+    ('student', 'schedule.manage'),
+    ('student', 'notification.manage'),
+    ('student', 'profile.manage')
+);
+
+-- Subtype foreign keys, last. In 012_rbac.sql these have to come after the
+-- backfill, because until it runs there are Student rows with no matching
+-- User_Account row and the constraint would be rejected. Here both tables are
+-- empty, so they succeed immediately.
+
+SET @has_student_user_fk = (
+    SELECT COUNT(*)
+    FROM information_schema.TABLE_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Student'
+      AND CONSTRAINT_NAME = 'fk_student_user_account'
+);
+SET @student_user_fk_sql = IF(
+    @has_student_user_fk = 0,
+    'ALTER TABLE Student ADD CONSTRAINT fk_student_user_account FOREIGN KEY (user_id) REFERENCES User_Account(user_id)',
+    'SELECT 1'
+);
+PREPARE student_user_fk_stmt FROM @student_user_fk_sql;
+EXECUTE student_user_fk_stmt;
+DEALLOCATE PREPARE student_user_fk_stmt;
+
+SET @has_admin_user_fk = (
+    SELECT COUNT(*)
+    FROM information_schema.TABLE_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Admin'
+      AND CONSTRAINT_NAME = 'fk_admin_user_account'
+);
+SET @admin_user_fk_sql = IF(
+    @has_admin_user_fk = 0,
+    'ALTER TABLE Admin ADD CONSTRAINT fk_admin_user_account FOREIGN KEY (user_id) REFERENCES User_Account(user_id)',
+    'SELECT 1'
+);
+PREPARE admin_user_fk_stmt FROM @admin_user_fk_sql;
+EXECUTE admin_user_fk_stmt;
+DEALLOCATE PREPARE admin_user_fk_stmt;
 
 CREATE TABLE Product_Event (
     event_id      BIGINT AUTO_INCREMENT PRIMARY KEY,

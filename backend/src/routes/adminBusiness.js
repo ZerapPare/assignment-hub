@@ -1,5 +1,6 @@
 const express = require('express');
-const { requireAdmin } = require('../middleware/adminAuth');
+const { requireAdmin, requirePermission } = require('../middleware/adminAuth');
+const { PERMISSIONS: P } = require('../rbac/permissions');
 const {
   TREND_FEATURES,
   getFeatureRanking,
@@ -25,7 +26,9 @@ function rangeFromRequest(req, res) {
   return days;
 }
 
-router.use('/api/admin/business', requireAdmin);
+// Safe to apply in bulk, unlike the prefix guard in admin.js: this router owns
+// /api/admin/business outright and every endpoint under it needs the same code.
+router.use('/api/admin/business', requireAdmin, requirePermission(P.BUSINESS_ANALYTICS_READ));
 
 router.get('/api/admin/business/overview', asyncRoute(async (req, res) => {
   const days = rangeFromRequest(req, res);

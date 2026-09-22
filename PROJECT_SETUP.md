@@ -666,16 +666,40 @@ hex in a component, so both screens keep one palette.
 
 Auto-created on first DB start. Tables:
 
-`University` · `Student` · `Admin` · `Product_Event` · `Course` · `Assignment` · `Assignment_Detail` · `Schedule` ·
-`Notification` · `Notification_Setting` · `Notification_Lead_Time` · `System_Error_Log` ·
-`Admin_Audit_Log` · `System_Request_Metric_Hourly`
+`University` · `User_Account` · `Student` · `Admin` · `Role` · `Permission` · `Role_Permission` ·
+`User_Role` · `Schedule_Setting` · `User_Settings` · `Product_Event` · `Course` · `Announcement` ·
+`Assignment` · `Assignment_Detail` · `Schedule` · `Notification` · `Notification_Setting` ·
+`Notification_Lead_Time` · `System_Error_Log` · `Admin_Audit_Log` · `System_Request_Metric_Hourly`
 
-> ⚠️ **`init.sql` is currently behind the migrations.** It does not create `Announcement`
-> and does not add `Assignment_Detail.max_points` / `assigned_grade`. A *fresh* database
-> therefore still needs `006_announcement.sql` and `007_score.sql` applied, or
-> `/api/announcements`, `/api/assignments` and the Classroom sync all fail on a missing
-> table or column. Run `./migrate.sh` after the first `docker compose up`, or fold the two
-> into `init.sql`. See [Migrations](#migrations).
+### Identity and access control
+
+`User_Account` is the central account table. `Student` and `Admin` are **disjoint subtypes**
+of it — each keeps its own primary key and its own type-specific columns (OAuth tokens on
+one side, Microsoft tenant/object ids on the other) and carries a foreign key up to
+`User_Account`. Roles attach to `User_Account`, never to a subtype, so there is a single
+`User_Role` assignment table:
+
+```
+User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
+     │
+     ├── Student
+     └── Admin
+```
+
+Student ids were preserved through the RBAC migration and administrator ids were reissued,
+because the two tables' AUTO_INCREMENT sequences had already collided — id 1 existed in
+both and meant two different people. Six tables reference `Student(user_id)`, so that side
+had to stay fixed.
+
+`Student.role` still exists and still reads `'student'` for every row. It is a denormalised
+discriminator kept for the metrics queries that filter on it (about fifteen clauses across
+`routes/admin.js`, `services/adminMetrics.js` and `services/businessMetrics.js`);
+`User_Role` is the authoritative source for what anyone may actually do.
+
+`requireAdmin` loads roles and permissions on every request rather than caching them in the
+session, so a grant or revocation takes effect immediately. `requirePermission(code)` then
+guards each endpoint individually. See [Admin access](README.md#admin-access) for
+provisioning.
 
 `init.sql` creates the schema and **inserts nothing** — the database starts empty, so a
 new account sees an empty dashboard until it runs a Classroom sync. `University` rows are
@@ -749,6 +773,9 @@ do not rerun a migration that has already been applied.
 | `007_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` | the คะแนน column |
 | `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs | admin login |
 | `009_notification_delivery.sql` | `Notification` unique key + retry columns | FR-07 email reminders |
+| `010_schedule_setting.sql` | `Schedule_Setting` table | auto-scheduling |
+| `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` | `/api/assignments`, auto-scheduling |
+| `012_rbac.sql` | `User_Account` + `Role` / `Permission` / `Role_Permission` / `User_Role`; `Student` and `Admin` become subtypes | role-based access control |
 
 **Two pairs share a number** (`006_product_analytics` / `006_announcement`, and
 `007_admin_identity` / `007_score`) because the features landed on separate branches. They

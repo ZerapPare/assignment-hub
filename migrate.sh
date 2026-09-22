@@ -1,14 +1,17 @@
 #!/bin/bash
+# Applies every file in migrations/ in filename order.
+#
+# Deliberately a loop rather than a hand-written list: the list version silently
+# stopped at 009 while 010 and 011 sat in the repo unapplied, so databases ended
+# up missing columns the code already queried. A new migration is picked up here
+# the moment it is added.
+#
+# Migrations are one-time scripts. Re-running this over an already-migrated
+# database reports errors for the ones that have already been applied; that is
+# expected and harmless.
 echo "Running migrations..."
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/001_identity.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/002_task_type.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/003_status_updated_at.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/004_notification_settings.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/005_admin_monitoring.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_product_analytics.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_announcement.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_admin_identity.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_score.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/008_admin_microsoft_identity.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/009_notification_delivery.sql
+for migration in migrations/*.sql; do
+  echo "  -> $migration"
+  docker compose exec -T db mysql -uroot -proot123 assignment_hub < "$migration"
+done
 echo "Migrations complete!"

@@ -178,13 +178,21 @@ db-1        | ... ready for connections
 
 ## Database
 
-Database ชื่อ `assignment_hub` ถูกสร้างอัตโนมัติจาก `init.sql` ตอน start ครั้งแรก มี 14 ตาราง:
+Database ชื่อ `assignment_hub` ถูกสร้างอัตโนมัติจาก `init.sql` ตอน start ครั้งแรก มี 22 ตาราง:
 
 | ตาราง | เก็บอะไร |
 |---|---|
 | `University` | มหาวิทยาลัย + โดเมนอีเมล |
-| `Student` | ผู้ใช้ + token สำหรับ login (Google/Microsoft) |
-| `Admin` | รายชื่อผู้ดูแลที่อนุญาตให้เข้า admin console (ไม่มี provider token) |
+| `User_Account` | บัญชีผู้ใช้กลาง (supertype) ของทั้งนักศึกษาและผู้ดูแล — เป็นตัวที่ role ผูกอยู่ |
+| `Student` | subtype ของ `User_Account`: ผู้ใช้ + token สำหรับ login (Google/Microsoft) |
+| `Admin` | subtype ของ `User_Account`: รายชื่อผู้ดูแลที่อนุญาตให้เข้า admin console (ไม่มี provider token) |
+| `Role` | บทบาท เช่น `super_admin`, `support_admin`, `analytics_viewer`, `student` |
+| `Permission` | สิทธิ์ย่อยแบบ `resource` + `action` เช่น `user.suspend` |
+| `Role_Permission` | บทบาทไหนมีสิทธิ์อะไรบ้าง (m:n) |
+| `User_Role` | ผู้ใช้คนไหนถือบทบาทอะไร (m:n) |
+| `Schedule_Setting` | เวลาทำงาน/พักเที่ยงของนักศึกษาสำหรับจัดตารางอัตโนมัติ |
+| `User_Settings` | เวลาพักเที่ยงและชั่วโมงทำงาน (ของเดิม ทับซ้อนกับ `Schedule_Setting`) |
+| `Announcement` | ประกาศที่ดึงมาจาก Classroom |
 | `Product_Event` | event การใช้งานแบบ metadata ปลอดภัยสำหรับ business analytics |
 | `Course` | รายวิชา + แพลตฟอร์มต้นทาง (Classroom/Teams) |
 | `Assignment` | งาน: ชื่อ, ประเภท (`task_type`), ลิงก์ต้นทาง, วิชา |
@@ -207,7 +215,10 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "SHOW TABLES; SE
 
 `init.sql` รันครั้งเดียวตอนสร้าง database ใหม่เท่านั้น **database ที่มีอยู่แล้วจะไม่ได้ schema ใหม่ตามไปด้วย**
 ไฟล์ใน `migrations/` ต้องรันตามลำดับกับ database เดิม และเป็น one-time migrations
-(ไม่ควรรันซ้ำบนฐานข้อมูลที่ใช้ migration นั้นไปแล้ว)
+(ไม่ควรรันซ้ำบนฐานข้อมูลที่ใช้ migration นั้นไปแล้ว — จะขึ้น error ของไฟล์ที่ลงไปแล้ว ซึ่งไม่เป็นอันตราย)
+
+สคริปต์จะวนรันทุกไฟล์ใน `migrations/` ตามชื่อ ไม่ได้ไล่รายชื่อไว้ในสคริปต์ — ของเดิมไล่รายชื่อแล้วหยุดอยู่ที่ `009`
+ทำให้ `010` กับ `011` ไม่เคยถูกรัน และ database หลายเครื่องขาดคอลัมน์ที่โค้ดเรียกใช้อยู่ เพิ่ม migration ใหม่แล้วไม่ต้องแก้สคริปต์
 
 ```bash
 ./migrate.sh        # macOS / Linux / Git Bash
@@ -227,6 +238,9 @@ migrate.bat         # Windows cmd
 | `007_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` |
 | `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs สำหรับ Admin |
 | `009_notification_delivery.sql` | unique key กันส่งอีเมลซ้ำ + คอลัมน์ retry บน `Notification` |
+| `010_schedule_setting.sql` | ตาราง `Schedule_Setting` สำหรับจัดตารางอัตโนมัติ |
+| `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` — database ที่สร้างก่อนคอลัมน์นี้จะทำให้ `/api/assignments` ตอบ `ER_BAD_FIELD_ERROR` |
+| `012_rbac.sql` | RBAC: `User_Account` + `Role`/`Permission`/`Role_Permission`/`User_Role` และย้าย `Student`/`Admin` เป็น subtype |
 
 เช็คว่าลงครบ:
 
@@ -236,13 +250,19 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assign
 
 ### Admin access
 
-There is no public admin registration. After applying migration `007_admin_identity.sql`, provision an allowlisted account directly:
+There is no public admin registration. After applying migrations `007_admin_identity.sql` and `012_rbac.sql`, provision an allowlisted account directly.
+
+Since `012_rbac.sql` an administrator needs **three** rows, not one: a `User_Account`, the `Admin` row that links to it, and a `User_Role` grant. An `Admin` row on its own can sign in but holds no permissions, so every console section answers `403 PERMISSION_DENIED`.
 
 ```sql
+-- 1. The central account. Roles attach here, not to the Admin row.
+INSERT INTO User_Account (email, display_name, user_type)
+VALUES ('admin@example.edu', 'Assignment Hub Admin', 'admin');
+
 -- Choose the provider(s) used by this admin. A single row may contain both.
 -- Google administrator (email is checked against the verified Google identity).
-INSERT INTO Admin (email, display_name)
-VALUES ('admin@example.edu', 'Assignment Hub Admin');
+INSERT INTO Admin (user_id, email, display_name)
+SELECT user_id, email, display_name FROM User_Account WHERE email = 'admin@example.edu';
 
 -- Microsoft administrator: use the Entra tenant ID and user Object ID,
 -- not an email address. The tenant must also be listed in MS_ADMIN_TENANT_IDS.
@@ -253,7 +273,31 @@ VALUES ('admin@example.edu', 'Assignment Hub Admin',
 ON DUPLICATE KEY UPDATE
   microsoft_tenant_id = VALUES(microsoft_tenant_id),
   microsoft_object_id = VALUES(microsoft_object_id);
+
+-- 3. Grant a role. Without this the account signs in with no permissions.
+--    super_admin      = the full console, i.e. what every admin had before RBAC
+--    support_admin    = dashboard + view and suspend users, nothing else
+--    analytics_viewer = dashboard + business analytics only, cannot see users
+INSERT IGNORE INTO User_Role (user_id, role_id)
+SELECT u.user_id, r.role_id
+FROM User_Account u
+JOIN Role r ON r.role_code = 'super_admin'
+WHERE u.email = 'admin@example.edu';
 ```
+
+Check what an account ended up with:
+
+```sql
+SELECT a.email, r.role_code, p.permission_code
+FROM Admin a
+JOIN User_Role ur       ON ur.user_id = a.user_id
+JOIN Role r             ON r.role_id = ur.role_id
+JOIN Role_Permission rp ON rp.role_id = ur.role_id
+JOIN Permission p       ON p.permission_id = rp.permission_id
+WHERE a.email = 'admin@example.edu';
+```
+
+Roles are read from the database on **every** request rather than cached in the session, so granting or revoking one takes effect on the next request without the administrator logging out.
 
 Register both admin OAuth callback URLs with the provider. Admin login uses `/admin/login`, has a separate `Admin` identity/auth mode, and never creates a `Student` row. The browser uses one session cookie, so switching between student and admin login replaces the active session mode.
 

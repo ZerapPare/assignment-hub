@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const pool = require('../db');
 const { FRONTEND_URL } = require('../config');
 const { findOrCreateUniversity, studentIdFromEmail, trySetStudentId } = require('./identity');
+const { createStudentAccount } = require('./rbac');
 const { safeTrackEvent } = require('./analytics');
 
 const PROVIDERS = {
@@ -70,13 +71,15 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
         [name, universityId, access, tokens.refresh_token || rows[0].refresh || null, userId]
       );
     } else {
-      const [ins] = await pool.query(
+      // Student is a subtype of User_Account and its primary key is that
+      // foreign key, so the account row has to come first and hand down the id.
+      userId = await createStudentAccount({ email, displayName: name });
+      await pool.query(
         `INSERT INTO Student
-           (student_name, university_email, university_id, ${accessCol}, ${refreshCol}, last_login_at, last_seen_at)
-         VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
-        [name, email, universityId, access, tokens.refresh_token || null]
+           (user_id, student_name, university_email, university_id, ${accessCol}, ${refreshCol}, last_login_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [userId, name, email, universityId, access, tokens.refresh_token || null]
       );
-      userId = ins.insertId;
     }
 
     // Separate from the insert above so a taken id can't fail the whole login.

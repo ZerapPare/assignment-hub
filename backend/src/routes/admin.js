@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
-const { requireAdmin } = require('../middleware/adminAuth');
+const { requireAdmin, requirePermission } = require('../middleware/adminAuth');
+const { PERMISSIONS: P, hasPermission } = require('../rbac/permissions');
 const { getDashboard, getSystemMetrics24h, normalizeRange } = require('../services/adminMetrics');
 const { logError, sanitizeErrorLog, sanitizeMetadata } = require('../services/errorLogger');
 const { getLiveMetrics } = require('../middleware/requestMetrics');
@@ -79,14 +80,18 @@ function userSelect() {
           ) ac ON ac.student_id = s.user_id`;
 }
 
+// Authentication only. Permissions are attached per route below, never here:
+// this path prefix also covers /api/admin/business/*, which this router does
+// not own, so a blanket requirePermission would reject the business endpoints
+// before adminBusiness.js ever sees them.
 router.use('/api/admin', requireAdmin);
 
-router.get('/api/admin/dashboard', asyncRoute(async (req, res) => {
+router.get('/api/admin/dashboard', requirePermission(P.DASHBOARD_VIEW), asyncRoute(async (req, res) => {
   const rangeDays = normalizeRange(req.query.range);
   res.json(await getDashboard(rangeDays));
 }));
 
-router.get('/api/admin/users', asyncRoute(async (req, res) => {
+router.get('/api/admin/users', requirePermission(P.USER_READ), asyncRoute(async (req, res) => {
   const page = pagination(req.query, 25);
   if (!page) return res.status(400).json({ error: 'invalid pagination', request_id: req.requestId });
 
@@ -136,7 +141,7 @@ router.get('/api/admin/users', asyncRoute(async (req, res) => {
   });
 }));
 
-router.get('/api/admin/users/:id', asyncRoute(async (req, res) => {
+router.get('/api/admin/users/:id', requirePermission(P.USER_READ), asyncRoute(async (req, res) => {
   const userId = asPositiveId(req.params.id);
   if (!userId) return res.status(404).json({ error: 'not found', request_id: req.requestId });
 
@@ -189,14 +194,19 @@ router.get('/api/admin/users/:id', asyncRoute(async (req, res) => {
       ...statusTotals,
     },
     recent_errors: errorsResult[0].map(sanitizeErrorLog),
-    recent_audit_actions: auditsResult[0].map((row) => ({
-      ...row,
-      detail: sanitizeMetadata(parseJson(row.detail)),
-    })),
+    // Attribute-level check: who may see this user's record is user.read, but
+    // who may see which administrator did what to it is audit_log.read.
+    // super_admin holds both, so its response is unchanged from before RBAC.
+    recent_audit_actions: hasPermission(req.permissions, P.AUDIT_LOG_READ)
+      ? auditsResult[0].map((row) => ({
+        ...row,
+        detail: sanitizeMetadata(parseJson(row.detail)),
+      }))
+      : [],
   });
 }));
 
-router.patch('/api/admin/users/:id/status', asyncRoute(async (req, res) => {
+router.patch('/api/admin/users/:id/status', requirePermission(P.USER_SUSPEND), asyncRoute(async (req, res) => {
   const userId = asPositiveId(req.params.id);
   const status = String(req.body?.status || '');
   if (!userId) return res.status(404).json({ error: 'not found', request_id: req.requestId });
@@ -238,7 +248,7 @@ router.patch('/api/admin/users/:id/status', asyncRoute(async (req, res) => {
   }
 }));
 
-router.get('/api/admin/errors', asyncRoute(async (req, res) => {
+router.get('/api/admin/errors', requirePermission(P.ERROR_LOG_READ), asyncRoute(async (req, res) => {
   const page = pagination(req.query, 50);
   if (!page) return res.status(400).json({ error: 'invalid pagination', request_id: req.requestId });
 
@@ -314,7 +324,7 @@ router.get('/api/admin/errors', asyncRoute(async (req, res) => {
   });
 }));
 
-router.get('/api/admin/errors/:id', asyncRoute(async (req, res) => {
+router.get('/api/admin/errors/:id', requirePermission(P.ERROR_LOG_READ), asyncRoute(async (req, res) => {
   if (!/^\d{1,20}$/.test(String(req.params.id))) {
     return res.status(404).json({ error: 'not found', request_id: req.requestId });
   }
@@ -334,7 +344,7 @@ router.get('/api/admin/errors/:id', asyncRoute(async (req, res) => {
   res.json({ error: sanitizeErrorLog(rows[0]) });
 }));
 
-router.get('/api/admin/system/health', asyncRoute(async (req, res) => {
+router.get('/api/admin/system/health', requirePermission(P.SYSTEM_HEALTH_READ), asyncRoute(async (req, res) => {
   let dbStatus = 'healthy';
   try {
     await pool.query('SELECT 1');

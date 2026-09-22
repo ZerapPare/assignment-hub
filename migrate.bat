@@ -1,16 +1,17 @@
 @echo off
+REM Applies every file in migrations\ in filename order.
+REM
+REM Deliberately a loop rather than a hand-written list: the list version had
+REM drifted badly — it named a 001_init.sql that does not exist, ran 010 before
+REM 009, and never ran 011 at all, so databases ended up missing columns the
+REM code already queried. A new migration is picked up here the moment it is
+REM added.
+REM
+REM Migrations are one-time scripts. Re-running this over an already-migrated
+REM database reports errors for the ones already applied; that is expected.
 echo Running migrations...
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/001_init.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/001_identity.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/002_task_type.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/003_status_updated_at.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/004_notification_settings.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/005_admin_monitoring.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_product_analytics.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_announcement.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_admin_identity.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_score.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/008_admin_microsoft_identity.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/010_schedule_setting.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/009_notification_delivery.sql
+for /f "delims=" %%f in ('dir /b /on migrations\*.sql') do (
+  echo   -^> %%f
+  docker compose exec -T db mysql -uroot -proot123 assignment_hub < "migrations\%%f"
+)
 echo Migrations complete!

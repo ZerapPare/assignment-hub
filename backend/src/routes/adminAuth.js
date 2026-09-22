@@ -164,11 +164,17 @@ router.get('/api/admin/auth/microsoft/callback', async (req, res) => {
   }
 });
 
+// requireAdmin only, deliberately no requirePermission: an administrator who
+// has not been granted a role yet must still be able to read back an empty
+// permission list, otherwise the console can only bounce them to the login page
+// they just came from.
 router.get('/api/admin/me', requireAdmin, (req, res) => {
   res.json({
     admin_id: Number(req.admin.admin_id),
     email: req.admin.email,
     display_name: req.admin.display_name || null,
+    roles: req.admin.roles || [],
+    permissions: req.admin.permissions || [],
   });
 });
 

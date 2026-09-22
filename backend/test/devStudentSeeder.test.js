@@ -32,10 +32,12 @@ function createFakeDb({ indexes = [{ Key_name: 'uq_university_domain', Non_uniqu
     releases: 0,
     studentInserts: 0,
     studentUpdates: 0,
+    roleGrants: 0,
     lastUpdateSql: '',
     studentRows: new Map(existingEmails),
   };
   const universityIds = new Map();
+  const userAccountIds = new Map();
   let nextUniversityId = 1;
   let nextUserId = 1000;
 
@@ -71,15 +73,28 @@ function createFakeDb({ indexes = [{ Key_name: 'uq_university_domain', Non_uniqu
         );
         return [collision ? [collision] : [], []];
       }
+      // Student is a subtype of User_Account now, so the account row is what
+      // allocates the id and the Student insert is handed it. ON DUPLICATE KEY
+      // ... LAST_INSERT_ID means a repeated email yields the same id, which is
+      // what keeps ids stable across two seed runs.
+      if (sql.includes('INSERT INTO User_Account')) {
+        const email = params[0];
+        if (!userAccountIds.has(email)) userAccountIds.set(email, nextUserId++);
+        return [{ insertId: userAccountIds.get(email) }, []];
+      }
+      if (sql.includes('INSERT IGNORE INTO User_Role')) {
+        state.roleGrants++;
+        return [{ affectedRows: 1 }, []];
+      }
       if (sql.includes('INSERT INTO Student')) {
         state.studentInserts++;
         if (failAtInsert === state.studentInserts) throw new Error('injected student write failure');
-        state.studentRows.set(params[2], {
-          user_id: nextUserId++,
-          student_id: params[0],
-          university_id: params[3],
+        state.studentRows.set(params[3], {
+          user_id: params[0],
+          student_id: params[1],
+          university_id: params[4],
         });
-        return [{ insertId: nextUserId - 1 }, []];
+        return [{ insertId: params[0] }, []];
       }
       if (sql.includes('UPDATE Student')) {
         state.studentUpdates++;
@@ -233,6 +248,9 @@ test('two complete runs preserve fixture count and generated user IDs', async ()
   assert.equal(second.updatedCount, MOCK_USERS.length);
   assert.equal(db.state.studentRows.size, MOCK_USERS.length);
   assert.deepEqual(secondIds, firstIds);
+  // Both the insert and the update path grant the student role, so every seeded
+  // user ends up in User_Role no matter which run created them.
+  assert.equal(db.state.roleGrants, MOCK_USERS.length * 2);
   assert.equal(db.state.commits, 2);
   assert.equal(db.state.rollbacks, 0);
   assert.equal(db.state.releases, 2);

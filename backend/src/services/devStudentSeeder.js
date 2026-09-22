@@ -208,17 +208,40 @@ async function seedMockUsers({
         );
         updatedCount++;
       } else {
+        // Student is a subtype of User_Account and its primary key is that
+        // foreign key, so the account row has to exist first and hand down the
+        // id. Runs on the seeder's own connection to stay inside its
+        // transaction — a rollback must not leave the account row behind.
+        const [account] = await connection.query(
+          `INSERT INTO User_Account (email, display_name, user_type, created_at)
+           VALUES (?, ?, 'student', ?)
+           ON DUPLICATE KEY UPDATE user_id = LAST_INSERT_ID(user_id)`,
+          [user.email, user.name, daysAgo(now, user.createdDaysAgo)]
+        );
         await connection.query(
           `INSERT INTO Student (
-             student_id, student_name, university_email, university_id,
+             user_id, student_id, student_name, university_email, university_id,
              gg_refresh_token, ms_refresh_token, role, account_status,
              created_at, last_login_at, last_seen_at
-           ) VALUES (?, ?, ?, ?, ?, ?, 'student', ?, ?, ?, ?)`,
-          [user.studentId, user.name, user.email, universityId, googleToken, microsoftToken,
-            user.status, daysAgo(now, user.createdDaysAgo), lastLoginAt, lastSeenAt]
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'student', ?, ?, ?, ?)`,
+          [account.insertId, user.studentId, user.name, user.email, universityId,
+            googleToken, microsoftToken, user.status,
+            daysAgo(now, user.createdDaysAgo), lastLoginAt, lastSeenAt]
         );
         insertedCount++;
       }
+
+      // Keep Student.role and User_Role in agreement on both paths. The
+      // denormalised column drives the metrics queries; User_Role is what the
+      // permission checks read.
+      await connection.query(
+        `INSERT IGNORE INTO User_Role (user_id, role_id)
+         SELECT s.user_id, r.role_id
+         FROM Student s
+         JOIN Role r ON r.role_code = 'student'
+         WHERE s.university_email = ?`,
+        [user.email]
+      );
     }
 
     await connection.commit();
