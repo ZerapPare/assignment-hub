@@ -284,6 +284,7 @@ CREATE TABLE Schedule (
     start_time      DATETIME,
     end_time        DATETIME,
     time_estimate   INT,
+	segments        JSON NULL,
     CONSTRAINT fk_schedule_detail FOREIGN KEY (assignment_id) REFERENCES Assignment_Detail(assignment_id)
 );
 
@@ -376,4 +377,14 @@ CREATE TABLE User_Settings (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_user_settings_student FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE
+);
+
+CREATE TABLE Working_Hours (
+    user_id      INT NOT NULL,
+    day_of_week  TINYINT NOT NULL COMMENT '0=Sun,1=Mon,...,6=Sat',
+    start_time   TIME NOT NULL,
+    end_time     TIME NOT NULL,
+    PRIMARY KEY (user_id, day_of_week),
+    CONSTRAINT fk_working_hours_student
+        FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE
 );
