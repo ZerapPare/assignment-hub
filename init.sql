@@ -168,8 +168,6 @@ CREATE TABLE IF NOT EXISTS User_Role (
 
 INSERT INTO Role (role_code, role_name, description, is_system) VALUES
     ('super_admin',      'ผู้ดูแลระบบสูงสุด',     'สิทธิ์ทั้งหมดของ admin console',        TRUE),
-    ('support_admin',    'ผู้ดูแลผู้ใช้งาน',      'ดูและระงับบัญชีผู้ใช้',                 FALSE),
-    ('analytics_viewer', 'ผู้ดูข้อมูลเชิงธุรกิจ', 'ดูภาพรวมและ business analytics อย่างเดียว', FALSE),
     ('student',          'นักศึกษา',              'สิทธิ์ผู้ใช้งานทั่วไป',                 TRUE)
 ON DUPLICATE KEY UPDATE
     role_name   = VALUES(role_name),
