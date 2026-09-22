@@ -14,20 +14,27 @@ import { HOUR, URGENT_H, fmtDate, fmtTime, isDone, withDerived } from '../tasks'
 import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } from '../icons';
 import { C, FONT, R, SHADOW, WEEKDAYS } from '../theme';
 import AdPopup from '../components/AdPopup';
+import ToastNotification from '../components/ToastNotification';
 
 function HomePage() {
   const { student, assignments, setAssignments, loading, error, setError, logout } =
     useAssignments();
+
   const navigate = useNavigate();
+
   const [syncing, setSyncing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [syncToast, setSyncToast] = useState(null);
+
   const [cutoffDate, setCutoffDate] = useState(
     () => localStorage.getItem('classroomSyncCutoff') || '2026-06-28'
   );
+
   const [cal, setCal] = useState(() => {
     const n = new Date();
     return { year: n.getFullYear(), month: n.getMonth() };
   });
+
   const dashboardTracked = useRef(false);
 
   const [calendarView, setCalendarView] = useState('month');
@@ -53,6 +60,8 @@ function HomePage() {
     setError(null);
     //ad
     setShowAd(true);
+    //Toast popup
+    setSyncToast(null);
 
     try {
       const r = await fetch('/api/classroom/sync', {
@@ -60,12 +69,27 @@ function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cutoffDate: cutoffDate || null }),
       });
+
       const data = await r.json();
+
       if (!r.ok) throw new Error(data.message || data.error || 'Sync failed');
+
       const a = await fetch('/api/assignments').then((res) => res.json());
       setAssignments(a);
+
+      setSyncToast({
+        type: 'success',
+        message: 'ซิงก์ Classroom สำเร็จ',
+      });
+
     } catch (e) {
       setError(e.message);
+
+      setSyncToast({
+        type: 'error',
+        message: `ซิงก์ไม่สำเร็จ: ${e.message}`,
+      });
+
     } finally {
       setSyncing(false);
     }
@@ -183,6 +207,13 @@ function HomePage() {
 
   return (
     <div style={styles.page}>
+
+      <ToastNotification
+        type={syncToast?.type}
+        message={syncToast?.message}
+        onClose={() => setSyncToast(null)}
+      />
+
       <Sidebar active="home" student={student} onLogout={logout} />
 
       <div style={styles.main}>
