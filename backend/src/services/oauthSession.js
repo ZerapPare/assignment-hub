@@ -2,7 +2,8 @@ const crypto = require('crypto');
 const pool = require('../db');
 const { FRONTEND_URL } = require('../config');
 const { findOrCreateUniversity, studentIdFromEmail, trySetStudentId } = require('./identity');
-const { createStudentAccount } = require('./rbac');
+const { tryGrantRole } = require('./rbac');
+const { ROLES } = require('../rbac/permissions');
 const { safeTrackEvent } = require('./analytics');
 
 const PROVIDERS = {
@@ -41,11 +42,11 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
   if (linkMode && req.session.userId) {
     userId = req.session.userId;
     const [[existing = {}]] = await pool.query(
-      `SELECT ${refreshCol} AS refresh FROM Student WHERE user_id = ? LIMIT 1`,
+      `SELECT ${refreshCol} AS refresh FROM User_Account WHERE user_id = ? LIMIT 1`,
       [userId]
     );
     await pool.query(
-      `UPDATE Student
+      `UPDATE User_Account
        SET ${accessCol} = ?, ${refreshCol} = ?, last_login_at = NOW(), last_seen_at = NOW()
        WHERE user_id = ?`,
       [access, tokens.refresh_token || existing.refresh || null, userId]
@@ -54,7 +55,7 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
     const universityId = await findOrCreateUniversity(email);
 
     const [rows] = await pool.query(
-      `SELECT user_id, ${refreshCol} AS refresh FROM Student WHERE university_email = ? LIMIT 1`,
+      `SELECT user_id, ${refreshCol} AS refresh FROM User_Account WHERE email = ? LIMIT 1`,
       [email]
     );
 
@@ -64,22 +65,25 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
       // their University row existed get backfilled instead of staying NULL.
       // The refresh token is kept when the provider doesn't return a new one.
       await pool.query(
-        `UPDATE Student
-         SET student_name = ?, university_id = ?, ${accessCol} = ?, ${refreshCol} = ?,
+        `UPDATE User_Account
+         SET full_name = ?, university_id = ?, ${accessCol} = ?, ${refreshCol} = ?,
              last_login_at = NOW(), last_seen_at = NOW()
          WHERE user_id = ?`,
         [name, universityId, access, tokens.refresh_token || rows[0].refresh || null, userId]
       );
     } else {
-      // Student is a subtype of User_Account and its primary key is that
-      // foreign key, so the account row has to come first and hand down the id.
-      userId = await createStudentAccount({ email, displayName: name });
-      await pool.query(
-        `INSERT INTO Student
-           (user_id, student_name, university_email, university_id, ${accessCol}, ${refreshCol}, last_login_at, last_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [userId, name, email, universityId, access, tokens.refresh_token || null]
+      const [ins] = await pool.query(
+        `INSERT INTO User_Account
+           (full_name, email, user_type, university_id, ${accessCol}, ${refreshCol}, last_login_at, last_seen_at)
+         VALUES (?, ?, 'student', ?, ?, ?, NOW(), NOW())`,
+        [name, email, universityId, access, tokens.refresh_token || null]
       );
+      userId = ins.insertId;
+
+      // Signing in makes an ordinary account and nothing more. Any further
+      // access — the admin console included — comes from a role somebody grants
+      // this row afterwards, which is what replaced the old admin allowlist.
+      await tryGrantRole(userId, ROLES.STUDENT);
     }
 
     // Separate from the insert above so a taken id can't fail the whole login.

@@ -2,7 +2,6 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import GlobalStyles from './GlobalStyles';
 import LoginPage from './pages/LoginPage';
-import AdminLoginPage from './pages/AdminLoginPage';
 import HomePage from './pages/HomePage';
 import AssignmentsPage from './pages/AssignmentsPage';
 import AssignmentDetailPage from './pages/AssignmentDetailPage';
@@ -25,7 +24,10 @@ function App() {
       <GlobalStyles />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/admin/login" element={<AdminLoginPage />} />
+        {/* Administrators sign in through the one login page like everyone
+            else. Kept as a redirect so existing bookmarks still land somewhere
+            useful. */}
+        <Route path="/admin/login" element={<Navigate to="/login" replace />} />
         <Route path="/home" element={<HomePage />} />
         <Route path="/assignments" element={<AssignmentsPage />} />
         <Route path="/assignments/:id" element={<AssignmentDetailPage />} />

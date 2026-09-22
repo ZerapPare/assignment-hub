@@ -44,27 +44,42 @@ CREATE TABLE University (
     CONSTRAINT uq_university_domain UNIQUE (email_domain)
 );
 
-CREATE TABLE Student (
+-- One table for everybody. There is no separate administrator table: what an
+-- account may do is decided entirely by the roles attached to its user_id, so
+-- the only thing that ever distinguished the two was which columns they filled
+-- in. user_type says which kind of account this is for the metrics queries that
+-- count students; it is not an access-control field — User_Role is.
+--
+-- student_id is the number the university issues, not a key: it is NULL for
+-- administrators and unique only within a university.
+CREATE TABLE User_Account (
     user_id           INT AUTO_INCREMENT PRIMARY KEY,
     student_id        VARCHAR(50),
-    student_name      VARCHAR(255) NOT NULL,
-    university_email  VARCHAR(255) NOT NULL UNIQUE,
+    full_name         VARCHAR(255) NOT NULL,
+    email             VARCHAR(255) NOT NULL,
     university_id     INT,
     gg_access_token   TEXT,
     gg_refresh_token  TEXT,
     ms_access_token   TEXT,
     ms_refresh_token  TEXT,
-    role              VARCHAR(20) NOT NULL DEFAULT 'student',
+    -- Immutable Entra identifiers, matched instead of an address for accounts
+    -- that sign in through a trusted Microsoft tenant.
+    microsoft_tenant_id VARCHAR(36) NULL,
+    microsoft_object_id VARCHAR(36) NULL,
+    user_type         VARCHAR(20) NOT NULL DEFAULT 'student',
     account_status    VARCHAR(20) NOT NULL DEFAULT 'active',
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_login_at     DATETIME NULL,
     last_seen_at      DATETIME NULL,
-    CONSTRAINT fk_student_university FOREIGN KEY (university_id) REFERENCES University(university_id),
-    CONSTRAINT uq_student_per_university UNIQUE (student_id, university_id),
-    INDEX idx_student_account_status (account_status),
-    INDEX idx_student_created_at (created_at),
-    INDEX idx_student_last_seen_at (last_seen_at),
-    INDEX idx_student_university_id (university_id)
+    CONSTRAINT fk_user_account_university FOREIGN KEY (university_id) REFERENCES University(university_id),
+    CONSTRAINT uq_user_email UNIQUE (email),
+    CONSTRAINT uq_user_per_university UNIQUE (student_id, university_id),
+    CONSTRAINT uq_user_microsoft_identity UNIQUE (microsoft_tenant_id, microsoft_object_id),
+    INDEX idx_user_account_status (account_status),
+    INDEX idx_user_created_at (created_at),
+    INDEX idx_user_last_seen_at (last_seen_at),
+    INDEX idx_user_university_id (university_id),
+    INDEX idx_user_type (user_type)
 );
 
 CREATE TABLE IF NOT EXISTS Schedule_Setting (
@@ -77,49 +92,23 @@ CREATE TABLE IF NOT EXISTS Schedule_Setting (
     updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP 
                   ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_schedule_setting_student
-        FOREIGN KEY (user_id) REFERENCES Student(user_id) ON DELETE CASCADE
-);
-
-CREATE TABLE Admin (
-    admin_id      INT AUTO_INCREMENT PRIMARY KEY,
-    email         VARCHAR(255) NOT NULL UNIQUE,
-    display_name  VARCHAR(255) NULL,
-    microsoft_tenant_id VARCHAR(36) NULL,
-    microsoft_object_id VARCHAR(36) NULL,
-    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_login_at DATETIME NULL,
-    CONSTRAINT uq_admin_microsoft_identity UNIQUE (microsoft_tenant_id, microsoft_object_id)
+        FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE
 );
 
 -- =========================================================
 -- RBAC — User–Role–Permission
 --
 --   User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
---        │
---        ├── Student   (subtype: OAuth tokens, student_id, account_status)
---        └── Admin     (subtype: microsoft identity, is_active)
 --
--- Student and Admin stay as subtype tables rather than being folded into
--- User_Account: six tables carry a foreign key to Student(user_id) and
--- Admin_Audit_Log carries one to Admin(admin_id), and keeping both primary keys
--- means none of those references have to move.
+-- Every access decision in the application is this join. There is no second
+-- identity table and no "admin mode" on the session: an account can reach the
+-- admin console exactly when it holds an administrative permission, which is
+-- also why one login page serves everyone.
 --
--- This whole block is duplicated verbatim in migrations/012_rbac.sql, which
--- adds a backfill on top for databases that already hold rows. Keep the two in
--- step — test/rbacSchema.test.js fails if they drift.
+-- These tables and their seed rows are duplicated in migrations/012_rbac.sql
+-- for databases that already exist. Keep the two in step —
+-- test/rbacSchema.test.js fails if they drift.
 -- =========================================================
-
-CREATE TABLE IF NOT EXISTS User_Account (
-    user_id       INT AUTO_INCREMENT PRIMARY KEY,
-    email         VARCHAR(255) NOT NULL,
-    display_name  VARCHAR(255) NULL,
-    user_type     VARCHAR(20)  NOT NULL,
-    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_user_account_email UNIQUE (email),
-    CONSTRAINT ck_user_account_type  CHECK (user_type IN ('student', 'admin')),
-    INDEX idx_user_account_type (user_type)
-);
 
 CREATE TABLE IF NOT EXISTS Role (
     role_id     INT AUTO_INCREMENT PRIMARY KEY,
@@ -170,27 +159,6 @@ CREATE TABLE IF NOT EXISTS User_Role (
         FOREIGN KEY (granted_by_user_id) REFERENCES User_Account(user_id) ON DELETE SET NULL,
     INDEX idx_user_role_role (role_id)
 );
-
--- Admin gains its link column. Guarded with an information_schema lookup so the
--- identical statement in 012_rbac.sql is a no-op when re-run over an
--- already-migrated database. Nullable because the migration adds it to a table
--- that already holds rows; its backfill fills every one.
-
-SET @has_admin_user_column = (
-    SELECT COUNT(*)
-    FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'Admin'
-      AND COLUMN_NAME = 'user_id'
-);
-SET @admin_user_column_sql = IF(
-    @has_admin_user_column = 0,
-    'ALTER TABLE Admin ADD COLUMN user_id INT NULL AFTER admin_id, ADD CONSTRAINT uq_admin_user_account UNIQUE (user_id)',
-    'SELECT 1'
-);
-PREPARE admin_user_column_stmt FROM @admin_user_column_sql;
-EXECUTE admin_user_column_stmt;
-DEALLOCATE PREPARE admin_user_column_stmt;
 
 -- Reference data.
 --
@@ -247,43 +215,6 @@ WHERE (r.role_code, p.permission_code) IN (
     ('student', 'profile.manage')
 );
 
--- Subtype foreign keys, last. In 012_rbac.sql these have to come after the
--- backfill, because until it runs there are Student rows with no matching
--- User_Account row and the constraint would be rejected. Here both tables are
--- empty, so they succeed immediately.
-
-SET @has_student_user_fk = (
-    SELECT COUNT(*)
-    FROM information_schema.TABLE_CONSTRAINTS
-    WHERE CONSTRAINT_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'Student'
-      AND CONSTRAINT_NAME = 'fk_student_user_account'
-);
-SET @student_user_fk_sql = IF(
-    @has_student_user_fk = 0,
-    'ALTER TABLE Student ADD CONSTRAINT fk_student_user_account FOREIGN KEY (user_id) REFERENCES User_Account(user_id)',
-    'SELECT 1'
-);
-PREPARE student_user_fk_stmt FROM @student_user_fk_sql;
-EXECUTE student_user_fk_stmt;
-DEALLOCATE PREPARE student_user_fk_stmt;
-
-SET @has_admin_user_fk = (
-    SELECT COUNT(*)
-    FROM information_schema.TABLE_CONSTRAINTS
-    WHERE CONSTRAINT_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'Admin'
-      AND CONSTRAINT_NAME = 'fk_admin_user_account'
-);
-SET @admin_user_fk_sql = IF(
-    @has_admin_user_fk = 0,
-    'ALTER TABLE Admin ADD CONSTRAINT fk_admin_user_account FOREIGN KEY (user_id) REFERENCES User_Account(user_id)',
-    'SELECT 1'
-);
-PREPARE admin_user_fk_stmt FROM @admin_user_fk_sql;
-EXECUTE admin_user_fk_stmt;
-DEALLOCATE PREPARE admin_user_fk_stmt;
-
 CREATE TABLE Product_Event (
     event_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id       INT NOT NULL,
@@ -292,7 +223,7 @@ CREATE TABLE Product_Event (
     event_result  VARCHAR(20) NULL,
     metadata      JSON NULL,
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_product_event_student FOREIGN KEY (user_id) REFERENCES Student(user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_product_event_student FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE,
     INDEX idx_product_event_created (created_at),
     INDEX idx_product_event_feature_created (feature_name, created_at),
     INDEX idx_product_event_name_created (event_name, created_at),
@@ -305,7 +236,7 @@ CREATE TABLE Course (
     external_course_id  VARCHAR(100),
     platform_source     VARCHAR(50),
     student_id          INT NOT NULL,
-    CONSTRAINT fk_course_student FOREIGN KEY (student_id) REFERENCES Student(user_id)
+    CONSTRAINT fk_course_student FOREIGN KEY (student_id) REFERENCES User_Account(user_id)
 );
 
 CREATE TABLE IF NOT EXISTS Announcement (
@@ -384,7 +315,7 @@ CREATE TABLE Notification_Setting (
     daily_repeat        BOOLEAN NOT NULL DEFAULT FALSE,
     daily_repeat_time   TIME NULL,
     last_custom_minutes INT NULL,
-    CONSTRAINT fk_notification_setting_student FOREIGN KEY (user_id) REFERENCES Student(user_id)
+    CONSTRAINT fk_notification_setting_student FOREIGN KEY (user_id) REFERENCES User_Account(user_id)
 );
 
 CREATE TABLE Notification_Lead_Time (
@@ -407,7 +338,7 @@ CREATE TABLE System_Error_Log (
     user_id INT NULL,
     request_id VARCHAR(64) NULL,
     metadata JSON NULL,
-    CONSTRAINT fk_error_log_student FOREIGN KEY (user_id) REFERENCES Student(user_id) ON DELETE SET NULL,
+    CONSTRAINT fk_error_log_student FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE SET NULL,
     INDEX idx_error_log_occurred_at (occurred_at),
     INDEX idx_error_log_source_occurred_at (source, occurred_at),
     INDEX idx_error_log_status_occurred_at (status_code, occurred_at),
@@ -423,7 +354,7 @@ CREATE TABLE Admin_Audit_Log (
     target_id VARCHAR(100) NULL,
     detail JSON NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_audit_log_admin FOREIGN KEY (admin_user_id) REFERENCES Admin(admin_id),
+    CONSTRAINT fk_audit_log_admin FOREIGN KEY (admin_user_id) REFERENCES User_Account(user_id),
     INDEX idx_audit_log_admin_created_at (admin_user_id, created_at),
     INDEX idx_audit_log_target_created_at (target_type, target_id, created_at)
 );
@@ -444,5 +375,5 @@ CREATE TABLE User_Settings (
     working_hours_end TIME DEFAULT '18:00:00',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_user_settings_student FOREIGN KEY (user_id) REFERENCES Student(user_id) ON DELETE CASCADE
+    CONSTRAINT fk_user_settings_student FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE
 );

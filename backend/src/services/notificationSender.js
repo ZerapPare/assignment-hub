@@ -162,10 +162,10 @@ function buildBody({ studentName, title, courseName, dueDate, assignmentId, orig
 const LEAD_REMINDER_SQL = `
   SELECT a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
-         s.university_email, s.student_name,
+         s.email, s.full_name,
          lt.minutes
   FROM Notification_Setting ns
-  JOIN Student s                 ON s.user_id = ns.user_id
+  JOIN User_Account s                 ON s.user_id = ns.user_id
   JOIN Notification_Lead_Time lt ON lt.user_id = ns.user_id
   JOIN Course c                  ON c.student_id = ns.user_id
   JOIN Assignment a              ON a.course_id = c.course_id
@@ -186,10 +186,10 @@ const LEAD_REMINDER_SQL = `
 const DAILY_REPEAT_SQL = `
   SELECT a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
-         s.university_email, s.student_name,
+         s.email, s.full_name,
          DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today
   FROM Notification_Setting ns
-  JOIN Student s           ON s.user_id = ns.user_id
+  JOIN User_Account s           ON s.user_id = ns.user_id
   JOIN Course c            ON c.student_id = ns.user_id
   JOIN Assignment a        ON a.course_id = c.course_id
   JOIN Assignment_Detail d ON d.assignment_id = a.assignment_id
@@ -245,12 +245,12 @@ const RETRY_SWEEP_SQL = `
   SELECT n.trigger_type, n.attempt_count,
          a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
-         s.university_email, s.student_name
+         s.email, s.full_name
   FROM Notification n
   JOIN Assignment_Detail d      ON d.assignment_id = n.assignment_id
   JOIN Assignment a             ON a.assignment_id = d.assignment_id
   JOIN Course c                 ON c.course_id = a.course_id
-  JOIN Student s                ON s.user_id = c.student_id
+  JOIN User_Account s                ON s.user_id = c.student_id
   JOIN Notification_Setting ns  ON ns.user_id = s.user_id
   WHERE n.is_sent = FALSE
     AND n.sent_at IS NULL
@@ -284,7 +284,7 @@ async function defaultLogFailure(err, context) {
 // without having to remember which pass first claimed it.
 function buildMessage(row, triggerType) {
   const common = {
-    studentName: row.student_name,
+    studentName: row.full_name,
     title: row.title,
     courseName: row.course_name,
     dueDate: row.due_date,
@@ -312,7 +312,7 @@ function buildMessage(row, triggerType) {
 async function deliver({ db, sendMail, logFailure, row, triggerType, attemptsSoFar }) {
   try {
     const { subject, text } = buildMessage(row, triggerType);
-    await sendMail({ to: row.university_email, subject, text });
+    await sendMail({ to: row.email, subject, text });
     await db.query(MARK_SENT_SQL, [row.assignment_id, triggerType]);
     return 'sent';
   } catch (err) {

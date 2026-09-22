@@ -47,9 +47,9 @@ async function seedMockBusinessAnalytics({ db, now = new Date() } = {}) {
   }
 
   const [students] = await db.query(
-    `SELECT user_id, university_email
-     FROM Student
-     WHERE student_id LIKE 'MOCK-%' AND university_email LIKE '%.test'`
+    `SELECT user_id, email
+     FROM User_Account
+     WHERE student_id LIKE 'MOCK-%' AND email LIKE '%.test'`
   );
   if (!students.length) throw new Error('Seed mock users before mock business analytics');
 

@@ -26,6 +26,19 @@ const PERMISSIONS = {
 
 const ALL_PERMISSION_CODES = Object.freeze(Object.values(PERMISSIONS));
 
+// Holding any one of these is what makes the admin console relevant to an
+// account. There is no separate "is an administrator" flag any more — being an
+// administrator just means holding administrative permissions.
+const ADMIN_PERMISSION_CODES = Object.freeze([
+  PERMISSIONS.DASHBOARD_VIEW,
+  PERMISSIONS.USER_READ,
+  PERMISSIONS.USER_SUSPEND,
+  PERMISSIONS.ERROR_LOG_READ,
+  PERMISSIONS.SYSTEM_HEALTH_READ,
+  PERMISSIONS.BUSINESS_ANALYTICS_READ,
+  PERMISSIONS.AUDIT_LOG_READ,
+]);
+
 const ROLES = {
   SUPER_ADMIN: 'super_admin',
   SUPPORT_ADMIN: 'support_admin',
@@ -46,6 +59,7 @@ function hasPermission(permissions, code) {
 module.exports = {
   PERMISSIONS,
   ALL_PERMISSION_CODES,
+  ADMIN_PERMISSION_CODES,
   ROLES,
   ALL_ROLE_CODES,
   hasPermission,

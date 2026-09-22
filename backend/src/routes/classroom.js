@@ -28,7 +28,7 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
     const cutoffDate = req.body?.cutoffDate ? new Date(req.body.cutoffDate) : null;
 
     const [rows] = await pool.query(
-      'SELECT gg_refresh_token FROM Student WHERE user_id = ? LIMIT 1',
+      'SELECT gg_refresh_token FROM User_Account WHERE user_id = ? LIMIT 1',
       [req.session.userId]
     );
     const refreshToken = rows[0]?.gg_refresh_token;

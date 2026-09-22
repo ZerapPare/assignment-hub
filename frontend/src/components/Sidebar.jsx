@@ -12,10 +12,23 @@ const NAV = [
   { key: 'settings', label: 'ตั้งค่า', Icon: GearIcon, path: '/settings' },
 ];
 
+// The seven administrative permission codes. Holding any one of them is what
+// makes the console reachable, so it is also what decides whether to show the
+// way in — there is no separate admin login page to find any more.
+const ADMIN_PERMISSIONS = [
+  'dashboard.view', 'user.read', 'user.suspend', 'error_log.read',
+  'system.health.read', 'business.analytics.read', 'audit_log.read',
+];
+
 function Sidebar({ active = 'home', student, onLogout }) {
   const navigate = useNavigate();
   const name = student?.student_name || '—';
   const sub = student?.university_name || student?.university_email || '';
+  const canOpenAdmin = (student?.permissions || []).some((code) => ADMIN_PERMISSIONS.includes(code));
+
+  const nav = canOpenAdmin
+    ? [...NAV, { key: 'admin', label: 'ผู้ดูแลระบบ', Icon: GridIcon, path: '/admin' }]
+    : NAV;
 
   return (
     <div style={styles.rail}>
@@ -24,7 +37,7 @@ function Sidebar({ active = 'home', student, onLogout }) {
       </div>
 
       <nav style={styles.nav}>
-        {NAV.map(({ key, label, Icon, path }) => {
+        {nav.map(({ key, label, Icon, path }) => {
           const on = key === active;
           return (
             <div

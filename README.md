@@ -86,7 +86,7 @@ db-1        | ... ready for connections
 
 เปิดเบราว์เซอร์ไปที่ **http://localhost:5173**
 
-จะเจอหน้า **login** ก่อน → กด "เข้าสู่ระบบด้วย Google/Microsoft" → ไปหน้า consent ของ provider → กลับมาที่ **dashboard** (ระบบสร้าง user ในตาราง `Student` + เก็บ token ให้อัตโนมัติ) กด "ออกจากระบบ" ที่ sidebar เพื่อออก
+จะเจอหน้า **login** ก่อน → กด "เข้าสู่ระบบด้วย Google/Microsoft" → ไปหน้า consent ของ provider → กลับมาที่ **dashboard** (ระบบสร้าง user ในตาราง `User_Account` + เก็บ token ให้อัตโนมัติ) กด "ออกจากระบบ" ที่ sidebar เพื่อออก
 
 **ครั้งแรก dashboard จะว่างเปล่า** เพราะ database ไม่มีข้อมูลตัวอย่าง — ตั้งวันที่ในช่อง "งานตั้งแต่วันที่"
 แล้วกด **"ซิงก์ Classroom"** เพื่อดึงงานจริงจากบัญชี Google ของคุณเข้ามา
@@ -183,9 +183,7 @@ Database ชื่อ `assignment_hub` ถูกสร้างอัตโน�
 | ตาราง | เก็บอะไร |
 |---|---|
 | `University` | มหาวิทยาลัย + โดเมนอีเมล |
-| `User_Account` | บัญชีผู้ใช้กลาง (supertype) ของทั้งนักศึกษาและผู้ดูแล — เป็นตัวที่ role ผูกอยู่ |
-| `Student` | subtype ของ `User_Account`: ผู้ใช้ + token สำหรับ login (Google/Microsoft) |
-| `Admin` | subtype ของ `User_Account`: รายชื่อผู้ดูแลที่อนุญาตให้เข้า admin console (ไม่มี provider token) |
+| `User_Account` | ผู้ใช้ทุกคน ทั้งนักศึกษาและผู้ดูแล อยู่ตารางเดียวกัน + token สำหรับ login (Google/Microsoft) |
 | `Role` | บทบาท เช่น `super_admin`, `support_admin`, `analytics_viewer`, `student` |
 | `Permission` | สิทธิ์ย่อยแบบ `resource` + `action` เช่น `user.suspend` |
 | `Role_Permission` | บทบาทไหนมีสิทธิ์อะไรบ้าง (m:n) |
@@ -241,6 +239,7 @@ migrate.bat         # Windows cmd
 | `010_schedule_setting.sql` | ตาราง `Schedule_Setting` สำหรับจัดตารางอัตโนมัติ |
 | `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` — database ที่สร้างก่อนคอลัมน์นี้จะทำให้ `/api/assignments` ตอบ `ER_BAD_FIELD_ERROR` |
 | `012_rbac.sql` | RBAC: `User_Account` + `Role`/`Permission`/`Role_Permission`/`User_Role` และย้าย `Student`/`Admin` เป็น subtype |
+| `013_single_user_table.sql` | ยุบ `Student` กับ `Admin` เหลือ `User_Account` ตารางเดียว + รวมหน้า login เป็นหน้าเดียว |
 
 เช็คว่าลงครบ:
 
@@ -250,34 +249,14 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assign
 
 ### Admin access
 
-There is no public admin registration. After applying migrations `007_admin_identity.sql` and `012_rbac.sql`, provision an allowlisted account directly.
+**Everyone signs in at `/login`.** There is no separate admin login page and no admin allowlist: signing in creates an ordinary account, and it takes a `User_Role` grant to make the console reachable. That grant is what "there is no public admin registration" means now — the person can log in, they simply cannot open `/admin` until somebody gives them a role.
 
-Since `012_rbac.sql` an administrator needs **three** rows, not one: a `User_Account`, the `Admin` row that links to it, and a `User_Role` grant. An `Admin` row on its own can sign in but holds no permissions, so every console section answers `403 PERMISSION_DENIED`.
+To make an existing account an administrator, have them sign in once, then grant a role:
 
 ```sql
--- 1. The central account. Roles attach here, not to the Admin row.
-INSERT INTO User_Account (email, display_name, user_type)
-VALUES ('admin@example.edu', 'Assignment Hub Admin', 'admin');
-
--- Choose the provider(s) used by this admin. A single row may contain both.
--- Google administrator (email is checked against the verified Google identity).
-INSERT INTO Admin (user_id, email, display_name)
-SELECT user_id, email, display_name FROM User_Account WHERE email = 'admin@example.edu';
-
--- Microsoft administrator: use the Entra tenant ID and user Object ID,
--- not an email address. The tenant must also be listed in MS_ADMIN_TENANT_IDS.
--- If the same row is also used for Microsoft, this upsert adds its immutable IDs.
-INSERT INTO Admin (email, display_name, microsoft_tenant_id, microsoft_object_id)
-VALUES ('admin@example.edu', 'Assignment Hub Admin',
-        '<tenant-guid>', '<user-object-guid>')
-ON DUPLICATE KEY UPDATE
-  microsoft_tenant_id = VALUES(microsoft_tenant_id),
-  microsoft_object_id = VALUES(microsoft_object_id);
-
--- 3. Grant a role. Without this the account signs in with no permissions.
---    super_admin      = the full console, i.e. what every admin had before RBAC
---    support_admin    = dashboard + view and suspend users, nothing else
---    analytics_viewer = dashboard + business analytics only, cannot see users
+-- super_admin      = the full console, i.e. what every admin had before RBAC
+-- support_admin    = dashboard + view and suspend users, nothing else
+-- analytics_viewer = dashboard + business analytics only, cannot see users
 INSERT IGNORE INTO User_Role (user_id, role_id)
 SELECT u.user_id, r.role_id
 FROM User_Account u
@@ -285,21 +264,28 @@ JOIN Role r ON r.role_code = 'super_admin'
 WHERE u.email = 'admin@example.edu';
 ```
 
+To provision an administrator who has never signed in, create the row first. They still have to log in through `/login` with the matching Google or Microsoft account:
+
+```sql
+INSERT INTO User_Account (full_name, email, user_type)
+VALUES ('Assignment Hub Admin', 'admin@example.edu', 'admin');
+```
+
 Check what an account ended up with:
 
 ```sql
-SELECT a.email, r.role_code, p.permission_code
-FROM Admin a
-JOIN User_Role ur       ON ur.user_id = a.user_id
+SELECT u.email, r.role_code, p.permission_code
+FROM User_Account u
+JOIN User_Role ur       ON ur.user_id = u.user_id
 JOIN Role r             ON r.role_id = ur.role_id
 JOIN Role_Permission rp ON rp.role_id = ur.role_id
 JOIN Permission p       ON p.permission_id = rp.permission_id
-WHERE a.email = 'admin@example.edu';
+WHERE u.email = 'admin@example.edu';
 ```
 
 Roles are read from the database on **every** request rather than cached in the session, so granting or revoking one takes effect on the next request without the administrator logging out.
 
-Register both admin OAuth callback URLs with the provider. Admin login uses `/admin/login`, has a separate `Admin` identity/auth mode, and never creates a `Student` row. The browser uses one session cookie, so switching between student and admin login replaces the active session mode.
+An account holding any administrative permission gets an extra "ผู้ดูแลระบบ" item in the sidebar; `/admin` is also reachable directly. Only the ordinary student callback URLs need registering with Google and Azure — the second pair for `/api/admin/auth/*` is no longer used.
 
 ### Mock users for the admin demo
 
@@ -316,10 +302,8 @@ The script upserts eight students under `.test` email domains with varied univer
 | Method | Path | ต้อง login? | คืนอะไร |
 |---|---|---|---|
 | GET | `/api/health` | — | สถานะการต่อ DB |
-| GET | `/api/admin/auth/{provider}` | — | เริ่ม OAuth สำหรับผู้ดูแล (Google/Microsoft) |
-| GET | `/api/admin/auth/{provider}/callback` | — | ตรวจ allowlist `Admin` แล้วเริ่ม admin session |
-| GET | `/api/admin/me` | ต้องเป็น admin | ข้อมูลผู้ดูแลที่ login อยู่ |
-| POST | `/api/admin/auth/logout` | ต้องเป็น admin | ออกจาก admin session |
+| GET | `/api/admin/me` | ต้องมีสิทธิ์ฝั่ง admin | ข้อมูลผู้ใช้ที่ login อยู่ + `roles` / `permissions` |
+| POST | `/api/admin/auth/logout` | ต้อง login | ออกจากระบบ (session เดียวกับฝั่งนักศึกษา) |
 | GET | `/api/admin/dashboard` · `/users` · `/errors` · `/system/*` | ต้องเป็น admin | monitoring console |
 | GET | `/api/admin/business/*` | ต้องเป็น admin | business analytics แบบ aggregate |
 | GET | `/api/auth/google` · `/microsoft` | — | ส่งไปหน้า consent ของ provider |

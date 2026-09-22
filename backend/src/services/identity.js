@@ -34,7 +34,7 @@ async function trySetStudentId(userId, studentId) {
   if (!studentId) return;
   try {
     await pool.query(
-      'UPDATE Student SET student_id = ? WHERE user_id = ? AND student_id IS NULL',
+      'UPDATE User_Account SET student_id = ? WHERE user_id = ? AND student_id IS NULL',
       [studentId, userId]
     );
   } catch (err) {

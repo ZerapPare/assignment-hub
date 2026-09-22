@@ -26,8 +26,8 @@ function candidate(overrides = {}) {
     origin_link: 'https://classroom.google.com/c/abc',
     course_name: 'ฐานข้อมูล',
     due_date: DUE,
-    university_email: 'student@uni.ac.th',
-    student_name: 'สมชาย',
+    email: 'student@uni.ac.th',
+    full_name: 'สมชาย',
     minutes: 1440,
     ...overrides,
   };
@@ -414,7 +414,7 @@ test('gaps read as days, hours or minutes', () => {
 test('a retry of a daily mail rebuilds the daily wording', () => {
   const row = {
     title: 'งานค้าง', course_name: 'วิชา', due_date: DUE,
-    student_name: 'สมชาย', assignment_id: 7,
+    full_name: 'สมชาย', assignment_id: 7,
   };
 
   assert.match(buildMessage(row, 'daily:2026-09-16').subject, /\[(งานค้าง|เลยกำหนดแล้ว)\]/);

@@ -11,15 +11,15 @@ const {
 } = require('../src/services/devStudentSeeder');
 
 const STUDENT_COLUMNS = [
-  'user_id', 'student_id', 'student_name', 'university_email', 'university_id',
+  'user_id', 'student_id', 'full_name', 'email', 'university_id',
   'gg_access_token', 'gg_refresh_token', 'ms_access_token', 'ms_refresh_token',
-  'role', 'account_status', 'created_at', 'last_login_at', 'last_seen_at',
+  'user_type', 'account_status', 'created_at', 'last_login_at', 'last_seen_at',
 ];
 
 const STUDENT_INDEXES = [
-  { Key_name: 'university_email', Non_unique: 0, Column_name: 'university_email', Seq_in_index: 1 },
-  { Key_name: 'uq_student_per_university', Non_unique: 0, Column_name: 'student_id', Seq_in_index: 1 },
-  { Key_name: 'uq_student_per_university', Non_unique: 0, Column_name: 'university_id', Seq_in_index: 2 },
+  { Key_name: 'uq_user_email', Non_unique: 0, Column_name: 'email', Seq_in_index: 1 },
+  { Key_name: 'uq_user_per_university', Non_unique: 0, Column_name: 'student_id', Seq_in_index: 1 },
+  { Key_name: 'uq_user_per_university', Non_unique: 0, Column_name: 'university_id', Seq_in_index: 2 },
 ];
 
 function createFakeDb({ indexes = [{ Key_name: 'uq_university_domain', Non_unique: 0, Column_name: 'email_domain', Seq_in_index: 1 }], columns = STUDENT_COLUMNS.map((Field) => ({ Field })), studentIndexes = STUDENT_INDEXES, existingEmails = new Map(), failAtInsert = null } = {}) {
@@ -64,7 +64,7 @@ function createFakeDb({ indexes = [{ Key_name: 'uq_university_domain', Non_uniqu
         const existing = state.studentRows.get(params[0]);
         return [existing ? [existing] : [], []];
       }
-      if (sql.includes('SELECT user_id, university_email')) {
+      if (sql.includes('SELECT user_id, email')) {
         const [studentId, universityId, excludedUserId] = params;
         const collision = [...state.studentRows.values()].find(
           (row) => row.student_id === studentId
@@ -73,30 +73,25 @@ function createFakeDb({ indexes = [{ Key_name: 'uq_university_domain', Non_uniqu
         );
         return [collision ? [collision] : [], []];
       }
-      // Student is a subtype of User_Account now, so the account row is what
-      // allocates the id and the Student insert is handed it. ON DUPLICATE KEY
-      // ... LAST_INSERT_ID means a repeated email yields the same id, which is
-      // what keeps ids stable across two seed runs.
-      if (sql.includes('INSERT INTO User_Account')) {
-        const email = params[0];
-        if (!userAccountIds.has(email)) userAccountIds.set(email, nextUserId++);
-        return [{ insertId: userAccountIds.get(email) }, []];
-      }
       if (sql.includes('INSERT IGNORE INTO User_Role')) {
         state.roleGrants++;
         return [{ affectedRows: 1 }, []];
       }
-      if (sql.includes('INSERT INTO Student')) {
+      // Students and administrators share one table, so the seeder is back to a
+      // single insert that allocates its own user_id.
+      if (sql.includes('INSERT INTO User_Account')) {
         state.studentInserts++;
         if (failAtInsert === state.studentInserts) throw new Error('injected student write failure');
-        state.studentRows.set(params[3], {
-          user_id: params[0],
-          student_id: params[1],
-          university_id: params[4],
+        const email = params[2];
+        if (!userAccountIds.has(email)) userAccountIds.set(email, nextUserId++);
+        state.studentRows.set(email, {
+          user_id: userAccountIds.get(email),
+          student_id: params[0],
+          university_id: params[3],
         });
-        return [{ insertId: params[0] }, []];
+        return [{ insertId: userAccountIds.get(email) }, []];
       }
-      if (sql.includes('UPDATE Student')) {
+      if (sql.includes('UPDATE User_Account')) {
         state.studentUpdates++;
         state.lastUpdateSql = sql;
         const userId = params[params.length - 1];
@@ -116,8 +111,8 @@ function createFakeDb({ indexes = [{ Key_name: 'uq_university_domain', Non_uniqu
     async query(sql) {
       state.schemaQueries++;
       if (sql.includes('SHOW INDEX FROM University')) return [indexes, []];
-      if (sql.includes('SHOW COLUMNS FROM Student')) return [columns, []];
-      if (sql.includes('SHOW INDEX FROM Student')) return [studentIndexes, []];
+      if (sql.includes('SHOW COLUMNS FROM User_Account')) return [columns, []];
+      if (sql.includes('SHOW INDEX FROM User_Account')) return [studentIndexes, []];
       throw new Error(`Unexpected pool query: ${sql}`);
     },
     async getConnection() {
@@ -189,25 +184,25 @@ test('seed rejects a wrongly defined university index', async () => {
   assert.equal(db.state.connectionRequests, 0);
 });
 
-test('seed rejects an incomplete Student schema before opening a transaction', async () => {
+test('seed rejects an incomplete User_Account schema before opening a transaction', async () => {
   const db = createFakeDb({ columns: STUDENT_COLUMNS.filter((column) => column !== 'account_status')
     .map((Field) => ({ Field })) });
 
   await assert.rejects(
     seedMockUsers({ db, env: DEV_ENV, now: NOW }),
-    /Student schema is missing account_status/
+    /User_Account schema is missing account_status/
   );
   assert.equal(db.state.connectionRequests, 0);
 });
 
-test('seed rejects missing Student identity indexes before opening a transaction', async () => {
+test('seed rejects missing User_Account identity indexes before opening a transaction', async () => {
   const db = createFakeDb({
-    studentIndexes: STUDENT_INDEXES.filter((index) => index.Key_name !== 'uq_student_per_university'),
+    studentIndexes: STUDENT_INDEXES.filter((index) => index.Key_name !== 'uq_user_per_university'),
   });
 
   await assert.rejects(
     seedMockUsers({ db, env: DEV_ENV, now: NOW }),
-    /Student identity index is missing/
+    /User_Account identity index is missing/
   );
   assert.equal(db.state.connectionRequests, 0);
 });

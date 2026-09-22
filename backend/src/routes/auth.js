@@ -58,8 +58,6 @@ router.get('/api/auth/google/callback', async (req, res) => {
       tokens,
       linkMode: wasLink,
     });
-    req.session.adminId = null;
-    req.session.authType = 'student';
     finishOAuth(req, res, 'google');
   } catch (err) {
     void logError(err, req, { source: 'auth', statusCode: 500 });
@@ -117,8 +115,6 @@ router.get('/api/auth/microsoft/callback', async (req, res) => {
       tokens,
       linkMode: wasLink,
     });
-    req.session.adminId = null;
-    req.session.authType = 'student';
     finishOAuth(req, res, 'microsoft');
   } catch (err) {
     void logError(err, req, { source: 'auth', statusCode: 500 });

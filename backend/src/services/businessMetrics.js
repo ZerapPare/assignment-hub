@@ -120,7 +120,7 @@ async function getActiveUserCount(days) {
   const [rows] = await pool.query(
     `SELECT COUNT(DISTINCT e.user_id) AS active_users
      FROM Product_Event e
-     JOIN Student s ON s.user_id = e.user_id AND s.role = 'student'
+     JOIN User_Account s ON s.user_id = e.user_id AND s.user_type = 'student'
      WHERE e.created_at >= DATE_SUB(NOW(), INTERVAL ${interval(days)} DAY)
        AND ${ACTIVE_EVENT_CLAUSE}`
   );
@@ -133,8 +133,8 @@ async function getOverview(days) {
     pool.query(
       `SELECT COUNT(*) AS total_users,
               COALESCE(SUM(created_at >= DATE_SUB(NOW(), INTERVAL ${range} DAY)), 0) AS new_users
-       FROM Student
-       WHERE role = 'student'`
+       FROM User_Account
+       WHERE user_type = 'student'`
     ),
     pool.query(
       `SELECT COUNT(DISTINCT CASE
@@ -148,7 +148,7 @@ async function getOverview(days) {
                END) AS mau,
               COUNT(DISTINCT CASE WHEN ${ACTIVE_EVENT_CLAUSE} THEN e.user_id END) AS active_users
        FROM Product_Event e
-       JOIN Student s ON s.user_id = e.user_id AND s.role = 'student'`
+       JOIN User_Account s ON s.user_id = e.user_id AND s.user_type = 'student'`
     ),
   ]);
   const users = usersResult[0][0] || {};
@@ -172,7 +172,7 @@ async function getFeatureRanking(days) {
               COUNT(DISTINCT e.user_id) AS unique_users,
               COUNT(*) AS actions
        FROM Product_Event e
-       JOIN Student s ON s.user_id = e.user_id AND s.role = 'student'
+       JOIN User_Account s ON s.user_id = e.user_id AND s.user_type = 'student'
        WHERE e.created_at >= DATE_SUB(NOW(), INTERVAL ${interval(days)} DAY)
          AND ${RANKED_EVENT_CLAUSE}
        GROUP BY e.feature_name
@@ -202,7 +202,7 @@ async function getFeatureTrend(feature, days) {
             COUNT(DISTINCT e.user_id) AS unique_users,
             COUNT(*) AS actions
      FROM Product_Event e
-     JOIN Student s ON s.user_id = e.user_id AND s.role = 'student'
+     JOIN User_Account s ON s.user_id = e.user_id AND s.user_type = 'student'
      WHERE e.feature_name = ?
        AND e.created_at >= DATE_SUB(NOW(), INTERVAL ${interval(days)} DAY)
        AND ${TREND_EVENT_CLAUSE}
@@ -218,8 +218,8 @@ async function getIntegrations(days) {
     pool.query(
       `SELECT COALESCE(SUM(gg_refresh_token IS NOT NULL), 0) AS google_connected_users,
               COALESCE(SUM(ms_refresh_token IS NOT NULL), 0) AS microsoft_connected_users
-       FROM Student
-       WHERE role = 'student'`
+       FROM User_Account
+       WHERE user_type = 'student'`
     ),
     pool.query(
       `SELECT COUNT(DISTINCT CASE WHEN e.event_name = 'classroom.sync_success' THEN e.user_id END) AS google_classroom_sync_users,
@@ -227,7 +227,7 @@ async function getIntegrations(days) {
               COALESCE(SUM(e.event_name = 'classroom.sync_success'), 0) AS classroom_sync_successes,
               COALESCE(SUM(e.event_name = 'classroom.sync_failed'), 0) AS classroom_sync_failures
        FROM Product_Event e
-       JOIN Student s ON s.user_id = e.user_id AND s.role = 'student'
+       JOIN User_Account s ON s.user_id = e.user_id AND s.user_type = 'student'
        WHERE e.feature_name = 'classroom_sync'
          AND e.created_at >= DATE_SUB(NOW(), INTERVAL ${interval(days)} DAY)`
     ),
@@ -258,7 +258,7 @@ async function getSourceMix() {
             COUNT(a.assignment_id) AS assignments,
             COUNT(DISTINCT c.student_id) AS unique_users
      FROM Course c
-     JOIN Student s ON s.user_id = c.student_id AND s.role = 'student'
+     JOIN User_Account s ON s.user_id = c.student_id AND s.user_type = 'student'
      JOIN Assignment a ON a.course_id = c.course_id
      GROUP BY CASE
                 WHEN c.platform_source IS NULL OR c.platform_source = '' THEN 'Manual'

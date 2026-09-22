@@ -46,19 +46,15 @@ The frontend never talks to MySQL directly — it calls `/api/*`, which Vite pro
 git clone https://github.com/ZerapPare/assignment-hub.git
 cd assignment-hub
 docker compose up --build
-
-# once MySQL is up — init.sql is behind these two, even on a brand-new database
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_announcement.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_score.sql
 ```
 
 Then open **http://localhost:5173**.
 
 > First run: MySQL takes ~10–20s to initialize. If the page shows a "waiting for database" warning, wait and refresh.
 
-> **Those two migrations are not optional.** `init.sql` does not yet create `Announcement`
-> or the score columns, so without them `/stream` and `/api/assignments` both fail. See
-> [Migrations](#migrations).
+> A brand-new database needs nothing extra — `init.sql` builds the current schema
+> on its own. `migrations/` is only for a database that already exists; run
+> `./migrate.sh` on one of those. See [Migrations](#migrations).
 
 > **Login needs OAuth credentials.** The stack runs without them, but clicking "เข้าสู่ระบบด้วย Google/Microsoft" will fail until you create a `.env.local` (see [Authentication](#authentication-oauth)).
 
@@ -101,10 +97,8 @@ This trips people up, so be precise about which file a variable belongs in:
 | `DB_NAME`               | compose          | `assignment_hub`                                 |
 | `OAUTH_REDIRECT_URL`    | compose          | derived — `${PUBLIC_URL}/api/auth/google/callback` |
 | `MS_OAUTH_REDIRECT_URL` | compose          | derived — `${PUBLIC_URL}/api/auth/microsoft/callback` |
-| `ADMIN_GOOGLE_REDIRECT_URL` | `.env.local` | optional explicit admin Google callback; defaults to `${FRONTEND_URL}/api/admin/auth/google/callback` |
-| `MS_ADMIN_OAUTH_REDIRECT_URL` | `.env.local` | optional explicit admin Microsoft callback; defaults to `${FRONTEND_URL}/api/admin/auth/microsoft/callback` |
 | `FRONTEND_URL`          | compose          | derived — `${PUBLIC_URL}`                        |
-| `PUBLIC_URL`            | **.env**         | origin the browser uses. Defaults to `http://localhost:5173`. Builds the default student and admin callback URLs above, so it must match what is registered with Google/Azure exactly |
+| `PUBLIC_URL`            | **.env**         | origin the browser uses. Defaults to `http://localhost:5173`. Builds the default callback URLs above, so it must match what is registered with Google/Azure exactly |
 | `SITE_HOST`             | **.env**         | hostname Caddy requests a certificate for        |
 | `BIND`                  | **.env**         | interface the app ports publish on. `127.0.0.1` on a deployed host keeps frontend/backend/db off the internet; defaults to `0.0.0.0` |
 | `FRONTEND_PORT`         | **.env**         | host port mapped to Vite's 5173; defaults to `5173`. Leave it alone when Caddy is in front — Caddy owns 80/443 |
@@ -114,7 +108,6 @@ This trips people up, so be precise about which file a variable belongs in:
 | `MS_CLIENT_ID`          | **.env.local**   | Azure app (application) ID                        |
 | `MS_CLIENT_SECRET`      | **.env.local**   | Azure client secret                              |
 | `MS_TENANT_ID`          | **.env.local**   | *(optional)* Azure tenant for student OAuth; defaults to `organizations` |
-| `MS_ADMIN_TENANT_IDS`   | **.env.local**   | **required for Microsoft admin OAuth** — comma-separated trusted Entra tenant GUIDs |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` | **.env.local** | SMTP account the reminder sender uses. Leave empty and mail is logged, not sent — the pipeline still runs |
 | `MAIL_FROM`             | **.env.local**   | sender address shown to the recipient. Gmail rewrites it to the authenticated account |
 | `SMTP_SECURE`           | **.env.local**   | *(optional)* `1` forces implicit TLS. Port `465` turns it on by itself; `587` uses STARTTLS |
@@ -126,7 +119,7 @@ This trips people up, so be precise about which file a variable belongs in:
 | Path     | Page          | Notes                                                        |
 |----------|---------------|-------------------------------------------------------------|
 | `/login` | Login screen  | Real Google / Microsoft OAuth (buttons redirect to the backend) |
-| `/admin/login` | Admin login | Separate Google / Microsoft OAuth; email must be provisioned in `Admin` |
+| `/admin/login` | — | Redirects to `/login`. Administrators sign in through the one login page; a `User_Role` grant is what opens the console |
 | `/admin/*` | Admin console | Protected admin dashboard, users, errors, system health, and business analytics |
 | `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, a month calendar with per-day hover details, upcoming deadlines, and a 48h checklist. **Summary only — no task table** |
 | `/assignments` | All tasks | Requires a session. The task table: search, platform/status/course filters, score column, per-row status control, edit + delete on manual tasks |
@@ -220,16 +213,18 @@ rather than declared in `index.html`.
 
 ## Authentication (OAuth)
 
-Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on a single origin (`localhost:5173` locally, `PUBLIC_URL` when deployed) via the Vite `/api` proxy, so the session cookie is same-host. Each flow sends a random `state` held in the session and rejects a callback that doesn't match it (`/login?error=state`). Student callbacks upsert the user into `Student` and store provider tokens. Admin callbacks use a provider-bound state, verify the provider identity, and look up the normalized email in the manually provisioned `Admin` allowlist; they never create a `Student` row or store provider tokens. The shared session cookie has one active mode at a time: switching to admin replaces the student session, and vice versa.
+Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on a single origin (`localhost:5173` locally, `PUBLIC_URL` when deployed) via the Vite `/api` proxy, so the session cookie is same-host. Each flow sends a random `state` held in the session and rejects a callback that doesn't match it (`/login?error=state`). The callback upserts the user into `User_Account` and stores provider tokens.
+
+There is one login for everybody. The session holds a single `userId` and nothing else — no "admin mode", no second identity — because what an account may do comes from the roles attached to that id. An administrator is simply an account someone granted an administrative role to.
 
 **Identity.** The email domain resolves to a `University` row that is *created on first sight*, so a new institution needs no seed data or code change (UR02). `student_id` is taken from the email's local part when it is all digits — the common `67050115@…` format — and is otherwise left unset for the user to fill in; it is unique per university, not globally (UR03).
 
-**Linking the other platform.** `/api/auth/{google,microsoft}?link=1` connects a provider to the account already in the session instead of signing in as a new one. This matters because a personal Google address rarely matches a university Microsoft address — a plain second login would create a second `Student` row. Link mode finds the row by session, leaves `student_name` alone, and returns to `/settings?linked=<provider>`. Signing in with Microsoft and then linking Google is what makes `/api/classroom/sync` usable.
+**Linking the other platform.** `/api/auth/{google,microsoft}?link=1` connects a provider to the account already in the session instead of signing in as a new one. This matters because a personal Google address rarely matches a university Microsoft address — a plain second login would create a second account. Link mode finds the row by session, leaves `full_name` alone, and returns to `/settings?linked=<provider>`. Signing in with Microsoft and then linking Google is what makes `/api/classroom/sync` usable.
 
 **Prerequisites — create OAuth apps and a `.env.local`:**
 
-1. **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External, add yourself as a Test user) → Credentials → OAuth client ID (Web application). Register both `http://localhost:5173/api/auth/google/callback` and `http://localhost:5173/api/admin/auth/google/callback`. Enable the **Google Classroom API** and add the three `classroom.*.readonly` scopes below, or `/api/classroom/sync` will fail.
-2. **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration (accounts: *organizations* / work-school). Register both `http://localhost:5173/api/auth/microsoft/callback` and `http://localhost:5173/api/admin/auth/microsoft/callback`, and create a client secret.
+1. **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External, add yourself as a Test user) → Credentials → OAuth client ID (Web application). Register `http://localhost:5173/api/auth/google/callback`. Enable the **Google Classroom API** and add the three `classroom.*.readonly` scopes below, or `/api/classroom/sync` will fail.
+2. **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration (accounts: *organizations* / work-school). Register `http://localhost:5173/api/auth/microsoft/callback` and create a client secret.
 3. Create **`.env.local`** at the repo root (git-ignored via `.env*`):
 
    ```env
@@ -238,27 +233,19 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
    MS_CLIENT_ID=...
    MS_CLIENT_SECRET=...
    MS_TENANT_ID=...             # optional; defaults to organizations
-   MS_ADMIN_TENANT_IDS=...      # required for Microsoft admin login
-   # ADMIN_GOOGLE_REDIRECT_URL=...
-   # MS_ADMIN_OAUTH_REDIRECT_URL=...
    SESSION_SECRET=<random-string>
    ```
 
-4. Provision an allowlisted admin directly in MySQL; there is intentionally no public admin registration endpoint:
+4. Grant an administrator role directly in MySQL. Signing in creates an ordinary
+   account and nothing more — a role grant is what opens the console, and there
+   is intentionally no endpoint that hands one out:
 
    ```sql
-   -- Choose the provider(s) used by this admin. A single row may contain both.
-   -- Google admin (email is matched to the verified Google identity).
-   INSERT INTO Admin (email, display_name)
-   VALUES ('admin@example.edu', 'Assignment Hub Admin');
-
-   -- Microsoft admin (use immutable Entra tenant and user Object IDs).
-   INSERT INTO Admin (email, display_name, microsoft_tenant_id, microsoft_object_id)
-   VALUES ('admin@example.edu', 'Assignment Hub Admin',
-           '<tenant-guid>', '<user-object-guid>')
-   ON DUPLICATE KEY UPDATE
-     microsoft_tenant_id = VALUES(microsoft_tenant_id),
-     microsoft_object_id = VALUES(microsoft_object_id);
+   INSERT IGNORE INTO User_Role (user_id, role_id)
+   SELECT u.user_id, r.role_id
+   FROM User_Account u
+   JOIN Role r ON r.role_code = 'super_admin'   -- or support_admin / analytics_viewer
+   WHERE u.email = 'admin@example.edu';
    ```
 
 5. Recreate the backend so it picks up the env: `docker compose up -d backend`.
@@ -280,10 +267,8 @@ Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The
 | Method | Path                          | Auth | Returns / does                                       |
 |--------|-------------------------------|------|------------------------------------------------------|
 | GET    | `/api/health`                 | —    | `{ status, db }` — verifies the DB connection        |
-| GET    | `/api/admin/auth/google`      | —    | Starts allowlisted admin Google OAuth                |
-| GET    | `/api/admin/auth/microsoft`   | —    | Starts allowlisted admin Microsoft OAuth             |
-| GET    | `/api/admin/me`               | Admin | Current `Admin` identity                             |
-| POST   | `/api/admin/auth/logout`      | Admin | Destroys the admin session                           |
+| GET    | `/api/admin/me`               | Admin permission | Current account plus its `roles` and `permissions` |
+| POST   | `/api/admin/auth/logout`      | Session | Destroys the session — the same one the student app uses |
 | GET    | `/api/admin/*`                | Admin | Monitoring and business analytics endpoints          |
 | GET    | `/api/auth/google`            | —    | Redirects to Google's consent screen                 |
 | GET    | `/api/auth/google/callback`   | —    | Exchanges code, upserts user + tokens, starts session |
@@ -614,7 +599,7 @@ assignment-hub/
 │       ├── services/
 │       │   ├── mailer.js           # nodemailer over SMTP; logs instead when unconfigured
 │       │   ├── notificationSender.js # the 5-minute reminder pass (FR-07)
-│       │   ├── adminIdentity.js    # allowlisted Admin lookup (never creates Student)
+│       │   ├── adminIdentity.js    # email / Entra id normalisation helpers
 │       │   ├── adminMetrics.js     # monitoring dashboard aggregates
 │       │   ├── analytics.js        # Product_Event validation + safeTrackEvent
 │       │   ├── businessMetrics.js  # aggregate adoption and usage metrics
@@ -632,15 +617,14 @@ assignment-hub/
     ├── index.html            # bare Vite entry (fonts are injected from GlobalStyles.jsx)
     └── src/
         ├── main.jsx          # React entry
-        ├── App.jsx           # router: student routes + /admin/login + protected /admin/*
+        ├── App.jsx           # router: student routes + protected /admin/*
         ├── theme.js          # design tokens: colours, font, radii, shadows, Thai day/month names
         ├── tasks.js          # shared task model: STATUS, filters, isDone, withDerived, date fmt
         ├── useAssignments.js # shared hook: fetch + status/delete/edit handlers
         ├── analytics.js      # trackClientEvent — allow-listed, failure-swallowing
         ├── GlobalStyles.jsx  # injects the Maitree webfont + base CSS, sets lang="th"
         ├── pages/
-        │   ├── LoginPage.jsx    # student Google/Microsoft OAuth
-        │   ├── AdminLoginPage.jsx # separate allowlisted admin OAuth
+        │   ├── LoginPage.jsx    # the one login — Google/Microsoft OAuth
         │   ├── HomePage.jsx     # dashboard summary + the Classroom sync toolbar
         │   ├── AssignmentsPage.jsx # the task table
         │   ├── AssignmentDetailPage.jsx # one task in full, resolved from the same list

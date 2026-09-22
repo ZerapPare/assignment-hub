@@ -1,185 +1,41 @@
-const crypto = require('crypto');
+// What is left of the separate administrator login.
+//
+// There used to be a second OAuth flow here — its own state cookie, its own
+// Google and Microsoft callbacks, its own allowlist lookup — because `Admin`
+// and `Student` were different tables and an administrator simply had no row
+// the ordinary login could find. Since migration 013 there is one user table,
+// and since 012 the roles on that row decide everything, so administrators sign
+// in through /login like everyone else.
+//
+// Nobody becomes an administrator by logging in: signing in creates an ordinary
+// account, and it takes a User_Role grant to make the console reachable. That
+// is the same guarantee the old allowlist gave, expressed in the access model
+// rather than in a second login page.
+
 const express = require('express');
-const { jwtVerify } = require('jose');
-const {
-  CLIENT_ID,
-  FRONTEND_URL,
-  MS_ADMIN_REDIRECT_URL,
-  MS_AUTHORIZE_URL,
-  MS_CLIENT_ID,
-  MS_CLIENT_SECRET,
-  MS_TOKEN_URL,
-  MS_ADMIN_TENANT_IDS,
-  adminOauth2,
-  msJwks,
-} = require('../config');
-const { logError } = require('../services/errorLogger');
-const { completeAdminLogin, normalizeMicrosoftId } = require('../services/adminIdentity');
 const { requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
-const ADMIN_OAUTH_PURPOSE = 'admin_login';
 
-function beginAdminOAuth(req, provider) {
-  const state = crypto.randomBytes(16).toString('hex');
-  req.session.adminOAuthState = state;
-  req.session.adminOAuthPurpose = ADMIN_OAUTH_PURPOSE;
-  req.session.adminOAuthProvider = provider;
-  return state;
-}
-
-function checkAdminOAuthState(req, provider) {
-  const expected = req.session.adminOAuthState;
-  const purpose = req.session.adminOAuthPurpose;
-  const expectedProvider = req.session.adminOAuthProvider;
-  delete req.session.adminOAuthState;
-  delete req.session.adminOAuthPurpose;
-  delete req.session.adminOAuthProvider;
-  return Boolean(expected)
-    && purpose === ADMIN_OAUTH_PURPOSE
-    && expectedProvider === provider
-    && req.query.state === expected;
-}
-
-function adminLoginRedirect(res, error) {
-  return res.redirect(`${FRONTEND_URL}/admin/login?error=${encodeURIComponent(error)}`);
-}
-
-function getTrustedMicrosoftIdentity(payload) {
-  const tenantId = normalizeMicrosoftId(payload?.tid);
-  const objectId = normalizeMicrosoftId(payload?.oid);
-  if (!tenantId || !objectId || !MS_ADMIN_TENANT_IDS.includes(tenantId)) return null;
-
-  const expectedIssuer = `https://login.microsoftonline.com/${tenantId}/v2.0`;
-  if (String(payload?.iss || '').toLowerCase() !== expectedIssuer) return null;
-  return { tenantId, objectId };
-}
-
-function establishAdminSession(req, admin) {
-  return new Promise((resolve, reject) => {
-    req.session.regenerate((regenerateError) => {
-      if (regenerateError) return reject(regenerateError);
-      req.session.userId = null;
-      req.session.adminId = admin.admin_id;
-      req.session.authType = 'admin';
-      req.session.save((saveError) => {
-        if (saveError) return reject(saveError);
-        resolve();
-      });
-    });
-  });
-}
-
-router.get('/api/admin/auth/google', (req, res) => {
-  const url = adminOauth2.generateAuthUrl({
-    access_type: 'online',
-    prompt: 'select_account',
-    state: beginAdminOAuth(req, 'google'),
-    scope: ['openid', 'email', 'profile'],
-  });
-  res.redirect(url);
-});
-
-router.get('/api/admin/auth/google/callback', async (req, res) => {
-  if (!checkAdminOAuthState(req, 'google')) return adminLoginRedirect(res, 'state');
-  if (req.query.error || !req.query.code) return adminLoginRedirect(res, 'oauth');
-
-  try {
-    const { tokens } = await adminOauth2.getToken(req.query.code);
-    const ticket = await adminOauth2.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    if (payload.email_verified !== true) return adminLoginRedirect(res, 'forbidden');
-
-    const admin = await completeAdminLogin({
-      provider: 'google',
-      email: payload.email,
-      name: payload.name || payload.email,
-    });
-    if (!admin) return adminLoginRedirect(res, 'forbidden');
-
-    await establishAdminSession(req, admin);
-    return res.redirect(`${FRONTEND_URL}/admin`);
-  } catch (err) {
-    void logError(err, req, { source: 'admin-auth', statusCode: 500 });
-    console.error('[admin-auth] Google callback failed:', req.requestId, err.code || 'unknown');
-    return adminLoginRedirect(res, 'oauth');
-  }
-});
-
-router.get('/api/admin/auth/microsoft', (req, res) => {
-  const url = new URL(MS_AUTHORIZE_URL);
-  url.searchParams.set('client_id', MS_CLIENT_ID || '');
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('redirect_uri', MS_ADMIN_REDIRECT_URL);
-  url.searchParams.set('response_mode', 'query');
-  url.searchParams.set('state', beginAdminOAuth(req, 'microsoft'));
-  url.searchParams.set('scope', 'openid email profile');
-  res.redirect(url.toString());
-});
-
-router.get('/api/admin/auth/microsoft/callback', async (req, res) => {
-  if (!checkAdminOAuthState(req, 'microsoft')) return adminLoginRedirect(res, 'state');
-  if (req.query.error || !req.query.code) return adminLoginRedirect(res, 'oauth');
-
-  try {
-    const tokenRes = await fetch(MS_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: MS_CLIENT_ID || '',
-        client_secret: MS_CLIENT_SECRET || '',
-        code: req.query.code,
-        redirect_uri: MS_ADMIN_REDIRECT_URL,
-        grant_type: 'authorization_code',
-        scope: 'openid email profile',
-      }),
-    });
-    const tokens = await tokenRes.json();
-    if (!tokenRes.ok || !tokens.id_token) {
-      throw new Error('admin Microsoft token exchange failed');
-    }
-
-    const { payload } = await jwtVerify(tokens.id_token, msJwks, { audience: MS_CLIENT_ID });
-    const identity = getTrustedMicrosoftIdentity(payload);
-    if (!identity) return adminLoginRedirect(res, 'forbidden');
-    const email = payload.email || payload.preferred_username;
-    const admin = await completeAdminLogin({
-      provider: 'microsoft',
-      email,
-      name: payload.name || email,
-      microsoftTenantId: identity.tenantId,
-      microsoftObjectId: identity.objectId,
-    });
-    if (!admin) return adminLoginRedirect(res, 'forbidden');
-
-    await establishAdminSession(req, admin);
-    return res.redirect(`${FRONTEND_URL}/admin`);
-  } catch (err) {
-    void logError(err, req, { source: 'admin-auth', statusCode: 500 });
-    console.error('[admin-auth] Microsoft callback failed:', req.requestId, err.code || 'unknown');
-    return adminLoginRedirect(res, 'oauth');
-  }
-});
-
-// requireAdmin only, deliberately no requirePermission: an administrator who
-// has not been granted a role yet must still be able to read back an empty
-// permission list, otherwise the console can only bounce them to the login page
-// they just came from.
+// requireAdmin means "holds at least one administrative permission", so an
+// account that can open the console can always read back what it may do in it.
 router.get('/api/admin/me', requireAdmin, (req, res) => {
   res.json({
-    admin_id: Number(req.admin.admin_id),
-    email: req.admin.email,
-    display_name: req.admin.display_name || null,
-    roles: req.admin.roles || [],
-    permissions: req.admin.permissions || [],
+    user_id: Number(req.account.user_id),
+    // admin_id is kept as an alias of user_id so the console keeps working
+    // while the two ids are still the same thing to it.
+    admin_id: Number(req.account.user_id),
+    email: req.account.email,
+    display_name: req.account.full_name || null,
+    roles: req.account.roles,
+    permissions: req.account.permissions,
   });
 });
 
+// Kept at its old path so the console's logout button needs no change. It is
+// now the same session as the student app, so this logs the person out of both.
 router.post('/api/admin/auth/logout', (req, res) => {
-  if (req.session?.authType !== 'admin' || !Number.isSafeInteger(Number(req.session?.adminId))) {
+  if (!Number.isSafeInteger(Number(req.session?.userId))) {
     return res.status(401).json({ error: 'not authenticated', request_id: req.requestId });
   }
   req.session.destroy((err) => {

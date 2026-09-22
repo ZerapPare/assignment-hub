@@ -202,7 +202,7 @@ router.post('/api/notification-settings/test', requireAuth, async (req, res) => 
   let sample;
   try {
     const [students] = await pool.query(
-      'SELECT student_name, university_email FROM Student WHERE user_id = ? LIMIT 1',
+      'SELECT full_name, email FROM User_Account WHERE user_id = ? LIMIT 1',
       [req.session.userId]
     );
     student = students[0];
@@ -237,10 +237,10 @@ router.post('/api/notification-settings/test', requireAuth, async (req, res) => 
   let delivery;
   try {
     delivery = await sendMail({
-      to: student.university_email,
+      to: student.email,
       subject: buildSubject({ title: task.title, dueDate: task.due_date }),
       text: buildBody({
-        studentName: student.student_name,
+        studentName: student.full_name,
         title: task.title,
         courseName: task.course_name,
         dueDate: task.due_date,
@@ -257,7 +257,7 @@ router.post('/api/notification-settings/test', requireAuth, async (req, res) => 
   // delivered:false means no SMTP account is configured and the mail was only
   // written to the log. Passing that through matters — a panel that says "sent"
   // when nothing left the building sends people looking through an empty inbox.
-  res.json({ ok: true, to: student.university_email, delivered: delivery.delivered !== false });
+  res.json({ ok: true, to: student.email, delivered: delivery.delivered !== false });
 });
 
 module.exports = router;

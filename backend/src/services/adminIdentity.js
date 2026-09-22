@@ -1,4 +1,10 @@
-const pool = require('../db');
+// Identity normalisation helpers.
+//
+// This module used to own completeAdminLogin, which looked an administrator up
+// in the `Admin` allowlist during a login flow of its own. Migration 013 folded
+// that table into User_Account and roles replaced the allowlist, so the lookup
+// is gone; the normalisers stay because they are what keep an email address or
+// a Microsoft object id comparable no matter how a provider spells it.
 
 const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -12,58 +18,4 @@ function normalizeMicrosoftId(value) {
   return GUID_PATTERN.test(id) ? id : null;
 }
 
-async function completeAdminLogin({
-  provider = 'google',
-  email,
-  name,
-  microsoftTenantId,
-  microsoftObjectId,
-}) {
-  const normalizedEmail = normalizeEmail(email);
-  let rows;
-
-  if (provider === 'microsoft') {
-    const tenantId = normalizeMicrosoftId(microsoftTenantId);
-    const objectId = normalizeMicrosoftId(microsoftObjectId);
-    if (!tenantId || !objectId) return null;
-
-    [rows] = await pool.query(
-      `SELECT admin_id, email, display_name, is_active
-       FROM Admin
-       WHERE microsoft_tenant_id = ? AND microsoft_object_id = ?
-       LIMIT 1`,
-      [tenantId, objectId]
-    );
-  } else if (provider === 'google') {
-    if (!normalizedEmail || !normalizedEmail.includes('@')) return null;
-    [rows] = await pool.query(
-      `SELECT admin_id, email, display_name, is_active
-       FROM Admin
-       WHERE email = ?
-       LIMIT 1`,
-      [normalizedEmail]
-    );
-  } else {
-    return null;
-  }
-
-  const admin = rows[0];
-  if (!admin || Number(admin.is_active) !== 1) return null;
-
-  const displayName = String(name || '').trim().slice(0, 255) || null;
-  await pool.query(
-    `UPDATE Admin
-     SET last_login_at = NOW(),
-         display_name = COALESCE(display_name, ?)
-     WHERE admin_id = ?`,
-    [displayName, admin.admin_id]
-  );
-
-  return {
-    admin_id: Number(admin.admin_id),
-    email: normalizeEmail(admin.email),
-    display_name: admin.display_name || displayName || null,
-  };
-}
-
-module.exports = { completeAdminLogin, normalizeEmail, normalizeMicrosoftId };
+module.exports = { normalizeEmail, normalizeMicrosoftId };

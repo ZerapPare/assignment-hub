@@ -3,9 +3,9 @@ const DEV_SEED_TOKEN_PREFIX = 'dev-seed:';
 const MOCK_ID_PREFIX = 'MOCK-';
 const ALLOWED_STATUSES = new Set(['active', 'suspended']);
 const REQUIRED_STUDENT_COLUMNS = [
-  'user_id', 'student_id', 'student_name', 'university_email', 'university_id',
+  'user_id', 'student_id', 'full_name', 'email', 'university_id',
   'gg_access_token', 'gg_refresh_token', 'ms_access_token', 'ms_refresh_token',
-  'role', 'account_status', 'created_at', 'last_login_at', 'last_seen_at',
+  'user_type', 'account_status', 'created_at', 'last_login_at', 'last_seen_at',
 ];
 
 const MOCK_UNIVERSITIES = [
@@ -91,21 +91,21 @@ async function assertSchema(db) {
     throw new Error('University.email_domain must be unique; apply migrations/001_identity.sql first');
   }
 
-  const [columns] = await db.query('SHOW COLUMNS FROM Student');
+  const [columns] = await db.query('SHOW COLUMNS FROM User_Account');
   const availableColumns = new Set(columns.map((column) => column.Field));
   const missingColumns = REQUIRED_STUDENT_COLUMNS.filter((column) => !availableColumns.has(column));
   if (missingColumns.length) {
     throw new Error(
-      `Student schema is missing ${missingColumns.join(', ')}; apply migrations/005_admin_monitoring.sql first`
+      `User_Account schema is missing ${missingColumns.join(', ')}; apply migrations/005_admin_monitoring.sql first`
     );
   }
 
-  const [studentIndexes] = await db.query('SHOW INDEX FROM Student');
-  if (!hasUniqueIndex(studentIndexes, ['university_email'])) {
-    throw new Error('Student.university_email must be unique; apply the current init.sql first');
+  const [studentIndexes] = await db.query('SHOW INDEX FROM User_Account');
+  if (!hasUniqueIndex(studentIndexes, ['email'])) {
+    throw new Error('User_Account.email must be unique; apply the current init.sql first');
   }
   if (!hasUniqueIndex(studentIndexes, ['student_id', 'university_id'])) {
-    throw new Error('Student identity index is missing; apply migrations/001_identity.sql first');
+    throw new Error('User_Account identity index is missing; apply migrations/001_identity.sql first');
   }
 }
 
@@ -163,8 +163,8 @@ async function seedMockUsers({
 
       const [emailRows] = await connection.query(
         `SELECT user_id, student_id
-         FROM Student
-         WHERE university_email = ?
+         FROM User_Account
+         WHERE email = ?
          LIMIT 1
          FOR UPDATE`,
         [user.email]
@@ -175,8 +175,8 @@ async function seedMockUsers({
       }
 
       const collisionParams = [user.studentId, universityId];
-      let collisionQuery = `SELECT user_id, university_email
-                            FROM Student
+      let collisionQuery = `SELECT user_id, email
+                            FROM User_Account
                             WHERE student_id = ? AND university_id = ?`;
       if (existing) {
         collisionQuery += ' AND user_id <> ?';
@@ -197,10 +197,10 @@ async function seedMockUsers({
 
       if (existing) {
         await connection.query(
-          `UPDATE Student
-           SET student_id = ?, student_name = ?, university_id = ?,
+          `UPDATE User_Account
+           SET student_id = ?, full_name = ?, university_id = ?,
                gg_access_token = NULL, ms_access_token = NULL,
-               gg_refresh_token = ?, ms_refresh_token = ?, role = 'student',
+               gg_refresh_token = ?, ms_refresh_token = ?, user_type = 'student',
                account_status = ?, last_login_at = ?, last_seen_at = ?
            WHERE user_id = ?`,
           [user.studentId, user.name, universityId, googleToken, microsoftToken,
@@ -208,38 +208,28 @@ async function seedMockUsers({
         );
         updatedCount++;
       } else {
-        // Student is a subtype of User_Account and its primary key is that
-        // foreign key, so the account row has to exist first and hand down the
-        // id. Runs on the seeder's own connection to stay inside its
-        // transaction — a rollback must not leave the account row behind.
-        const [account] = await connection.query(
-          `INSERT INTO User_Account (email, display_name, user_type, created_at)
-           VALUES (?, ?, 'student', ?)
-           ON DUPLICATE KEY UPDATE user_id = LAST_INSERT_ID(user_id)`,
-          [user.email, user.name, daysAgo(now, user.createdDaysAgo)]
-        );
         await connection.query(
-          `INSERT INTO Student (
-             user_id, student_id, student_name, university_email, university_id,
-             gg_refresh_token, ms_refresh_token, role, account_status,
+          `INSERT INTO User_Account (
+             student_id, full_name, email, university_id,
+             gg_refresh_token, ms_refresh_token, user_type, account_status,
              created_at, last_login_at, last_seen_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'student', ?, ?, ?, ?)`,
-          [account.insertId, user.studentId, user.name, user.email, universityId,
+           ) VALUES (?, ?, ?, ?, ?, ?, 'student', ?, ?, ?, ?)`,
+          [user.studentId, user.name, user.email, universityId,
             googleToken, microsoftToken, user.status,
             daysAgo(now, user.createdDaysAgo), lastLoginAt, lastSeenAt]
         );
         insertedCount++;
       }
 
-      // Keep Student.role and User_Role in agreement on both paths. The
-      // denormalised column drives the metrics queries; User_Role is what the
-      // permission checks read.
+      // Keep user_type and User_Role in agreement on both paths. The column is
+      // what the metrics queries filter on; User_Role is what decides access.
+      // Runs on the seeder's own connection so a rollback takes it with it.
       await connection.query(
         `INSERT IGNORE INTO User_Role (user_id, role_id)
          SELECT s.user_id, r.role_id
-         FROM Student s
+         FROM User_Account s
          JOIN Role r ON r.role_code = 'student'
-         WHERE s.university_email = ?`,
+         WHERE s.email = ?`,
         [user.email]
       );
     }

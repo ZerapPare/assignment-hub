@@ -64,13 +64,16 @@ async function writeAudit(executor, adminUserId, action, targetType, targetId, d
 }
 
 function userSelect() {
-  return `SELECT s.user_id, s.student_id, s.student_name, s.university_email,
-                 u.university_name, s.role, s.account_status, s.created_at,
+  // full_name/email are aliased back to the names the console already renders,
+  // so folding Student into User_Account stays invisible to the frontend.
+  return `SELECT s.user_id, s.student_id,
+                 s.full_name AS student_name, s.email AS university_email,
+                 u.university_name, s.user_type, s.account_status, s.created_at,
                  s.last_login_at, s.last_seen_at,
                  s.gg_refresh_token IS NOT NULL AS google_connected,
                  s.ms_refresh_token IS NOT NULL AS microsoft_connected,
                  COALESCE(ac.assignment_count, 0) AS assignment_count
-          FROM Student s
+          FROM User_Account s
           LEFT JOIN University u ON u.university_id = s.university_id
           LEFT JOIN (
             SELECT c.student_id, COUNT(*) AS assignment_count
@@ -95,7 +98,7 @@ router.get('/api/admin/users', requirePermission(P.USER_READ), asyncRoute(async 
   const page = pagination(req.query, 25);
   if (!page) return res.status(400).json({ error: 'invalid pagination', request_id: req.requestId });
 
-  const clauses = ['s.role = ?'];
+  const clauses = ['s.user_type = ?'];
   const params = ['student'];
   const search = String(req.query.search || '').trim().slice(0, 100);
   const status = String(req.query.status || '').trim();
@@ -114,7 +117,7 @@ router.get('/api/admin/users', requirePermission(P.USER_READ), asyncRoute(async 
     else return res.status(400).json({ error: 'invalid provider filter', request_id: req.requestId });
   }
   if (search) {
-    clauses.push('(s.student_name LIKE ? OR s.university_email LIKE ? OR s.student_id LIKE ?)');
+    clauses.push('(s.full_name LIKE ? OR s.email LIKE ? OR s.student_id LIKE ?)');
     const pattern = `%${search}%`;
     params.push(pattern, pattern, pattern);
   }
@@ -127,7 +130,7 @@ router.get('/api/admin/users', requirePermission(P.USER_READ), asyncRoute(async 
        LIMIT ? OFFSET ?`,
       [...params, page.pageSize, page.offset]
     ),
-    pool.query(`SELECT COUNT(*) AS total FROM Student s${where}`, params),
+    pool.query(`SELECT COUNT(*) AS total FROM User_Account s${where}`, params),
   ]);
   const total = Number(totalResult[0][0]?.total || 0);
   res.json({
@@ -147,7 +150,7 @@ router.get('/api/admin/users/:id', requirePermission(P.USER_READ), asyncRoute(as
 
   const [userResult, courseResult, statusResult, errorsResult, auditsResult] = await Promise.all([
     pool.query(
-      `${userSelect()} WHERE s.role = 'student' AND s.user_id = ?`,
+      `${userSelect()} WHERE s.user_type = 'student' AND s.user_id = ?`,
       [userId]
     ),
     pool.query('SELECT COUNT(*) AS course_count FROM Course WHERE student_id = ?', [userId]),
@@ -184,7 +187,7 @@ router.get('/api/admin/users/:id', requirePermission(P.USER_READ), asyncRoute(as
   const statusTotals = Object.fromEntries(
     assignmentStatusCounts.map((row) => [row.status, row.count])
   );
-  await writeAudit(pool, req.session.adminId, 'USER_VIEW_DETAIL', 'user', userId);
+  await writeAudit(pool, req.session.userId, 'USER_VIEW_DETAIL', 'user', userId);
   res.json({
     user: booleanFields(userResult[0][0]),
     usage: {
@@ -216,23 +219,27 @@ router.patch('/api/admin/users/:id/status', requirePermission(P.USER_SUSPEND), a
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    // Now that everyone lives in one table this is a plain id comparison. It
+    // used to match on email address, because the acting administrator and the
+    // target student were rows in two different tables with two different key
+    // spaces and the address was the only thing they had in common.
+    if (userId === Number(req.session.userId)) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'administrators cannot change their own status', request_id: req.requestId });
+    }
     const [users] = await conn.query(
-      'SELECT account_status, university_email FROM Student WHERE role = \'student\' AND user_id = ? FOR UPDATE',
+      'SELECT account_status FROM User_Account WHERE user_type = \'student\' AND user_id = ? FOR UPDATE',
       [userId]
     );
     if (!users.length) {
       await conn.rollback();
       return res.status(404).json({ error: 'not found', request_id: req.requestId });
     }
-    if (String(users[0].university_email || '').toLowerCase() === String(req.admin?.email || '').toLowerCase()) {
-      await conn.rollback();
-      return res.status(400).json({ error: 'administrators cannot change their own status', request_id: req.requestId });
-    }
     const previousStatus = users[0].account_status;
-    await conn.query('UPDATE Student SET account_status = ? WHERE user_id = ?', [status, userId]);
+    await conn.query('UPDATE User_Account SET account_status = ? WHERE user_id = ?', [status, userId]);
     await writeAudit(
       conn,
-      req.session.adminId,
+      req.session.userId,
       status === 'suspended' ? 'USER_SUSPEND' : 'USER_UNSUSPEND',
       'user',
       userId,
@@ -303,9 +310,9 @@ router.get('/api/admin/errors', requirePermission(P.ERROR_LOG_READ), asyncRoute(
     pool.query(
       `SELECT e.error_id, e.occurred_at, e.level, e.source, e.method, e.path,
               e.status_code, e.error_code, e.message, e.user_id, e.request_id,
-              s.student_name, s.university_email
+              s.full_name, s.email
        FROM System_Error_Log e
-       LEFT JOIN Student s ON s.user_id = e.user_id${where}
+       LEFT JOIN User_Account s ON s.user_id = e.user_id${where}
        ORDER BY e.occurred_at DESC, e.error_id DESC
        LIMIT ? OFFSET ?`,
       [...params, page.pageSize, page.offset]
@@ -332,15 +339,15 @@ router.get('/api/admin/errors/:id', requirePermission(P.ERROR_LOG_READ), asyncRo
   const [rows] = await pool.query(
     `SELECT e.error_id, e.occurred_at, e.level, e.source, e.method, e.path,
             e.status_code, e.error_code, e.message, e.user_id, e.request_id, e.metadata,
-            s.student_name, s.university_email
+            s.full_name, s.email
      FROM System_Error_Log e
-     LEFT JOIN Student s ON s.user_id = e.user_id
+     LEFT JOIN User_Account s ON s.user_id = e.user_id
      WHERE e.error_id = ? LIMIT 1`,
     [errorId]
   );
   if (!rows.length) return res.status(404).json({ error: 'not found', request_id: req.requestId });
 
-  await writeAudit(pool, req.session.adminId, 'ERROR_VIEW_DETAIL', 'error', errorId);
+  await writeAudit(pool, req.session.userId, 'ERROR_VIEW_DETAIL', 'error', errorId);
   res.json({ error: sanitizeErrorLog(rows[0]) });
 }));
 

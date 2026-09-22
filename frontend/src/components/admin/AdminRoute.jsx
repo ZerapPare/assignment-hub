@@ -7,6 +7,7 @@ function AdminRoute() {
   const [admin, setAdmin] = useState(null);
   const [loading, setLoading] = useState(true);
   const [redirect, setRedirect] = useState(false);
+  const [denied, setDenied] = useState(false);
   const [error, setError] = useState(null);
 
   const loadAdmin = useCallback(async () => {
@@ -16,8 +17,16 @@ function AdminRoute() {
       const currentAdmin = await adminRequest('/api/admin/me');
       setAdmin(currentAdmin);
     } catch (err) {
-      if (err.status === 401 || err.status === 403) {
+      // 401 and 403 mean different things now that there is one login for
+      // everyone: 401 is "nobody is signed in", 403 is "you are signed in but
+      // hold no administrative role". Sending the second case to the login page
+      // would just loop them back here.
+      if (err.status === 401) {
         setRedirect(true);
+        return;
+      }
+      if (err.status === 403) {
+        setDenied(true);
         return;
       }
       setError(err.message);
@@ -28,8 +37,17 @@ function AdminRoute() {
 
   useEffect(() => { loadAdmin(); }, [loadAdmin]);
 
-  if (redirect) return <Navigate to="/admin/login" replace />;
+  if (redirect) return <Navigate to="/login" replace />;
   if (loading) return <AccessMessage title="กำลังตรวจสอบสิทธิ์" detail="กำลังโหลดพื้นที่ผู้ดูแลระบบ…" />;
+  if (denied) {
+    return (
+      <AccessMessage
+        title="ไม่มีสิทธิ์เข้าถึงพื้นที่ผู้ดูแล"
+        detail="บัญชีนี้เข้าสู่ระบบแล้ว แต่ยังไม่ได้รับบทบาทผู้ดูแล ติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์"
+        action={<a href="/home" style={styles.primaryButton}>กลับหน้าแรก</a>}
+      />
+    );
+  }
   if (error) {
     return <AccessMessage title="เปิดพื้นที่ผู้ดูแลไม่ได้" detail={error} action={<button type="button" onClick={loadAdmin} style={styles.primaryButton}>ลองอีกครั้ง</button>} />;
   }
