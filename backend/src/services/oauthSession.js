@@ -3,7 +3,8 @@ const pool = require('../db');
 const { FRONTEND_URL } = require('../config');
 const { findOrCreateUniversity, studentIdFromEmail, trySetStudentId } = require('./identity');
 const { tryGrantRole } = require('./rbac');
-const { ROLES } = require('../rbac/permissions');
+const { ADMIN_PERMISSION_CODES, ROLES } = require('../rbac/permissions');
+const { loadAccount } = require('../middleware/auth');
 const { safeTrackEvent } = require('./analytics');
 
 const PROVIDERS = {
@@ -101,10 +102,19 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
   return userId;
 }
 
-function finishOAuth(req, res, provider) {
+async function finishOAuth(req, res, provider) {
   const wasLink = Boolean(req.session.linkMode);
   delete req.session.linkMode;
-  res.redirect(wasLink ? `${FRONTEND_URL}/settings?linked=${provider}` : `${FRONTEND_URL}/home`);
+  if (wasLink) {
+    res.redirect(`${FRONTEND_URL}/settings?linked=${provider}`);
+    return;
+  }
+
+  const account = await loadAccount(req.session.userId);
+  const isAdmin = account?.permissions?.some((permission) =>
+    ADMIN_PERMISSION_CODES.includes(permission)
+  );
+  res.redirect(`${FRONTEND_URL}${isAdmin ? '/admin' : '/home'}`);
 }
 
 module.exports = { PROVIDERS, beginOAuth, checkState, completeLogin, finishOAuth };

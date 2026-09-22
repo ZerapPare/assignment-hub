@@ -58,7 +58,7 @@ router.get('/api/auth/google/callback', async (req, res) => {
       tokens,
       linkMode: wasLink,
     });
-    finishOAuth(req, res, 'google');
+    await finishOAuth(req, res, 'google');
   } catch (err) {
     void logError(err, req, { source: 'auth', statusCode: 500 });
     console.error('[auth] callback failed:', req.requestId, err.code || 'unknown');
@@ -115,7 +115,7 @@ router.get('/api/auth/microsoft/callback', async (req, res) => {
       tokens,
       linkMode: wasLink,
     });
-    finishOAuth(req, res, 'microsoft');
+    await finishOAuth(req, res, 'microsoft');
   } catch (err) {
     void logError(err, req, { source: 'auth', statusCode: 500 });
     console.error('[auth] microsoft callback failed:', req.requestId, err.code || 'unknown');

@@ -17,6 +17,7 @@ import AdminSystemPage from './pages/admin/AdminSystemPage';
 import AdminBusinessPage from './pages/admin/AdminBusinessPage';
 import Schedule from './pages/Schedule';
 import WeeklyView from './pages/WeeklyView';
+import StudentRoute from './components/StudentRoute';
 
 function App() {
   return (
@@ -28,13 +29,15 @@ function App() {
             else. Kept as a redirect so existing bookmarks still land somewhere
             useful. */}
         <Route path="/admin/login" element={<Navigate to="/login" replace />} />
-        <Route path="/home" element={<HomePage />} />
-        <Route path="/assignments" element={<AssignmentsPage />} />
-        <Route path="/assignments/:id" element={<AssignmentDetailPage />} />
-        <Route path="/stream" element={<StreamPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/schedule" element={<Schedule />} />
-        <Route path="/weekly" element={<WeeklyView />} />
+        <Route element={<StudentRoute />}>
+          <Route path="/home" element={<HomePage />} />
+          <Route path="/assignments" element={<AssignmentsPage />} />
+          <Route path="/assignments/:id" element={<AssignmentDetailPage />} />
+          <Route path="/stream" element={<StreamPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/schedule" element={<Schedule />} />
+          <Route path="/weekly" element={<WeeklyView />} />
+        </Route>
         <Route path="/admin" element={<AdminRoute />}>
           <Route element={<AdminLayout />}>
             <Route index element={<Navigate to="dashboard" replace />} />
