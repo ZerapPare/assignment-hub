@@ -54,6 +54,19 @@ CREATE TABLE Student (
     INDEX idx_student_university_id (university_id)
 );
 
+CREATE TABLE IF NOT EXISTS Schedule_Setting (
+    user_id       INT PRIMARY KEY,
+    work_start    TIME NOT NULL DEFAULT '08:00:00',
+    work_end      TIME NOT NULL DEFAULT '18:00:00',
+    lunch_start   TIME NOT NULL DEFAULT '12:00:00',
+    lunch_end     TIME NOT NULL DEFAULT '13:00:00',
+    slot_step_min INT NOT NULL DEFAULT 15,
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP 
+                  ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_schedule_setting_student
+        FOREIGN KEY (user_id) REFERENCES Student(user_id) ON DELETE CASCADE
+);
+
 CREATE TABLE Admin (
     admin_id      INT AUTO_INCREMENT PRIMARY KEY,
     email         VARCHAR(255) NOT NULL UNIQUE,
@@ -90,6 +103,21 @@ CREATE TABLE Course (
     CONSTRAINT fk_course_student FOREIGN KEY (student_id) REFERENCES Student(user_id)
 );
 
+CREATE TABLE IF NOT EXISTS Announcement (
+    announcement_id           INT AUTO_INCREMENT PRIMARY KEY,
+    external_announcement_id  VARCHAR(100),
+    title                     VARCHAR(255),
+    text_content              TEXT NOT NULL,
+    creator_name              VARCHAR(255),
+    creator_email             VARCHAR(255),
+    origin_link               VARCHAR(500),
+    posted_at                 DATETIME,
+    course_id                 INT NOT NULL,
+    CONSTRAINT fk_announcement_course
+        FOREIGN KEY (course_id) REFERENCES Course(course_id)
+        ON DELETE CASCADE
+);
+
 CREATE TABLE Assignment (
     assignment_id           INT AUTO_INCREMENT PRIMARY KEY,
     external_assignment_id  VARCHAR(100),
@@ -101,13 +129,17 @@ CREATE TABLE Assignment (
 );
 
 CREATE TABLE Assignment_Detail (
-    assignment_id   INT PRIMARY KEY,
-    description     TEXT,
-    due_date        DATETIME,
-    status          VARCHAR(50),
+    assignment_id     INT PRIMARY KEY,
+    description       TEXT,
+    due_date          DATETIME,
+    status            VARCHAR(50),
     status_updated_at DATETIME,
-    priority_score  DECIMAL(5,2),
-    CONSTRAINT fk_detail_assignment FOREIGN KEY (assignment_id) REFERENCES Assignment(assignment_id)
+    priority_score    DECIMAL(5,2),
+    time_estimate     INT,
+    max_points        FLOAT DEFAULT NULL,
+    assigned_grade    FLOAT DEFAULT NULL,
+    CONSTRAINT fk_detail_assignment
+      FOREIGN KEY (assignment_id) REFERENCES Assignment(assignment_id)
 );
 
 CREATE TABLE Schedule (

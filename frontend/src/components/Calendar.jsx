@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { C, FONT, WEEKDAYS, TH_MONTHS } from '../theme';
 
-function CalendarEvent({ event }) {
+function CalendarEvent({ event, onClick }) {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
@@ -10,7 +10,13 @@ function CalendarEvent({ event }) {
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <div style={styles.eventBadge}>{event.title}</div>
+      <button
+        type="button"
+        onClick={() => onClick?.(event)}
+        style={styles.eventBadge}
+      >
+        {event.title}
+      </button>
 
       {isHovered && (
         <div style={styles.popup}>
@@ -20,23 +26,47 @@ function CalendarEvent({ event }) {
             กำหนดส่ง:{' '}
             {event.due
               ? `${String(event.due.getHours()).padStart(2, '0')}:${String(
-                  event.due.getMinutes()
-                ).padStart(2, '0')} น.`
+                event.due.getMinutes()
+              ).padStart(2, '0')} น.`
               : '—'}
           </div>
+
         </div>
       )}
     </div>
   );
 }
 
-function CalendarCell({ n, isToday, events }) {
+function CalendarCell({ n, isToday, events, onEventClick, alignPopoverRight }) {
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const cellRef = useRef(null);
+
+  useEffect(() => {
+    if (!isPopoverOpen) return undefined;
+
+    const closeOnOutsideClick = (event) => {
+      if (!cellRef.current?.contains(event.target)) setIsPopoverOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setIsPopoverOpen(false);
+    };
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [isPopoverOpen]);
+
   if (n == null) {
     return <div style={{ ...styles.cell, background: C.pageBg }} />;
   }
 
+  const visibleEvents = events.slice(0, 2);
+
   return (
-    <div style={{ ...styles.cell, background: 'white' }}>
+    <div ref={cellRef} style={{ ...styles.cell, background: 'white' }}>
       <div
         style={{
           ...styles.dateNum,
@@ -49,20 +79,76 @@ function CalendarCell({ n, isToday, events }) {
       </div>
 
       <div style={styles.eventContainer}>
-        {events.slice(0, 2).map((a) => (
-          <CalendarEvent key={a.assignment_id} event={a} />
+        {visibleEvents.map((a) => (
+          <CalendarEvent
+            key={a.assignment_id}
+            event={a}
+            onClick={onEventClick}
+          />
         ))}
         {events.length > 2 && (
-          <div style={styles.moreText}>+ อีก {events.length - 2} งาน</div>
+          <button
+            type="button"
+            style={styles.moreButton}
+            aria-expanded={isPopoverOpen}
+            onClick={() => setIsPopoverOpen(true)}
+          >
+            ดูเพิ่มอีก {events.length - 2} งาน
+          </button>
         )}
       </div>
+
+      {isPopoverOpen && (
+        <div
+          role="dialog"
+          aria-label={`งานทั้งหมดวันที่ ${n}`}
+          style={{
+            ...styles.eventPopover,
+            ...(alignPopoverRight ? { right: 0 } : { left: 0 }),
+          }}
+        >
+          <div style={styles.popoverHeader}>
+            <span>งานวันที่ {n}</span>
+            <button
+              type="button"
+              style={styles.closePopoverButton}
+              onClick={() => setIsPopoverOpen(false)}
+              aria-label="ปิดรายการงาน"
+            >
+              ×
+            </button>
+          </div>
+          <div style={styles.popoverEvents}>
+            {events.map((event) => (
+              <CalendarEvent
+                key={event.assignment_id}
+                event={event}
+                onClick={onEventClick}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function Calendar({ year, month, today, eventsByDate = new Map(), onPrev, onNext }) {
+function Calendar({
+  year,
+  month,
+  today,
+  eventsByDate = new Map(),
+  view = 'month',
+  weekDays = [],
+  onPrev,
+  onNext,
+  onEventClick,
+}) {
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const title = view === 'week' && weekDays.length
+    ? `${weekDays[0].date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })} – ${weekDays[6].date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`
+    : `${TH_MONTHS[month]} ${year + 543}`;
 
   const cells = [];
   for (let i = 0; i < firstWeekday; i++) cells.push(null);
@@ -71,9 +157,7 @@ function Calendar({ year, month, today, eventsByDate = new Map(), onPrev, onNext
   return (
     <div>
       <div style={styles.header}>
-        <span style={styles.title}>
-          {TH_MONTHS[month]} {year + 543}
-        </span>
+        <span style={styles.title}>{title}</span>
         <div style={styles.navWrap}>
           <button type="button" onClick={onPrev} style={styles.navBtn} aria-label="เดือนก่อนหน้า">
             ‹
@@ -84,21 +168,50 @@ function Calendar({ year, month, today, eventsByDate = new Map(), onPrev, onNext
         </div>
       </div>
 
-      <div style={styles.grid}>
-        {WEEKDAYS.map((w) => (
-          <div key={w} style={styles.weekday}>
-            {w}
-          </div>
-        ))}
-        {cells.map((n, i) => (
-          <CalendarCell
-            key={i}
-            n={n}
-            isToday={n != null && n === today}
-            events={n != null ? eventsByDate.get(n) || [] : []}
-          />
-        ))}
-      </div>
+      {view === 'month' ? (
+        <div style={styles.grid}>
+          {WEEKDAYS.map((w) => (
+            <div key={w} style={styles.weekday}>
+              {w}
+            </div>
+          ))}
+
+          {cells.map((n, i) => (
+            <CalendarCell
+              key={`${year}-${month}-${i}`}
+              n={n}
+              isToday={n != null && n === today}
+              events={n != null ? eventsByDate.get(n) || [] : []}
+              onEventClick={onEventClick}
+              alignPopoverRight={i % 7 >= 5}
+            />
+          ))}
+        </div>
+      ) : (
+        <div style={styles.weekGrid}>
+          {weekDays.map(({ date, events }) => (
+            <div key={date.toISOString()} style={styles.weekCell}>
+              <div style={styles.weekDate}>
+                {date.toLocaleDateString('th-TH', {
+                  weekday: 'short',
+                  day: 'numeric',
+                  month: 'short',
+                })}
+              </div>
+
+              <div style={styles.eventContainer}>
+                {events.map((event) => (
+                  <CalendarEvent
+                    key={event.assignment_id}
+                    event={event}
+                    onClick={onEventClick}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -140,7 +253,30 @@ const styles = {
     gap: 1,
     background: C.line,
     border: `1px solid ${C.line}`,
+    borderRadius: 12,
+    overflow: 'visible',
+  },
+  weekGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+    gap: 1,
+    background: C.line,
+    border: `1px solid ${C.line}`,
+    borderRadius: 12,
+    overflow: 'visible',
+  },
+  weekCell: {
+    background: 'white',
+    minHeight: 180,
+    padding: 8,
+    minWidth: 0,
     borderRadius: 8,
+  },
+  weekDate: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: C.navy,
+    marginBottom: 8,
   },
   weekday: {
     fontSize: 13,
@@ -151,20 +287,22 @@ const styles = {
     padding: '12px 0',
   },
   cell: {
-    height: 120,
+    height: 142,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-end',
     padding: '6px 6px 2px',
     boxSizing: 'border-box',
     minWidth: 0,
+    borderRadius: 8,
+    position: 'relative',
   },
   eventContainer: {
     width: '100%',
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
-    marginTop: 'auto',
+    marginTop: 4,
     minWidth: 0,
   },
   eventWrap: {
@@ -177,20 +315,76 @@ const styles = {
     fontSize: 10,
     background: C.pinkBg,
     color: C.pinkDark,
+    cursor: 'pointer',
     padding: '3px 6px',
+    border: 'none',
     borderRadius: 4,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
+    textAlign: 'left',
     textOverflow: 'ellipsis',
     fontWeight: 600,
     width: '100%',
     boxSizing: 'border-box',
+    fontFamily: 'inherit',
   },
   moreText: {
     fontSize: 10,
     color: C.mutedLight,
     textAlign: 'left',
     paddingLeft: 2,
+  },
+  moreButton: {
+    fontSize: 10,
+    color: C.pinkDark,
+    textAlign: 'left',
+    padding: '4px 6px',
+    border: `1px solid ${C.pink}`,
+    borderRadius: 4,
+    background: 'white',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    fontWeight: 600,
+    width: '100%',
+  },
+  eventPopover: {
+    position: 'absolute',
+    top: 'calc(100% + 8px)',
+    zIndex: 200,
+    width: 250,
+    maxHeight: 280,
+    overflowY: 'auto',
+    padding: 10,
+    borderRadius: 10,
+    border: `1px solid ${C.line}`,
+    background: 'white',
+    boxShadow: '0 10px 28px rgba(15, 23, 42, 0.18)',
+    boxSizing: 'border-box',
+  },
+  popoverHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    color: C.navy,
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  closePopoverButton: {
+    width: 24,
+    height: 24,
+    border: 'none',
+    borderRadius: 6,
+    background: C.pageBg,
+    color: C.muted,
+    cursor: 'pointer',
+    fontSize: 18,
+    lineHeight: 1,
+  },
+  popoverEvents: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 5,
   },
   dateNum: {
     display: 'flex',

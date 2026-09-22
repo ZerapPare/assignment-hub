@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import AddTaskModal from '../components/AddTaskModal';
 import BarChart from '../components/BarChart';
 import Calendar from '../components/Calendar';
@@ -17,7 +18,7 @@ import AdPopup from '../components/AdPopup';
 function HomePage() {
   const { student, assignments, setAssignments, loading, error, setError, logout } =
     useAssignments();
-
+  const navigate = useNavigate();
   const [syncing, setSyncing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [cutoffDate, setCutoffDate] = useState(
@@ -28,6 +29,9 @@ function HomePage() {
     return { year: n.getFullYear(), month: n.getMonth() };
   });
   const dashboardTracked = useRef(false);
+
+  const [calendarView, setCalendarView] = useState('month');
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
 
   useEffect(() => {
     if (!student || loading || error || dashboardTracked.current) return;
@@ -49,7 +53,7 @@ function HomePage() {
     setError(null);
     //ad
     setShowAd(true);
-    
+
     try {
       const r = await fetch('/api/classroom/sync', {
         method: 'POST',
@@ -143,8 +147,40 @@ function HomePage() {
     return map;
   }, [view.withDate, cal.year, cal.month]);
 
+  const eventsByDayKey = useMemo(() => {
+    const map = new Map();
+
+    view.withDate
+      .filter((assignment) => assignment.due)
+      .forEach((assignment) => {
+        const due = assignment.due;
+        const key = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(assignment);
+      });
+
+    return map;
+  }, [view.withDate]);
+
+  const weekDays = useMemo(
+    () =>
+      Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(weekStart);
+        date.setDate(date.getDate() + index);
+
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+        return {
+          date,
+          events: eventsByDayKey.get(key) || [],
+        };
+      }),
+    [weekStart, eventsByDayKey]
+  );
+
   const isCurrentMonth = cal.year === view.now.getFullYear() && cal.month === view.now.getMonth();
-  
+
   return (
     <div style={styles.page}>
       <Sidebar active="home" student={student} onLogout={logout} />
@@ -154,7 +190,7 @@ function HomePage() {
         {error && <p style={styles.error}>⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>}
 
         {!loading && !error && (
-          
+
           <>
             <div style={styles.header}>
               <h1 style={styles.title}>แดชบอร์ด</h1>
@@ -239,9 +275,9 @@ function HomePage() {
                     />
                   </div>
                   <div style={styles.card}>
-                  <div style={styles.cardHead}>
-                    <span style={styles.cardTitle}>กำหนดส่งใกล้ถึง</span>
-                  </div>
+                    <div style={styles.cardHead}>
+                      <span style={styles.cardTitle}>กำหนดส่งใกล้ถึง</span>
+                    </div>
                     <DeadlineList
                       items={view.urgentList.map((a) => ({
                         id: a.assignment_id,
@@ -256,13 +292,69 @@ function HomePage() {
               </div>
               <div style={styles.bottomSection}>
                 <div style={{ ...styles.card, background: C.blue, padding: 24 }}>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                    <button
+                      type="button"
+                      style={
+                        calendarView === 'month'
+                          ? styles.primaryBtn
+                          : styles.ghostBtn
+                      }
+                      onClick={() => setCalendarView('month')}
+                    >
+                      เดือน
+                    </button>
+
+                    <button
+                      type="button"
+                      style={
+                        calendarView === 'week'
+                          ? styles.primaryBtn
+                          : styles.ghostBtn
+                      }
+                      onClick={() => {
+                        setCalendarView('week');
+                        setWeekStart(startOfWeek(view.now));
+                      }}
+                    >
+                      สัปดาห์
+                    </button>
+                  </div>
                   <Calendar
                     year={cal.year}
                     month={cal.month}
                     today={isCurrentMonth ? view.now.getDate() : null}
                     eventsByDate={eventsByDate}
-                    onPrev={() => shiftMonth(-1)}
-                    onNext={() => shiftMonth(1)}
+                    view={calendarView}
+                    weekDays={weekDays}
+                    onEventClick={(assignment) => {
+                      navigate(`/assignments/${assignment.assignment_id}`);
+                    }}
+                    onPrev={() => {
+                      if (calendarView === 'month') {
+                        shiftMonth(-1);
+                        return;
+                      }
+
+                      setWeekStart((old) => {
+                        const next = new Date(old);
+                        next.setDate(next.getDate() - 7);
+                        return next;
+                      });
+                    }}
+
+                    onNext={() => {
+                      if (calendarView === 'month') {
+                        shiftMonth(1);
+                        return;
+                      }
+
+                      setWeekStart((old) => {
+                        const next = new Date(old);
+                        next.setDate(next.getDate() + 7);
+                        return next;
+                      });
+                    }}
                   />
                 </div>
               </div>
@@ -283,6 +375,16 @@ function HomePage() {
   );
 }
 
+function startOfWeek(date) {
+  const result = new Date(date);
+  const day = result.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+
+  result.setDate(result.getDate() + diff);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
 const styles = {
   page: {
     minHeight: '100vh',
@@ -292,24 +394,24 @@ const styles = {
     display: 'flex',
     overflow: 'hidden'
   },
-  main: { 
-    flex: 1, 
-    minWidth: 0, 
-    padding: '26px 28px 40px', 
+  main: {
+    flex: 1,
+    minWidth: 0,
+    padding: '26px 28px 40px',
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     height: '100vh',
     overflowY: 'auto'
   },
-  muted: { 
+  muted: {
     color: C.mutedLight,
     fontSize: 13,
-    margin: '8px 0 0' 
+    margin: '8px 0 0'
   },
-  error: { 
+  error: {
     color: C.pinkDark,
-    fontSize: 14 
+    fontSize: 14
   },
   header: {
     display: 'flex',
@@ -327,9 +429,10 @@ const styles = {
     fontSize: 22,
     fontWeight: 700,
     color: C.ink,
-    margin: 0 
+    margin: 0
   },
-  toolbar: { display: 'flex',
+  toolbar: {
+    display: 'flex',
     alignItems: 'center',
     gap: 10,
     flexWrap: 'wrap'
