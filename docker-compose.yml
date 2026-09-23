@@ -68,7 +68,7 @@ services:
       # Compose interpolates this even when the profile is off, so it needs a
       # default rather than a required marker. Keep it in step with
       # `allowedHosts` in frontend/vite.config.js.
-      SITE_HOST: ${SITE_HOST:-assignment-hubb.duckdns.org}
+      SITE_HOST: ${SITE_HOST:-assignment-hub.cskmitl.com}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data        # issued certificates — must persist, or every

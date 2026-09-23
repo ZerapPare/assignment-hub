@@ -14,7 +14,7 @@ export default defineConfig({
     // Vite rejects requests whose Host header it doesn't recognise (DNS-rebinding
     // guard). localhost / 127.0.0.1 are always allowed; any other hostname the dev
     // server is reached through has to be listed here.
-    allowedHosts: ['assignment-hubb.duckdns.org'],
+    allowedHosts: ['assignment-hub.cskmitl.com'],
     hmr: hmrClientPort ? { clientPort: hmrClientPort, protocol: 'wss' } : {},
     watch: {
       usePolling: true, // needed for hot reload to detect file changes in Docker on Windows
