@@ -7,11 +7,11 @@ const router = express.Router();
 
 router.get('/api/me', requireAuth, async (req, res) => {
   try {
-    // Connection state comes from the *refresh* tokens: those are what make
-    // future syncing possible. The token values themselves never leave here.
+    // Connection state comes from the *refresh* tokens — those are what make
+    // future syncing possible. The values themselves never leave here.
     const [rows] = await pool.query(
-      // full_name/email are aliased back to the names the client already uses,
-      // so folding Student into User_Account stays invisible to the frontend.
+      // Aliased to the names the client already uses, so folding Student into
+      // User_Account stayed invisible to the frontend.
       `SELECT s.user_id, s.student_id,
               s.full_name AS student_name, s.email AS university_email,
               s.user_type, s.account_status,
@@ -28,8 +28,8 @@ router.get('/api/me', requireAuth, async (req, res) => {
       ...rows[0],
       google_connected: Boolean(rows[0].google_connected),
       microsoft_connected: Boolean(rows[0].microsoft_connected),
-      // requireAuth already resolved these; they are what the client uses to
-      // decide whether to offer the admin console at all.
+      // Already resolved by requireAuth; the client uses them to decide whether
+      // to offer the admin console.
       roles: req.account.roles,
       permissions: req.account.permissions,
     });

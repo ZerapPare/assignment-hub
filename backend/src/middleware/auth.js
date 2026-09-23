@@ -10,20 +10,18 @@ function updateLastSeen(userId) {
   lastSeenWrites.set(userId, now);
   void pool.query('UPDATE User_Account SET last_seen_at = NOW() WHERE user_id = ?', [userId])
     .catch((err) => {
-      // Activity tracking must not make an otherwise valid request fail.
+      // Activity tracking must not fail an otherwise valid request.
       lastSeenWrites.delete(userId);
       console.error('[auth] last-seen update failed:', userId, err.code || 'unknown');
     });
 }
 
-// One session shape for everybody: req.session.userId and nothing else. There
-// is no "admin mode" any more — what a request may do is decided entirely by
-// the roles attached to that user_id, which is why a single login page can
-// serve both the student app and the admin console.
+// One session shape for everybody: req.session.userId and nothing else. No
+// "admin mode" — the roles on that user_id decide everything, which is why one
+// login page serves both apps.
 //
-// Roles are read on every request rather than cached in the session, so
-// revoking one takes effect immediately instead of at the user's next login.
-// The two queries run in parallel, so this costs one round-trip window.
+// Roles are read every request, not cached in the session, so a revocation
+// takes effect immediately. The two queries run in parallel.
 async function loadAccount(userId) {
   const [[rows], [grants]] = await Promise.all([
     pool.query(
@@ -77,14 +75,10 @@ async function requireAuth(req, res, next) {
   }
 }
 
-// Guards the console shell — the layout and /api/admin/me — for anyone holding
-// at least one administrative permission. Individual endpoints still declare
-// the specific permission they need via requirePermission, so this is about
-// "does the admin console concern you at all", not about what you may do in it.
-//
-// Deliberately permissive about *which* admin permission: an account granted
-// only analytics_viewer must be able to load the console and be told which
-// sections it can open.
+// Guards the console shell — the layout and /api/admin/me. Answers "does the
+// admin console concern you at all"; requirePermission decides what you may do
+// inside it. Permissive about *which* admin permission on purpose, so a
+// narrowly-scoped account can still load the console and see its own sections.
 async function requireAdmin(req, res, next) {
   return requireAuth(req, res, (err) => {
     if (err) return next(err);

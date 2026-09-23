@@ -5,27 +5,21 @@ const { FRONTEND_URL } = require('../config');
 
 const TICK_MS = 5 * 60 * 1000;
 
-// How long a claimed row counts as in-flight. A pass that dies between claiming
-// and sending leaves the claim behind; this is what lets a later pass pick it
-// back up instead of the reminder being lost for good.
+// How long a claim counts as in-flight, so a pass that dies before sending gets
+// swept up later instead of losing the reminder.
 const CLAIM_LEASE_MINUTES = 5;
 
-// Minutes to wait before each retry (UC-8 7a.2). Indexed by how many attempts
-// have already failed, so the first failure waits 5 minutes, the second 30, the
-// third 120 — then the row is out of retries. An SMTP outage that outlasts all
-// three is not a blip and needs a person, which is what the banner is for.
+// Retry delays in minutes (UC-8 7a.2), indexed by attempts already failed. An
+// outage outlasting all three needs a person — that is what the banner is for.
 const RETRY_MINUTES = [5, 30, 120];
 const MAX_ATTEMPTS = RETRY_MINUTES.length + 1; // the first send, plus one per retry slot
 
-// How far either side of today the daily repeat looks (FR-07.2). Without a
-// window, a student carrying thirty unfinished tasks would get thirty mails
-// every morning, which is how people learn to filter the whole sender away.
-// Overdue work stays in range for a week because it can usually still be handed in.
+// How far either side of today the daily repeat looks (FR-07.2). Without it,
+// thirty unfinished tasks means thirty mails every morning — and a filter rule.
+// Overdue work stays in range: it can usually still be handed in.
 const DAILY_WINDOW_DAYS = 7;
 
-// Both of these mean the student is finished with the task (FR-07.4). Kept in
-// step with DONE in frontend/src/tasks.js and the status list in
-// routes/assignments.js.
+// Finished, for FR-07.4. Keep in step with DONE in frontend/src/tasks.js.
 const DONE_STATUSES = ['submitted', 'completed'];
 
 const THAI_MONTHS = [
@@ -44,24 +38,20 @@ function formatThaiDateTime(value) {
     + `${pad(date.getHours())}:${pad(date.getMinutes())} น.`;
 }
 
-// 'YYYY-MM-DD HH:MM' in the app's wall-clock time — the same shape
-// requestMetrics.js uses for its hour buckets, and short enough that the whole
-// trigger_type stays inside VARCHAR(50).
+// 'YYYY-MM-DD HH:MM' wall-clock — short enough to keep trigger_type in VARCHAR(50).
 function triggerStamp(value) {
   const date = new Date(value);
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
     + `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-// The due date belongs in the key: moving a deadline has to re-arm the
-// reminder, not stay quiet because this lead time already fired on the old one.
+// The due date is in the key so moving a deadline re-arms the reminder.
 function leadTriggerType(minutes, dueDate) {
   return `lead:${minutes}:${triggerStamp(dueDate)}`;
 }
 
-// A retry rebuilds its mail from the row, and the lead time it was claimed for
-// lives in the key. Reading it back from Notification_Lead_Time instead would
-// use whatever the student has selected *now*, which may no longer include it.
+// Read from the key, not Notification_Lead_Time: the student may since have
+// deselected the lead time this reminder was claimed for.
 function leadMinutesFromTrigger(triggerType) {
   const match = /^lead:(\d+):/.exec(String(triggerType || ''));
   return match ? Number(match[1]) : null;
@@ -75,8 +65,7 @@ function dailyTriggerType(today) {
   return `daily:${today}`;
 }
 
-// Floor-based, unlike formatLeadTime, because this describes an arbitrary gap
-// rather than one of the preset lead times: "2 วัน" reads better than "3210 นาที".
+// Floors, because this is an arbitrary gap: "2 วัน" beats "3210 นาที".
 function humanizeGap(minutes) {
   if (minutes >= 1440) return `${Math.floor(minutes / 1440)} วัน`;
   if (minutes >= 60) return `${Math.floor(minutes / 60)} ชั่วโมง`;
@@ -87,20 +76,20 @@ function isOverdue(dueDate, now = new Date()) {
   return new Date(dueDate).getTime() < now.getTime();
 }
 
-// FR-07.6 — the subject alone has to carry the task name and when it is due,
-// so the student can act on it without opening the mail.
+// FR-07.6 — the subject alone carries task and due date, so it is actionable
+// without opening the mail.
 function buildSubject({ title, dueDate }) {
   return `[ใกล้ครบกำหนด] ${title} — ส่ง ${formatThaiDateTime(dueDate)}`;
 }
 
-// The daily repeat covers overdue work too, and telling someone a passed
-// deadline is "coming up" is worse than not writing at all.
+// The daily repeat covers overdue work, and calling a passed deadline
+// "coming up" is worse than silence.
 function buildDailySubject({ title, dueDate }, now = new Date()) {
   const tag = isOverdue(dueDate, now) ? 'เลยกำหนดแล้ว' : 'งานค้าง';
   return `[${tag}] ${title} — ส่ง ${formatThaiDateTime(dueDate)}`;
 }
 
-// FR-07.3 again — same three facts, framed as a standing reminder.
+// FR-07.3 again — the same three facts, framed as a standing reminder.
 function buildDailyBody({ studentName, title, courseName, dueDate, assignmentId, originLink }, now = new Date()) {
   const minutes = Math.abs(minutesUntil(dueDate, now));
   const headline = isOverdue(dueDate, now)
@@ -127,13 +116,11 @@ function buildDailyBody({ studentName, title, courseName, dueDate, assignmentId,
   return lines.join('\n');
 }
 
-// FR-07.3 — task name, course name and due date must all be present.
+// FR-07.3 — task, course and due date must all be present.
 //
-// The countdown is measured from the due date rather than echoing the lead time
-// that triggered the mail. At the moment of the first send the two are the same,
-// but a retry going out two hours later would otherwise still claim "1 day left"
-// when 22 hours remain — and the test mail, which has no lead time at all, would
-// have to invent one.
+// The countdown comes from the due date, not the lead time that triggered it: a
+// retry two hours later would otherwise still say "1 day left", and the test
+// mail has no lead time to echo.
 function buildBody({ studentName, title, courseName, dueDate, assignmentId, originLink }, now = new Date()) {
   const lines = [
     `สวัสดี ${studentName || 'นักศึกษา'}`,
@@ -155,10 +142,8 @@ function buildBody({ studentName, title, courseName, dueDate, assignmentId, orig
   return lines.join('\n');
 }
 
-// Every time condition is computed by MySQL rather than in JS, so there is one
-// clock. due_date is stored as wall-clock time (see utils/dueDate.js), which
-// only lines up if the containers run in the app's timezone — docker-compose.yml
-// sets TZ on both backend and db for exactly this reason.
+// Time conditions run in MySQL so there is one clock. due_date is wall-clock
+// (utils/dueDate.js), so backend and db must share TZ — docker-compose.yml sets it.
 const LEAD_REMINDER_SQL = `
   SELECT a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
@@ -179,10 +164,9 @@ const LEAD_REMINDER_SQL = `
   ORDER BY d.due_date
 `;
 
-// FR-07.2 — one mail per unfinished task once the student's chosen hour has
-// passed, deduplicated for the day by the daily:<date> key. CURDATE() comes back
-// with the rows so the key is stamped from the database's clock, not the
-// process's; a pass running across midnight must not straddle two dates.
+// FR-07.2 — one mail per unfinished task after the chosen hour, deduplicated by
+// the daily:<date> key. CURDATE() rides along so the key uses the database's
+// clock: a pass crossing midnight must not straddle two dates.
 const DAILY_REPEAT_SQL = `
   SELECT a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
@@ -204,9 +188,8 @@ const DAILY_REPEAT_SQL = `
   ORDER BY d.due_date
 `;
 
-// INSERT IGNORE against uq_notification_trigger is the whole concurrency story:
-// whoever inserts the row owns the send. A second pass — or a second container —
-// gets affectedRows 0 and skips, so the same reminder is never mailed twice.
+// The whole concurrency story: whoever inserts the row owns the send. A second
+// pass or container gets affectedRows 0 and skips, so nothing is mailed twice.
 const CLAIM_SQL = `
   INSERT IGNORE INTO Notification
     (assignment_id, trigger_type, is_sent, attempt_count, next_attempt_at)
@@ -219,9 +202,8 @@ const MARK_SENT_SQL = `
    WHERE assignment_id = ? AND trigger_type = ?
 `;
 
-// A failure with retries left. sent_at stays NULL, which is precisely what keeps
-// this row out of readFailures() — the student sees nothing while the system is
-// still trying (UC-8 7a.3).
+// Retries left. sent_at stays NULL, which keeps the row out of readFailures():
+// the student sees nothing while the system is still trying (UC-8 7a.3).
 const MARK_RETRY_SQL = `
   UPDATE Notification
      SET attempt_count = attempt_count + 1,
@@ -229,8 +211,8 @@ const MARK_RETRY_SQL = `
    WHERE assignment_id = ? AND trigger_type = ?
 `;
 
-// Out of retries. Writing sent_at with is_sent still false is what readFailures()
-// counts, which raises the banner already wired up in NotificationSettings.jsx.
+// Out of retries. sent_at set with is_sent false is what readFailures() counts,
+// and what raises the banner in NotificationSettings.jsx.
 const MARK_FAILED_SQL = `
   UPDATE Notification
      SET sent_at = NOW(), is_sent = FALSE,
@@ -238,9 +220,8 @@ const MARK_FAILED_SQL = `
    WHERE assignment_id = ? AND trigger_type = ?
 `;
 
-// Rows whose lease or retry delay has expired. attempt_count 0 is included on
-// purpose: that is a claim whose pass died before sending, and it deserves the
-// same second chance as a send that actually failed.
+// Rows whose lease or retry delay expired. attempt_count 0 is included: that is
+// a claim whose pass died before sending, and it deserves the same second chance.
 const RETRY_SWEEP_SQL = `
   SELECT n.trigger_type, n.attempt_count,
          a.assignment_id, a.title, a.origin_link,
@@ -305,10 +286,8 @@ function buildMessage(row, triggerType) {
   };
 }
 
-// Sends one reminder and records what happened. Shared by the first attempt and
-// by every retry, so the two can never drift on what a success or failure means.
-// `attemptsSoFar` is how many attempts the row has already burned: 0 on a fresh
-// claim, and it picks the retry delay.
+// Sends one reminder and records the outcome. Shared by the first attempt and
+// every retry so the two cannot drift. `attemptsSoFar` picks the retry delay.
 async function deliver({ db, sendMail, logFailure, row, triggerType, attemptsSoFar }) {
   try {
     const { subject, text } = buildMessage(row, triggerType);
@@ -316,8 +295,7 @@ async function deliver({ db, sendMail, logFailure, row, triggerType, attemptsSoF
     await db.query(MARK_SENT_SQL, [row.assignment_id, triggerType]);
     return 'sent';
   } catch (err) {
-    // FR-07.7 — record it on the row and in System_Error_Log either way. One bad
-    // address must never stop the rest of the pass.
+    // address must not stop the pass.
     const delayMinutes = RETRY_MINUTES[attemptsSoFar];
     const outcome = delayMinutes === undefined ? 'failed' : 'retrying';
 
@@ -349,8 +327,7 @@ async function runNotificationPass({
   const tally = { sent: 0, failed: 0, retrying: 0, skipped: 0 };
   const count = (outcome) => { tally[outcome] += 1; };
 
-  // Retries first: a row that has already been claimed is work the system
-  // promised to finish, and it should not queue behind fresh candidates.
+  // Retries first: already-claimed work the system promised to finish.
   const [retries] = await db.query(RETRY_SWEEP_SQL, [MAX_ATTEMPTS, ...DONE_STATUSES]);
   for (const row of retries) {
     count(await deliver({
@@ -410,8 +387,7 @@ async function tick() {
       );
     }
   } catch (err) {
-    // Same posture as the metrics flush: a bad pass is logged and the interval
-    // keeps running. Never let this reject into an unhandled rejection.
+    // Like the metrics flush: log and keep the interval running. Never reject.
     console.error('[notifications] pass failed:', err.code || 'unknown');
   }
 }

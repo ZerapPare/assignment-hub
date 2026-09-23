@@ -8,17 +8,15 @@ const { buildSubject, buildBody } = require('../services/notificationSender');
 
 const router = express.Router();
 
-// 28 days. Anything longer is almost certainly a typo (a student entering
-// "10000" meaning minutes when they meant hours), and the sender would have to
-// look that far back on every pass.
+// 28 days. Anything longer is almost certainly a typo, and the sender would
+// have to look that far back on every pass.
 const MAX_LEAD_MINUTES = 40320;
 const MAX_LEAD_TIMES = 10;
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-// What a student who has never opened this panel gets. Deliberately returned
-// rather than inserted: an empty Notification_Setting table means "nobody has
-// saved settings", which is worth being able to tell.
+// What a student who has never opened this panel gets. Returned rather than
+// inserted, so "no row" still means "never saved settings".
 const DEFAULTS = {
   enabled: true,
   lead_times: [1440],
@@ -33,13 +31,9 @@ function toHhMm(value) {
   return String(value).slice(0, 5);
 }
 
-// Notification rows hang off Assignment_Detail, so reaching the owning student
-// means walking up to Course — the same join the assignments list uses to scope
-// itself. A send that was attempted and failed is one with a sent_at stamp but
-// is_sent still false.
-//
-// Nothing writes Notification yet, so this is 0 for everyone; it is here so the
-// banner has a real source the moment the sender lands.
+// Notification hangs off Assignment_Detail, so reaching the owning student means
+// walking up to Course. A failed send is one with sent_at stamped but is_sent
+// still false — see MARK_FAILED_SQL in services/notificationSender.js.
 async function readFailures(userId) {
   const [rows] = await pool.query(
     `SELECT COUNT(*) AS failed_count, MAX(n.sent_at) AS last_failed_at
@@ -74,8 +68,8 @@ async function readSettings(userId) {
   const row = settings[0];
   return {
     enabled: Boolean(row.enabled),
-    // A saved row with no lead times is a real state (the student cleared them
-    // all), so this stays empty instead of falling back to DEFAULTS.
+    // A saved row with no lead times is a real state — the student cleared them
+    // all — so this stays empty instead of falling back to DEFAULTS.
     lead_times: leadTimes.map((r) => r.minutes),
     daily_repeat: Boolean(row.daily_repeat),
     daily_repeat_time: toHhMm(row.daily_repeat_time),
@@ -93,8 +87,8 @@ router.get('/api/notification-settings', requireAuth, async (req, res) => {
   }
 });
 
-// Numbers only — Number(true) is 1, which would otherwise sneak a boolean
-// through as a one-minute lead time.
+// Numbers only: Number(true) is 1, which would sneak a boolean through as a
+// one-minute lead time.
 function parseLeadMinutes(value) {
   if (typeof value !== 'number' || !Number.isInteger(value)) return null;
   if (value < 1 || value > MAX_LEAD_MINUTES) return null;
@@ -135,8 +129,8 @@ router.put('/api/notification-settings', requireAuth, async (req, res) => {
     }
   }
 
-  // Both tables move together: a settings row whose lead times half-applied
-  // would silently change when the student gets reminded.
+  // Both tables move together: half-applied lead times would silently change
+  // when the student gets reminded.
   let conn;
   try {
     conn = await pool.getConnection();
@@ -193,9 +187,8 @@ router.put('/api/notification-settings', requireAuth, async (req, res) => {
   }
 });
 
-// Sends one reminder to the address the student logged in with, built by the
-// same two functions the scheduler uses — so a test that arrives proves the
-// real thing will too. Deliberately writes no Notification row: this is not a
+// Built by the same two functions the scheduler uses, so a test that arrives
+// proves the real thing will. Writes no Notification row: this is not a
 // reminder for any task, and assignment_id is NOT NULL.
 router.post('/api/notification-settings/test', requireAuth, async (req, res) => {
   let student;
@@ -254,9 +247,8 @@ router.post('/api/notification-settings/test', requireAuth, async (req, res) => 
     return res.status(502).json({ error: 'ส่งอีเมลทดสอบไม่สำเร็จ', request_id: req.requestId });
   }
 
-  // delivered:false means no SMTP account is configured and the mail was only
-  // written to the log. Passing that through matters — a panel that says "sent"
-  // when nothing left the building sends people looking through an empty inbox.
+  // delivered:false means no SMTP account is configured and the mail only went
+  // to the log. Saying "sent" instead would send people hunting an empty inbox.
   res.json({ ok: true, to: student.email, delivered: delivery.delivered !== false });
 });
 

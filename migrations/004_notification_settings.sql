@@ -8,9 +8,8 @@
 --
 -- Safe to skip entirely on a database created from the current init.sql.
 --
--- Lead times live in their own table rather than a CSV column because a
--- student may pick several, and the sender will have to JOIN on them to find
--- which assignments are due for a reminder.
+-- Lead times get their own table, not a CSV column: a student may pick several,
+-- and the sender JOINs on them to find which assignments are due.
 -- =========================================================
 
 CREATE TABLE Notification_Setting (
@@ -18,16 +17,15 @@ CREATE TABLE Notification_Setting (
     enabled             BOOLEAN NOT NULL DEFAULT TRUE,
     daily_repeat        BOOLEAN NOT NULL DEFAULT FALSE,
     daily_repeat_time   TIME NULL,
-    -- The last value the student typed under "+ กำหนดเอง", kept only so the
-    -- hint line can offer it again. Being set here does NOT mean it is
-    -- currently selected — Notification_Lead_Time is what selection means.
+    -- The last value typed under "+ กำหนดเอง", kept so the hint line can offer
+    -- it again. Set here does NOT mean selected — Notification_Lead_Time does.
     last_custom_minutes INT NULL,
     CONSTRAINT fk_notification_setting_student
         FOREIGN KEY (user_id) REFERENCES Student(user_id)
 );
 
--- One row per selected lead time, stored in minutes so presets and custom
--- values share a single representation and compare directly against due_date.
+-- One row per selected lead time, in minutes so presets and custom values share
+-- one representation and compare directly against due_date.
 CREATE TABLE Notification_Lead_Time (
     user_id  INT NOT NULL,
     minutes  INT NOT NULL,

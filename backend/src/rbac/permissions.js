@@ -1,9 +1,9 @@
 // Single source of truth for permission codes.
 //
-// Route guards reference these constants rather than bare strings so a typo is a
-// crash at require-time instead of a silently unreachable endpoint. The codes
-// must stay in step with the Permission seed rows in init.sql and
-// migrations/012_rbac.sql — test/rbacSchema.test.js asserts that they do.
+// Guards reference these constants, not bare strings, so a typo crashes at
+// require-time instead of leaving an endpoint silently unreachable. Must stay
+// in step with the Permission seed rows in init.sql and migrations/012_rbac.sql
+// — test/rbacSchema.test.js asserts it.
 
 const PERMISSIONS = {
   // Admin console
@@ -16,8 +16,8 @@ const PERMISSIONS = {
   AUDIT_LOG_READ: 'audit_log.read',
 
   // Student scope — modelled and granted, not yet enforced. requireAuth already
-  // guards every student endpoint, so adding a permission check there today
-  // would only risk locking out a student whose User_Role row went missing.
+  // guards these endpoints, so checking here would only risk locking out a
+  // student whose User_Role row went missing.
   ASSIGNMENT_MANAGE: 'assignment.manage',
   SCHEDULE_MANAGE: 'schedule.manage',
   NOTIFICATION_MANAGE: 'notification.manage',
@@ -26,9 +26,8 @@ const PERMISSIONS = {
 
 const ALL_PERMISSION_CODES = Object.freeze(Object.values(PERMISSIONS));
 
-// Holding any one of these is what makes the admin console relevant to an
-// account. There is no separate "is an administrator" flag any more — being an
-// administrator just means holding administrative permissions.
+// Holding any one of these is what makes the admin console relevant. There is
+// no "is an administrator" flag — being one means holding these permissions.
 const ADMIN_PERMISSION_CODES = Object.freeze([
   PERMISSIONS.DASHBOARD_VIEW,
   PERMISSIONS.USER_READ,
@@ -39,17 +38,17 @@ const ADMIN_PERMISSION_CODES = Object.freeze([
   PERMISSIONS.AUDIT_LOG_READ,
 ]);
 
+// Two roles, and a user holds exactly one. An administrator is not also a
+// student — see docs/roles.md.
 const ROLES = {
-  SUPER_ADMIN: 'super_admin',
-  SUPPORT_ADMIN: 'support_admin',
-  ANALYTICS_VIEWER: 'analytics_viewer',
+  ADMIN: 'admin',
   STUDENT: 'student',
 };
 
 const ALL_ROLE_CODES = Object.freeze(Object.values(ROLES));
 
-// Accepts the Set built by requireAdmin as well as a plain array, so callers
-// that only have the /api/admin/me payload can use the same helper.
+// Takes the Set requireAdmin builds or a plain array, so callers holding only
+// the /api/admin/me payload can use the same helper.
 function hasPermission(permissions, code) {
   if (permissions instanceof Set) return permissions.has(code);
   if (Array.isArray(permissions)) return permissions.includes(code);

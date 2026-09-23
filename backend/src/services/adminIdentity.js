@@ -1,10 +1,9 @@
 // Identity normalisation helpers.
 //
-// This module used to own completeAdminLogin, which looked an administrator up
-// in the `Admin` allowlist during a login flow of its own. Migration 013 folded
-// that table into User_Account and roles replaced the allowlist, so the lookup
-// is gone; the normalisers stay because they are what keep an email address or
-// a Microsoft object id comparable no matter how a provider spells it.
+// completeAdminLogin used to live here, looking administrators up in the `Admin`
+// allowlist. Migration 013 folded that table away and roles replaced the
+// allowlist. The normalisers stay: they keep an email or a Microsoft object id
+// comparable however a provider spells it.
 
 const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -1,31 +1,26 @@
 -- =========================================================
 -- 012 — role-based access control (User–Role–Permission)
 --
--- Replaces the binary admin/student split with a real RBAC model. Before this,
--- every administrator could do everything any administrator could do: one
+-- Replaces the binary admin/student split with real RBAC. Before this, one
 -- requireAdmin guard covered the whole console.
 --
--- Shape:
 --   User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
 --        │
 --        ├── Student   (subtype: OAuth tokens, student_id, account_status)
 --        └── Admin     (subtype: microsoft identity, is_active)
 --
--- Student and Admin stay as subtype tables rather than being folded into
--- User_Account, because six tables carry a foreign key to Student(user_id) and
--- Admin_Audit_Log carries one to Admin(admin_id). Keeping both primary keys
--- untouched means none of those references have to move.
+-- Student and Admin stay as subtypes: six tables reference Student(user_id) and
+-- Admin_Audit_Log references Admin(admin_id), so keeping both primary keys
+-- means none of those references move.
 --
--- Note that Student.user_id and Admin.admin_id are separate AUTO_INCREMENT
--- sequences and already overlap — id 1 exists in both and is two different
--- people. Students therefore keep their existing user_id in User_Account, and
--- administrators are issued fresh ids above the student range.
+-- The two are separate AUTO_INCREMENT sequences that already overlap — id 1 is
+-- two different people — so students keep their user_id and administrators get
+-- fresh ids above the student range.
 --
--- Step order matters here: the subtype foreign keys go on last, because adding
--- them before the backfill would fail against rows that have no User_Account
--- row yet. Everything except the backfill is duplicated verbatim in init.sql,
--- which needs no backfill because a fresh database has no rows to migrate.
--- test/rbacSchema.test.js enforces that the two files stay in step.
+-- Step order matters: the subtype foreign keys go on last, because adding them
+-- before the backfill would fail against rows with no User_Account row yet.
+-- Everything but the backfill is duplicated in init.sql;
+-- test/rbacSchema.test.js keeps the two in step.
 --
 -- Apply after migrations 001–011:
 --
@@ -34,10 +29,8 @@
 -- =========================================================
 
 -- The role and permission names below are Thai. Without this the mysql client
--- reads these UTF-8 bytes as latin1 and stores double-encoded mojibake — and it
--- also decides the character set of the string literals inside CHECK
--- constraints, so the same file produces subtly different schema depending on
--- how it is fed in.
+-- reads these UTF-8 bytes as latin1 and stores mojibake, and it also picks the
+-- charset of string literals inside CHECK constraints.
 SET NAMES utf8mb4;
 
 -- ---------------------------------------------------------
@@ -96,8 +89,8 @@ CREATE TABLE IF NOT EXISTS User_Role (
     PRIMARY KEY (user_id, role_id),
     CONSTRAINT fk_user_role_user
         FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE,
-    -- No ON DELETE here on purpose: a role that is still assigned to somebody
-    -- must not be silently deletable.
+    -- No ON DELETE on purpose: a role still assigned to somebody must not be
+    -- silently deletable.
     CONSTRAINT fk_user_role_role
         FOREIGN KEY (role_id) REFERENCES Role(role_id),
     CONSTRAINT fk_user_role_granted_by
@@ -108,9 +101,8 @@ CREATE TABLE IF NOT EXISTS User_Role (
 -- ---------------------------------------------------------
 -- 2. Admin gains its link column
 --
--- Guarded with information_schema lookups so re-running migrate.sh over an
--- already-migrated database is a no-op instead of an error. Nullable because
--- this runs against a table that already holds rows; step 4 fills every one.
+-- Guarded with information_schema so re-running migrate.sh is a no-op instead
+-- of an error. Nullable because the table already holds rows; step 4 fills them.
 -- ---------------------------------------------------------
 
 SET @has_admin_user_column = (
@@ -132,16 +124,13 @@ DEALLOCATE PREPARE admin_user_column_stmt;
 -- ---------------------------------------------------------
 -- 3. Reference data
 --
--- super_admin holds exactly the seven capabilities the single requireAdmin
--- guard grants today, so an administrator backfilled onto it can do precisely
--- what every administrator can do now — no more, no less.
+-- admin holds exactly the seven capabilities the single requireAdmin
+-- guard granted before RBAC — no more, no less.
 -- ---------------------------------------------------------
 
 INSERT INTO Role (role_code, role_name, description, is_system) VALUES
-    ('super_admin',      'ผู้ดูแลระบบสูงสุด',     'สิทธิ์ทั้งหมดของ admin console',        TRUE),
-    ('support_admin',    'ผู้ดูแลผู้ใช้งาน',      'ดูและระงับบัญชีผู้ใช้',                 FALSE),
-    ('analytics_viewer', 'ผู้ดูข้อมูลเชิงธุรกิจ', 'ดูภาพรวมและ business analytics อย่างเดียว', FALSE),
-    ('student',          'นักศึกษา',              'สิทธิ์ผู้ใช้งานทั่วไป',                 TRUE)
+    ('admin',   'ผู้ดูแลระบบ', 'สิทธิ์ทั้งหมดของ admin console', TRUE),
+    ('student', 'นักศึกษา',    'สิทธิ์ผู้ใช้งานทั่วไป',          TRUE)
 ON DUPLICATE KEY UPDATE
     role_name   = VALUES(role_name),
     description = VALUES(description),
@@ -168,18 +157,13 @@ SELECT r.role_id, p.permission_id
 FROM Role r
 CROSS JOIN Permission p
 WHERE (r.role_code, p.permission_code) IN (
-    ('super_admin', 'dashboard.view'),
-    ('super_admin', 'user.read'),
-    ('super_admin', 'user.suspend'),
-    ('super_admin', 'error_log.read'),
-    ('super_admin', 'system.health.read'),
-    ('super_admin', 'business.analytics.read'),
-    ('super_admin', 'audit_log.read'),
-    ('support_admin', 'dashboard.view'),
-    ('support_admin', 'user.read'),
-    ('support_admin', 'user.suspend'),
-    ('analytics_viewer', 'dashboard.view'),
-    ('analytics_viewer', 'business.analytics.read'),
+    ('admin', 'dashboard.view'),
+    ('admin', 'user.read'),
+    ('admin', 'user.suspend'),
+    ('admin', 'error_log.read'),
+    ('admin', 'system.health.read'),
+    ('admin', 'business.analytics.read'),
+    ('admin', 'audit_log.read'),
     ('student', 'assignment.manage'),
     ('student', 'schedule.manage'),
     ('student', 'notification.manage'),
@@ -189,22 +173,19 @@ WHERE (r.role_code, p.permission_code) IN (
 -- ---------------------------------------------------------
 -- 4. Backfill — migration only.
 --
--- init.sql stops after step 3 and then jumps to step 5: a freshly initialised
--- database has no Student or Admin rows to migrate. Structure and reference
--- data belong to initdb; moving existing data belongs here.
+-- init.sql skips to step 5: a fresh database has no rows to migrate. Structure
+-- and reference data belong to initdb; moving existing data belongs here.
 -- ---------------------------------------------------------
 
--- Students keep their existing user_id, so the six foreign keys pointing at
--- Student(user_id) never have to move. INSERT IGNORE rather than plain INSERT
--- guards the case of a student and an administrator sharing an email address;
+-- Students keep their user_id, so the six foreign keys to Student(user_id) never
+-- move. INSERT IGNORE guards a student and an administrator sharing an email;
 -- step 5 then fails loudly on any row it skipped, which is the right outcome.
 INSERT IGNORE INTO User_Account (user_id, email, display_name, user_type, created_at)
 SELECT s.user_id, s.university_email, s.student_name, 'student', s.created_at
 FROM Student s;
 
 -- Push the sequence past the student range before issuing administrator ids.
--- ALTER TABLE ... AUTO_INCREMENT only ever raises the counter, so re-running
--- this is safe.
+-- ALTER TABLE ... AUTO_INCREMENT only raises the counter, so re-running is safe.
 SET @next_user_id = (SELECT IFNULL(MAX(user_id), 0) + 1 FROM User_Account);
 SET @bump_sql = CONCAT('ALTER TABLE User_Account AUTO_INCREMENT = ', @next_user_id);
 PREPARE bump_stmt FROM @bump_sql;
@@ -226,9 +207,8 @@ JOIN User_Account u ON u.email = a.email AND u.user_type = 'admin'
 -- ---------------------------------------------------------
 -- 5. Subtype foreign keys
 --
--- Last, because until step 4 has run there are Student rows with no matching
--- User_Account row and the constraint would be rejected. On a fresh database
--- both tables are empty and these succeed immediately.
+-- Last, because before step 4 there are Student rows with no User_Account row
+-- and the constraint would be rejected. On a fresh database both are empty.
 -- ---------------------------------------------------------
 
 SET @has_student_user_fk = (
@@ -267,14 +247,13 @@ DEALLOCATE PREPARE admin_user_fk_stmt;
 -- 6. Grant roles — migration only
 -- ---------------------------------------------------------
 
--- Every existing administrator keeps exactly the access they had before RBAC.
--- Deactivated administrators are included too: requireAdmin already rejects
--- them on is_active, and re-activating one later must not silently leave them
--- with no role at all.
+-- Every existing administrator keeps the access they had before RBAC.
+-- Deactivated ones are included: requireAdmin already rejects them on
+-- is_active, and re-activating one must not leave them with no role.
 INSERT IGNORE INTO User_Role (user_id, role_id)
 SELECT a.user_id, r.role_id
 FROM Admin a
-JOIN Role r ON r.role_code = 'super_admin'
+JOIN Role r ON r.role_code = 'admin'
 WHERE a.user_id IS NOT NULL;
 
 INSERT IGNORE INTO User_Role (user_id, role_id)

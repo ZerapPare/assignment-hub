@@ -16,9 +16,8 @@ if (!CLIENT_ID || !CLIENT_SECRET) {
 
 const MS_CLIENT_ID = process.env.MS_CLIENT_ID;
 const MS_CLIENT_SECRET = process.env.MS_CLIENT_SECRET;
-// 'organizations' = work/school (Azure AD) accounts only — matches this app's
-// registration (not enabled for personal Microsoft/consumer accounts) and fits
-// a university-login use case anyway.
+// 'organizations' = work/school accounts only. Matches this app's registration,
+// which is not enabled for personal Microsoft accounts, and fits university login.
 const MS_TENANT = process.env.MS_TENANT_ID || 'organizations';
 const MS_REDIRECT_URL = process.env.MS_OAUTH_REDIRECT_URL || `${FRONTEND_URL}/api/auth/microsoft/callback`;
 const MS_AUTHORIZE_URL = `https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/authorize`;

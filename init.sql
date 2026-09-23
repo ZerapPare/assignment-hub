@@ -1,11 +1,9 @@
 USE assignment_hub;
 
--- The seed data below contains Thai text. Without this the mysql client reads
--- these UTF-8 bytes as latin1 and stores double-encoded mojibake — and it also
--- decides the character set of the string literals inside CHECK constraints,
--- so the same file produces subtly different schema depending on how it is fed
--- in. Declaring it here keeps the result identical for docker-entrypoint,
--- migrate.sh and a manual pipe alike.
+-- The seed data below is Thai. Without this the mysql client reads these UTF-8
+-- bytes as latin1 and stores mojibake, and it also picks the charset of string
+-- literals inside CHECK constraints. Declaring it here keeps docker-entrypoint,
+-- migrate.sh and a manual pipe identical.
 SET NAMES utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 0;
@@ -44,14 +42,12 @@ CREATE TABLE University (
     CONSTRAINT uq_university_domain UNIQUE (email_domain)
 );
 
--- One table for everybody. There is no separate administrator table: what an
--- account may do is decided entirely by the roles attached to its user_id, so
--- the only thing that ever distinguished the two was which columns they filled
--- in. user_type says which kind of account this is for the metrics queries that
--- count students; it is not an access-control field — User_Role is.
+-- One table for everybody — no separate administrator table, because the roles
+-- on a user_id decide everything. user_type only tells the metrics queries
+-- which rows to count; it is not an access-control field, User_Role is.
 --
--- student_id is the number the university issues, not a key: it is NULL for
--- administrators and unique only within a university.
+-- student_id is the number the university issues, not a key: NULL for
+-- administrators, unique only within a university.
 CREATE TABLE User_Account (
     user_id           INT AUTO_INCREMENT PRIMARY KEY,
     student_id        VARCHAR(50),
@@ -62,8 +58,7 @@ CREATE TABLE User_Account (
     gg_refresh_token  TEXT,
     ms_access_token   TEXT,
     ms_refresh_token  TEXT,
-    -- Immutable Entra identifiers, matched instead of an address for accounts
-    -- that sign in through a trusted Microsoft tenant.
+    -- Immutable Entra ids, matched instead of an address for Microsoft sign-in.
     microsoft_tenant_id VARCHAR(36) NULL,
     microsoft_object_id VARCHAR(36) NULL,
     user_type         VARCHAR(20) NOT NULL DEFAULT 'student',
@@ -100,14 +95,12 @@ CREATE TABLE IF NOT EXISTS Schedule_Setting (
 --
 --   User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
 --
--- Every access decision in the application is this join. There is no second
--- identity table and no "admin mode" on the session: an account can reach the
--- admin console exactly when it holds an administrative permission, which is
--- also why one login page serves everyone.
+-- Every access decision is this join. No second identity table and no "admin
+-- mode" on the session: the console opens exactly when the account holds an
+-- administrative permission, which is why one login page serves everyone.
 --
--- These tables and their seed rows are duplicated in migrations/012_rbac.sql
--- for databases that already exist. Keep the two in step —
--- test/rbacSchema.test.js fails if they drift.
+-- Duplicated in migrations/012_rbac.sql for databases that already exist.
+-- Keep the two in step — test/rbacSchema.test.js fails if they drift.
 -- =========================================================
 
 CREATE TABLE IF NOT EXISTS Role (
@@ -151,8 +144,8 @@ CREATE TABLE IF NOT EXISTS User_Role (
     PRIMARY KEY (user_id, role_id),
     CONSTRAINT fk_user_role_user
         FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE,
-    -- No ON DELETE here on purpose: a role that is still assigned to somebody
-    -- must not be silently deletable.
+    -- No ON DELETE on purpose: a role still assigned to somebody must not be
+    -- silently deletable.
     CONSTRAINT fk_user_role_role
         FOREIGN KEY (role_id) REFERENCES Role(role_id),
     CONSTRAINT fk_user_role_granted_by
@@ -160,15 +153,12 @@ CREATE TABLE IF NOT EXISTS User_Role (
     INDEX idx_user_role_role (role_id)
 );
 
--- Reference data.
---
--- super_admin holds exactly the seven capabilities the single requireAdmin
--- guard granted before RBAC, so an administrator on that role can do precisely
--- what every administrator could do — no more, no less.
+-- Reference data. admin holds exactly the seven capabilities the single
+-- requireAdmin guard granted before RBAC — no more, no less.
 
 INSERT INTO Role (role_code, role_name, description, is_system) VALUES
-    ('super_admin',      'ผู้ดูแลระบบสูงสุด',     'สิทธิ์ทั้งหมดของ admin console',        TRUE),
-    ('student',          'นักศึกษา',              'สิทธิ์ผู้ใช้งานทั่วไป',                 TRUE)
+    ('admin',   'ผู้ดูแลระบบ', 'สิทธิ์ทั้งหมดของ admin console', TRUE),
+    ('student', 'นักศึกษา',    'สิทธิ์ผู้ใช้งานทั่วไป',          TRUE)
 ON DUPLICATE KEY UPDATE
     role_name   = VALUES(role_name),
     description = VALUES(description),
@@ -195,13 +185,13 @@ SELECT r.role_id, p.permission_id
 FROM Role r
 CROSS JOIN Permission p
 WHERE (r.role_code, p.permission_code) IN (
-    ('super_admin', 'dashboard.view'),
-    ('super_admin', 'user.read'),
-    ('super_admin', 'user.suspend'),
-    ('super_admin', 'error_log.read'),
-    ('super_admin', 'system.health.read'),
-    ('super_admin', 'business.analytics.read'),
-    ('super_admin', 'audit_log.read'),
+    ('admin', 'dashboard.view'),
+    ('admin', 'user.read'),
+    ('admin', 'user.suspend'),
+    ('admin', 'error_log.read'),
+    ('admin', 'system.health.read'),
+    ('admin', 'business.analytics.read'),
+    ('admin', 'audit_log.read'),
     ('student', 'assignment.manage'),
     ('student', 'schedule.manage'),
     ('student', 'notification.manage'),
@@ -284,20 +274,19 @@ CREATE TABLE Schedule (
 CREATE TABLE Notification (
     notification_id  INT AUTO_INCREMENT PRIMARY KEY,
     assignment_id    INT NOT NULL,
-    -- Which reminder this row is: 'lead:<minutes>:<due date>' for an advance
-    -- reminder, 'daily:<YYYY-MM-DD>' for a daily repeat. The due date is part
-    -- of the key so moving a deadline re-arms the reminder instead of staying
-    -- quiet — see backend/src/services/notificationSender.js.
+    -- Which reminder this is: 'lead:<minutes>:<due date>' or
+    -- 'daily:<YYYY-MM-DD>'. The due date is in the key so moving a deadline
+    -- re-arms the reminder. See backend/src/services/notificationSender.js.
     trigger_type     VARCHAR(50) NOT NULL,
     sent_at          DATETIME,
     is_sent          BOOLEAN DEFAULT FALSE,
-    -- Retry ladder. sent_at stays NULL while attempts remain, so the settings
-    -- banner only counts a send that failed for good.
+    -- Retry ladder. sent_at stays NULL while attempts remain, so the banner
+    -- only counts a send that failed for good.
     attempt_count    INT NOT NULL DEFAULT 0,
     next_attempt_at  DATETIME NULL,
     CONSTRAINT fk_notification_detail
         FOREIGN KEY (assignment_id) REFERENCES Assignment_Detail(assignment_id),
-    -- The claiming INSERT relies on this to decide who sends; without it every
+    -- The claiming INSERT races on this to decide who sends; without it every
     -- pass would mail the same reminder again.
     CONSTRAINT uq_notification_trigger UNIQUE (assignment_id, trigger_type),
     INDEX idx_notification_retry (next_attempt_at, is_sent)

@@ -19,9 +19,8 @@ CREATE TABLE Admin (
     CONSTRAINT uq_admin_microsoft_identity UNIQUE (microsoft_tenant_id, microsoft_object_id)
 );
 
--- Preserve legacy administrators created by migration 005. Keeping the same numeric
--- id lets existing Admin_Audit_Log rows continue to identify their actor after the
--- Student role is retired from the administrator login path.
+-- Preserve administrators created by migration 005. Keeping the same numeric id
+-- lets existing Admin_Audit_Log rows still identify their actor.
 INSERT INTO Admin (admin_id, email, display_name, is_active, created_at, last_login_at)
 SELECT user_id, university_email, student_name,
        account_status = 'active', created_at, last_login_at
@@ -31,10 +30,9 @@ ON DUPLICATE KEY UPDATE
     display_name = COALESCE(Admin.display_name, VALUES(display_name)),
     is_active = VALUES(is_active);
 
--- Migration 005 originally linked audit rows to Student.role='admin'. Admin
--- sessions now use Admin.admin_id. Remove only that legacy foreign key: when this
--- script is run after the latest init.sql, the existing FK already points to Admin
--- and must be preserved.
+-- 005 linked audit rows to Student.role='admin'; sessions now use
+-- Admin.admin_id. Drop only that legacy foreign key — run after the current
+-- init.sql the FK already points at Admin and must be kept.
 SET @drop_legacy_admin_fk = (
     SELECT COUNT(*)
     FROM information_schema.REFERENTIAL_CONSTRAINTS
@@ -52,8 +50,5 @@ PREPARE drop_legacy_admin_fk_stmt FROM @drop_legacy_admin_fk_sql;
 EXECUTE drop_legacy_admin_fk_stmt;
 DEALLOCATE PREPARE drop_legacy_admin_fk_stmt;
 
--- Provision administrators manually. Never expose a public registration API.
--- Google: INSERT INTO Admin (email, display_name)
---        VALUES ('admin@example.com', 'Assignment Hub Admin');
--- Microsoft additionally requires the trusted tenant and Entra user object IDs;
--- see 008_admin_microsoft_identity.sql and the project setup guide.
+-- Provision administrators manually; never expose a public registration API.
+-- Superseded by migration 013 — see docs/roles.md for the current grant.

@@ -184,7 +184,7 @@ Database ชื่อ `assignment_hub` ถูกสร้างอัตโน�
 |---|---|
 | `University` | มหาวิทยาลัย + โดเมนอีเมล |
 | `User_Account` | ผู้ใช้ทุกคน ทั้งนักศึกษาและผู้ดูแล อยู่ตารางเดียวกัน + token สำหรับ login (Google/Microsoft) |
-| `Role` | บทบาท เช่น `super_admin`, `support_admin`, `analytics_viewer`, `student` |
+| `Role` | บทบาท — มีแค่ `admin` กับ `student` |
 | `Permission` | สิทธิ์ย่อยแบบ `resource` + `action` เช่น `user.suspend` |
 | `Role_Permission` | บทบาทไหนมีสิทธิ์อะไรบ้าง (m:n) |
 | `User_Role` | ผู้ใช้คนไหนถือบทบาทอะไร (m:n) |
@@ -240,6 +240,7 @@ migrate.bat         # Windows cmd
 | `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` — database ที่สร้างก่อนคอลัมน์นี้จะทำให้ `/api/assignments` ตอบ `ER_BAD_FIELD_ERROR` |
 | `012_rbac.sql` | RBAC: `User_Account` + `Role`/`Permission`/`Role_Permission`/`User_Role` และย้าย `Student`/`Admin` เป็น subtype |
 | `013_single_user_table.sql` | ยุบ `Student` กับ `Admin` เหลือ `User_Account` ตารางเดียว + รวมหน้า login เป็นหน้าเดียว |
+| `014_rename_admin_role.sql` | เหลือ 2 บทบาท — เปลี่ยน `super_admin` เป็น `admin` และลบบทบาทที่ไม่มีใครถือทิ้ง |
 
 เช็คว่าลงครบ:
 
@@ -254,13 +255,12 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assign
 To make an existing account an administrator, have them sign in once, then grant a role:
 
 ```sql
--- super_admin      = the full console, i.e. what every admin had before RBAC
--- support_admin    = dashboard + view and suspend users, nothing else
--- analytics_viewer = dashboard + business analytics only, cannot see users
+-- 'admin' is the full console; 'student' is an ordinary user. Those are the
+-- only two roles, and a user holds one of them.
 INSERT IGNORE INTO User_Role (user_id, role_id)
 SELECT u.user_id, r.role_id
 FROM User_Account u
-JOIN Role r ON r.role_code = 'super_admin'
+JOIN Role r ON r.role_code = 'admin'
 WHERE u.email = 'admin@example.edu';
 ```
 

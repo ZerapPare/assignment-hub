@@ -54,8 +54,7 @@ CREATE TABLE Admin_Audit_Log (
     INDEX idx_audit_log_target_created_at (target_type, target_id, created_at)
 );
 
--- Metrics are aggregated in the application and flushed periodically, rather
--- than inserting one row per request.
+-- Aggregated in the application and flushed periodically, not one row per request.
 CREATE TABLE System_Request_Metric_Hourly (
     bucket_start DATETIME PRIMARY KEY,
     request_count INT NOT NULL DEFAULT 0,
@@ -64,5 +63,5 @@ CREATE TABLE System_Request_Metric_Hourly (
     p95_response_ms DECIMAL(10,2) NULL
 );
 
--- Administrator identities are migrated to the separate Admin table by 007_admin_identity.sql.
--- Do not promote a Student row for new administrators; provision an Admin row instead.
+-- 007 moved administrator identities to a separate Admin table, and 013 folded
+-- everything back into User_Account. See docs/roles.md for the current model.

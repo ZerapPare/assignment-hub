@@ -64,8 +64,8 @@ async function writeAudit(executor, adminUserId, action, targetType, targetId, d
 }
 
 function userSelect() {
-  // full_name/email are aliased back to the names the console already renders,
-  // so folding Student into User_Account stays invisible to the frontend.
+  // Aliased to the names the console already renders, so folding Student into
+  // User_Account stayed invisible to the frontend.
   return `SELECT s.user_id, s.student_id,
                  s.full_name AS student_name, s.email AS university_email,
                  u.university_name, s.user_type, s.account_status, s.created_at,
@@ -83,10 +83,9 @@ function userSelect() {
           ) ac ON ac.student_id = s.user_id`;
 }
 
-// Authentication only. Permissions are attached per route below, never here:
-// this path prefix also covers /api/admin/business/*, which this router does
-// not own, so a blanket requirePermission would reject the business endpoints
-// before adminBusiness.js ever sees them.
+// Authentication only — permissions go per route below. This prefix also covers
+// /api/admin/business/*, which this router does not own, so a blanket
+// requirePermission here would reject those before adminBusiness.js sees them.
 router.use('/api/admin', requireAdmin);
 
 router.get('/api/admin/dashboard', requirePermission(P.DASHBOARD_VIEW), asyncRoute(async (req, res) => {
@@ -197,9 +196,8 @@ router.get('/api/admin/users/:id', requirePermission(P.USER_READ), asyncRoute(as
       ...statusTotals,
     },
     recent_errors: errorsResult[0].map(sanitizeErrorLog),
-    // Attribute-level check: who may see this user's record is user.read, but
-    // who may see which administrator did what to it is audit_log.read.
-    // super_admin holds both, so its response is unchanged from before RBAC.
+    // Attribute-level check: seeing the record is user.read, seeing which
+    // administrator did what to it is audit_log.read.
     recent_audit_actions: hasPermission(req.permissions, P.AUDIT_LOG_READ)
       ? auditsResult[0].map((row) => ({
         ...row,
@@ -219,10 +217,8 @@ router.patch('/api/admin/users/:id/status', requirePermission(P.USER_SUSPEND), a
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    // Now that everyone lives in one table this is a plain id comparison. It
-    // used to match on email address, because the acting administrator and the
-    // target student were rows in two different tables with two different key
-    // spaces and the address was the only thing they had in common.
+    // A plain id comparison now that everyone shares one table. It used to
+    // match on email, the only thing two separate key spaces had in common.
     if (userId === Number(req.session.userId)) {
       await conn.rollback();
       return res.status(400).json({ error: 'administrators cannot change their own status', request_id: req.requestId });

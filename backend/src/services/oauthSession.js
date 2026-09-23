@@ -12,9 +12,8 @@ const PROVIDERS = {
   microsoft: { accessCol: 'ms_access_token', refreshCol: 'ms_refresh_token' },
 };
 
-// `state` ties a callback to the browser session that started the flow.
-// Without it anyone can feed a victim a crafted callback URL — which under
-// ?link=1 would bind the attacker's platform account to the victim's.
+// `state` ties a callback to the session that started the flow. Without it a
+// crafted callback URL under ?link=1 binds an attacker's account to the victim's.
 function beginOAuth(req) {
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = state;
@@ -29,17 +28,14 @@ function checkState(req) {
   return Boolean(expected) && req.query.state === expected;
 }
 
-// Link mode finds the row by session, never by email — a personal Google
-// address rarely matches a university Microsoft one, and matching on email
-// would create a second Student instead of connecting the existing one.
 async function completeLogin({ req, provider, email, name, tokens, linkMode = Boolean(req.session.linkMode) }) {
   const { accessCol, refreshCol } = PROVIDERS[provider];
   const access = tokens.access_token || null;
   let userId;
 
-  // Link mode finds the row by session, never by email — a personal Google
+  // Link mode finds the row by session, never by email: a personal Google
   // address rarely matches a university Microsoft one, and matching on email
-  // would create a second Student instead of connecting the existing one.
+  // would create a second account instead of connecting the existing one.
   if (linkMode && req.session.userId) {
     userId = req.session.userId;
     const [[existing = {}]] = await pool.query(
@@ -62,9 +58,9 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
 
     if (rows.length) {
       userId = rows[0].user_id;
-      // university_id is refreshed on every login so accounts created before
-      // their University row existed get backfilled instead of staying NULL.
-      // The refresh token is kept when the provider doesn't return a new one.
+      // university_id is refreshed every login so accounts created before their
+      // University row existed get backfilled. The refresh token is kept when
+      // the provider returns no new one.
       await pool.query(
         `UPDATE User_Account
          SET full_name = ?, university_id = ?, ${accessCol} = ?, ${refreshCol} = ?,
@@ -81,9 +77,8 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
       );
       userId = ins.insertId;
 
-      // Signing in makes an ordinary account and nothing more. Any further
-      // access — the admin console included — comes from a role somebody grants
-      // this row afterwards, which is what replaced the old admin allowlist.
+      // Signing in makes an ordinary account and nothing more. The admin console
+      // needs a role granted afterwards — what replaced the old allowlist.
       await tryGrantRole(userId, ROLES.STUDENT);
     }
 
@@ -91,8 +86,8 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
     await trySetStudentId(userId, studentIdFromEmail(email));
   }
 
-  // Track only after the account write succeeds. Link mode is an integration
-  // action; a normal OAuth callback is an authenticated login.
+  // Tracked only after the account write succeeds. Link mode is an integration
+  // action; a normal callback is a login.
   void safeTrackEvent({
     userId,
     eventName: linkMode ? `integration.${provider}_connected` : 'auth.login_success',

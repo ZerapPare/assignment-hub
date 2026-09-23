@@ -8,9 +8,9 @@
 --
 -- Safe to skip entirely on a database created from the current init.sql.
 --
--- NULL means "the student has never set this status by hand", which is what
--- the Classroom sync checks before it is allowed to overwrite status. Do not
--- backfill it — that would hand every synced row back to the platform.
+-- NULL means "never set by hand", which the Classroom sync checks before it may
+-- overwrite status. Do not backfill — that hands every synced row back to the
+-- platform.
 -- =========================================================
 
 ALTER TABLE Assignment_Detail

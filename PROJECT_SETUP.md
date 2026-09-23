@@ -242,7 +242,7 @@ There is one login for everybody. The session holds a single `userId` and nothin
    INSERT IGNORE INTO User_Role (user_id, role_id)
    SELECT u.user_id, r.role_id
    FROM User_Account u
-   JOIN Role r ON r.role_code = 'super_admin'   -- or support_admin / analytics_viewer
+   JOIN Role r ON r.role_code = 'admin'   -- the only other role is 'student'
    WHERE u.email = 'admin@example.edu';
    ```
 

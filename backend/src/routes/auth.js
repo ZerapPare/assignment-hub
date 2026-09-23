@@ -27,9 +27,8 @@ router.get('/api/auth/google', (req, res) => {
     scope: [
       'openid', 'email', 'profile',
       'https://www.googleapis.com/auth/classroom.courses.readonly',
-      // read/write variant: the readonly scope can't be declared on the
-      // consent screen (console rejects it), and Google drops undeclared
-      // scopes from grants — the app itself never writes coursework
+      // read/write variant: the consent screen rejects the readonly scope, and
+      // Google drops undeclared scopes. The app never writes coursework.
       'https://www.googleapis.com/auth/classroom.coursework.me',
       'https://www.googleapis.com/auth/classroom.student-submissions.me.readonly',
       'https://www.googleapis.com/auth/classroom.announcements.readonly'
@@ -75,7 +74,8 @@ router.get('/api/auth/microsoft', (req, res) => {
   url.searchParams.set('redirect_uri', MS_REDIRECT_URL);
   url.searchParams.set('response_mode', 'query');
   url.searchParams.set('state', beginOAuth(req));
-  // offline_access is what gets Microsoft to return a refresh_token (like Google's access_type: 'offline').
+  // offline_access is what makes Microsoft return a refresh_token, like
+  // Google's access_type: 'offline'.
   url.searchParams.set('scope', 'openid email profile offline_access User.Read');
   res.redirect(url.toString());
 });

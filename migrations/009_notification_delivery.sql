@@ -1,15 +1,13 @@
 -- =========================================================
 -- 009 — notification delivery (FR-07, UC-8)
 --
--- Notification shipped with no unique key, so nothing would have stopped the
--- sender from mailing the same reminder on every pass. trigger_type says which
--- reminder a row is:
+-- Notification shipped with no unique key, so nothing stopped the sender from
+-- mailing the same reminder every pass. trigger_type says which reminder a row is:
 --
---   lead:<minutes>:<due date>   an advance reminder, e.g. lead:1440:2026-09-20 23:59
---   daily:<YYYY-MM-DD>          a daily repeat for that date
+--   lead:<minutes>:<due date>   advance reminder, e.g. lead:1440:2026-09-20 23:59
+--   daily:<YYYY-MM-DD>          daily repeat for that date
 --
--- The due date is part of the key on purpose: moving a deadline has to re-arm
--- the reminder, not stay quiet because 'lead:1440' was already sent once.
+-- The due date is in the key so moving a deadline re-arms the reminder.
 --
 -- attempt_count / next_attempt_at back the retry ladder. A row reads as:
 --
@@ -18,8 +16,8 @@
 --   sent                 sent_at set,  is_sent TRUE
 --   failed for good      sent_at set,  is_sent FALSE
 --
--- Only the last of those is what readFailures() in routes/notifications.js
--- counts, so the settings banner stays quiet while retries are still in flight.
+-- readFailures() in routes/notifications.js counts only the last, so the banner
+-- stays quiet while retries are in flight.
 --
 -- Apply once by hand on an existing database:
 --
@@ -29,10 +27,9 @@
 -- Safe to skip entirely on a database created from the current init.sql.
 -- =========================================================
 
--- Nothing has ever written this table, so it is empty and this cannot fail on
--- existing NULLs. It matters because a NULL trigger_type would slip past the
--- unique index below (NULLs never collide), which is exactly the duplicate the
--- index exists to prevent.
+-- The table is empty, so this cannot fail on existing NULLs. It matters because
+-- NULLs never collide, so a NULL trigger_type would slip past the unique index
+-- below — exactly the duplicate that index exists to prevent.
 ALTER TABLE Notification
     MODIFY COLUMN trigger_type VARCHAR(50) NOT NULL;
 
@@ -41,6 +38,5 @@ ALTER TABLE Notification
     ADD COLUMN next_attempt_at DATETIME NULL,
     ADD CONSTRAINT uq_notification_trigger UNIQUE (assignment_id, trigger_type);
 
--- The retry sweep looks up by (next_attempt_at, is_sent); without this it is a
--- full scan on every pass.
+-- The retry sweep looks up by (next_attempt_at, is_sent) — a full scan without this.
 CREATE INDEX idx_notification_retry ON Notification (next_attempt_at, is_sent);
