@@ -14,7 +14,11 @@ const {
   RETRY_MINUTES,
   MAX_ATTEMPTS,
   DAILY_WINDOW_DAYS,
+  DEFAULT_LEAD_MINUTES,
+  ANNOUNCEMENT_SEEN_HOURS,
+  ANNOUNCEMENT_FRESH_DAYS,
 } = require('../src/services/notificationSender');
+const { DEFAULTS } = require('../src/routes/notifications');
 
 const DUE = new Date('2026-09-20T23:59:00');
 
@@ -34,26 +38,45 @@ function candidate(overrides = {}) {
 }
 
 // A row as RETRY_SWEEP_SQL returns it: already claimed, carrying its own
-// trigger_type and how many attempts it has burned.
+// trigger_type, notification_id and how many attempts it has burned.
 function retryRow(overrides = {}) {
   const { minutes, ...rest } = candidate();
   return {
     ...rest,
+    notification_id: 900,
     trigger_type: 'lead:1440:2026-09-20 23:59',
     attempt_count: 1,
     ...overrides,
   };
 }
 
-// Dispatch on a distinctive fragment of each statement, return the mysql2 [rows, fields]
-// tuple, and throw on anything unrecognised so query drift is caught loudly.
 function dailyRow(overrides = {}) {
   const { minutes, ...rest } = candidate();
   return { ...rest, today: '2026-09-16', ...overrides };
 }
 
+// Shaped like ANNOUNCEMENT_SQL's projection — no due date, no title, because a
+// Classroom announcement has neither.
+function announcementRow(overrides = {}) {
+  return {
+    announcement_id: 42,
+    text_content: 'ส่งสไลด์บทที่ 4 แล้วนะครับ อ่านก่อนเข้าเรียนด้วย',
+    creator_name: 'อ.สมหญิง',
+    origin_link: 'https://classroom.google.com/c/abc/p/xyz',
+    posted_at: new Date('2026-09-16T14:30:00'),
+    course_name: 'ฐานข้อมูล',
+    email: 'student@uni.ac.th',
+    full_name: 'สมชาย',
+    ...overrides,
+  };
+}
+
+// Dispatch on a distinctive fragment of each statement, return the mysql2
+// [rows, fields] tuple, and throw on anything unrecognised so query drift is
+// caught loudly.
 function createFakeDb({
-  candidates = [], retries = [], daily = [], claimResults = null, cancelled = 0,
+  candidates = [], retries = [], daily = [], announcements = [],
+  announcementRetries = [], claimResults = null, cancelled = 0,
 } = {}) {
   const state = {
     cancelCalls: 0,
@@ -70,31 +93,47 @@ function createFakeDb({
         state.cancelCalls++;
         return [{ affectedRows: cancelled }, []];
       }
-      // Must be tested before the candidate query: both mention Notification_Setting.
+      // Order matters: every one of these mentions Notification or
+      // Notification_Setting, so each matcher has to be more specific than the
+      // ones below it.
+      if (sql.includes('an.announcement_id = n.announcement_id')) {
+        return [announcementRetries, []];
+      }
       if (sql.includes('FROM Notification n')) {
         return [retries, []];
       }
       if (sql.includes('ns.daily_repeat = TRUE')) {
         return [daily, []];
       }
-      if (sql.includes('FROM Notification_Setting ns')) {
+      if (sql.includes('announcement_notify')) {
+        return [announcements, []];
+      }
+      // The lead query is driven from User_Account and joins in the lead times,
+      // which is the one table only it names.
+      if (sql.includes('Notification_Lead_Time')) {
         return [candidates, []];
       }
       if (sql.includes('INSERT IGNORE INTO Notification')) {
-        state.claims.push({ assignmentId: params[0], triggerType: params[1] });
-        const affectedRows = claimResults ? Number(claimResults[claimIndex++]) : 1;
-        return [{ affectedRows }, []];
+        state.claims.push({
+          assignmentId: params[0], announcementId: params[1], triggerType: params[2],
+        });
+        const affectedRows = claimResults ? Number(claimResults[claimIndex]) : 1;
+        // The claim hands its primary key to deliver(), which is what the MARK_*
+        // statements key on now.
+        const insertId = 5000 + claimIndex;
+        claimIndex += 1;
+        return [{ affectedRows, insertId }, []];
       }
       if (sql.includes('is_sent = TRUE')) {
-        state.marked.push({ result: 'sent', assignmentId: params[0], triggerType: params[1] });
+        state.marked.push({ result: 'sent', notificationId: params[0] });
         return [{ affectedRows: 1 }, []];
       }
       if (sql.includes('next_attempt_at = DATE_ADD')) {
-        state.marked.push({ result: 'retrying', delayMinutes: params[0], assignmentId: params[1] });
+        state.marked.push({ result: 'retrying', delayMinutes: params[0], notificationId: params[1] });
         return [{ affectedRows: 1 }, []];
       }
       if (sql.includes('is_sent = FALSE')) {
-        state.marked.push({ result: 'failed', assignmentId: params[0], triggerType: params[1] });
+        state.marked.push({ result: 'failed', notificationId: params[0] });
         return [{ affectedRows: 1 }, []];
       }
       throw new Error(`Unexpected fake query: ${sql}`);
@@ -193,9 +232,8 @@ test('a claimed reminder is sent and marked sent', async () => {
   assert.equal(result.skipped, 0);
   assert.equal(mailer.sent.length, 1);
   assert.equal(mailer.sent[0].to, 'student@uni.ac.th');
-  assert.deepEqual(db.state.marked, [
-    { result: 'sent', assignmentId: 11, triggerType: 'lead:1440:2026-09-20 23:59' },
-  ]);
+  // Keyed on the row the claim created, not on the target columns.
+  assert.deepEqual(db.state.marked, [{ result: 'sent', notificationId: 5000 }]);
 });
 
 test('losing the claim sends nothing — this is what stops a duplicate email', async () => {
@@ -332,6 +370,7 @@ test('an empty candidate list touches no mail transport at all', async () => {
     cancelled: 0,
     candidates: 0,
     dailyCandidates: 0,
+    announcementCandidates: 0,
     retried: 0,
     sent: 0,
     failed: 0,
@@ -437,5 +476,94 @@ test('retries are attempted before fresh candidates', async () => {
 
   assert.equal(result.sent, 2);
   assert.deepEqual(mailer.sent.map(() => true), [true, true]);
-  assert.deepEqual(db.state.marked.map((m) => m.assignmentId), [99, 11]);
+  // The retry carries its own notification_id; the fresh candidate gets the one
+  // its claim just created.
+  assert.deepEqual(db.state.marked.map((m) => m.notificationId), [900, 5000]);
+});
+
+test('a new announcement is claimed and mailed', async () => {
+  const db = createFakeDb({ announcements: [announcementRow()] });
+  const mailer = collectingMailer();
+
+  const result = await run(db, mailer.sendMail, db.state);
+
+  assert.equal(result.announcementCandidates, 1);
+  assert.equal(result.sent, 1);
+  assert.match(mailer.sent[0].subject, /^\[ประกาศใหม่\] ฐานข้อมูล/);
+});
+
+// The claim carries the announcement in its own column and leaves assignment_id
+// NULL — chk_notification_target rejects a row that sets both or neither, so
+// getting this order wrong fails at the database rather than silently.
+test('an announcement claim targets the announcement, not an assignment', async () => {
+  const db = createFakeDb({
+    announcements: [announcementRow()],
+    candidates: [candidate()],
+  });
+
+  await run(db, collectingMailer().sendMail, db.state);
+
+  assert.deepEqual(db.state.claims, [
+    { assignmentId: 11, announcementId: null, triggerType: 'lead:1440:2026-09-20 23:59' },
+    { assignmentId: null, announcementId: 42, triggerType: 'ann:new' },
+  ]);
+});
+
+// Losing the claim is how a second pass — or a second container — finds out
+// somebody else already owns this announcement.
+test('losing the claim on an announcement sends nothing', async () => {
+  const db = createFakeDb({ announcements: [announcementRow()], claimResults: [0] });
+  const mailer = collectingMailer();
+
+  const result = await run(db, mailer.sendMail, db.state);
+
+  assert.equal(result.skipped, 1);
+  assert.equal(result.sent, 0);
+  assert.equal(mailer.sent.length, 0);
+});
+
+// RETRY_SWEEP_SQL inner-joins Assignment_Detail, so without a sweep of its own
+// a failed announcement mail would sit unsent forever.
+test('a failed announcement mail is retried by its own sweep', async () => {
+  const db = createFakeDb({
+    announcementRetries: [announcementRow({ notification_id: 77, trigger_type: 'ann:new', attempt_count: 1 })],
+  });
+
+  const result = await run(db, async () => { throw new Error('smtp down'); }, db.state);
+
+  assert.equal(result.retrying, 1);
+  assert.deepEqual(db.state.marked, [
+    { result: 'retrying', delayMinutes: 30, notificationId: 77 },
+  ]);
+});
+
+test('the announcement mail links to the stream, not to an assignment', () => {
+  const { text } = buildMessage(announcementRow(), 'ann:new');
+  assert.match(text, /\/stream/);
+  assert.doesNotMatch(text, /\/assignments\//);
+});
+
+// The dispatch used to treat anything that was not a lead time as a daily
+// repeat, which would have rendered an announcement against an undefined due
+// date. A fourth kind must fail loudly instead of picking the wrong template.
+test('buildMessage dispatches on the key prefix and refuses an unknown one', () => {
+  assert.match(buildMessage(announcementRow(), 'ann:new').subject, /ประกาศใหม่/);
+  assert.match(buildMessage(candidate(), 'lead:1440:x').subject, /ใกล้ครบกำหนด/);
+  assert.match(buildMessage(dailyRow(), 'daily:2026-09-16').subject, /งานค้าง|เลยกำหนดแล้ว/);
+  assert.throws(() => buildMessage(candidate(), 'wat:1'), /unknown notification trigger/);
+});
+
+test('the announcement freshness gate is two clocks wide', () => {
+  assert.equal(ANNOUNCEMENT_SEEN_HOURS, 24);
+  assert.equal(ANNOUNCEMENT_FRESH_DAYS, 2);
+});
+
+// The settings panel returns DEFAULTS without writing a row, so a student who
+// has never opened it has nothing in Notification_Setting. The sender has to
+// assume the same defaults or the panel promises a reminder nobody sends —
+// which is exactly what it did before LEAD_REMINDER_SQL started from
+// User_Account. These two constants are the contract between the two files.
+test('the sender and the settings panel agree on the default lead time', () => {
+  assert.deepEqual(DEFAULTS.lead_times, [DEFAULT_LEAD_MINUTES]);
+  assert.equal(DEFAULTS.enabled, true);
 });

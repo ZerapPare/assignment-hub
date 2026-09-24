@@ -22,6 +22,20 @@ const DAILY_WINDOW_DAYS = 7;
 // Finished, for FR-07.4. Keep in step with DONE in frontend/src/tasks.js.
 const DONE_STATUSES = ['submitted', 'completed'];
 
+// What a student who has never saved settings gets reminded at. Must match
+// DEFAULTS.lead_times in routes/notifications.js, which is what the panel shows
+// them — if the two disagree, the UI promises a reminder nobody sends.
+const DEFAULT_LEAD_MINUTES = 1440;
+
+// How recently an announcement must have arrived to count as news, and how
+// close its posting date has to be to when we first saw it. See ANNOUNCEMENT_SQL.
+const ANNOUNCEMENT_SEEN_HOURS = 24;
+const ANNOUNCEMENT_FRESH_DAYS = 2;
+
+// Classroom announcement bodies are unbounded free text, so the mail carries an
+// excerpt and a link rather than the whole thing.
+const ANNOUNCEMENT_EXCERPT_CHARS = 400;
+
 const THAI_MONTHS = [
   'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
   'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
@@ -63,6 +77,24 @@ function minutesUntil(dueDate, now = new Date()) {
 
 function dailyTriggerType(today) {
   return `daily:${today}`;
+}
+
+// Constant, unlike the other two: which announcement this is already lives in
+// Notification.announcement_id, and uq_notification_announcement keys on the
+// pair, so repeating the id here would say the same thing twice.
+function announcementTriggerType() {
+  return 'ann:new';
+}
+
+function isAnnouncementTrigger(triggerType) {
+  return String(triggerType || '').startsWith('ann:');
+}
+
+// Classroom bodies arrive with arbitrary blank lines and no length limit.
+function excerpt(text) {
+  const clean = String(text || '').replace(/\n{3,}/g, '\n\n').trim();
+  if (clean.length <= ANNOUNCEMENT_EXCERPT_CHARS) return clean;
+  return `${clean.slice(0, ANNOUNCEMENT_EXCERPT_CHARS).trimEnd()}…`;
 }
 
 // Floors, because this is an arbitrary gap: "2 วัน" beats "3210 นาที".
@@ -142,20 +174,69 @@ function buildBody({ studentName, title, courseName, dueDate, assignmentId, orig
   return lines.join('\n');
 }
 
+// An announcement has no due date and no title — the sync never writes one — so
+// the course name plus the opening words is what makes the subject actionable
+// from a list view.
+function buildAnnouncementSubject({ courseName, textContent }) {
+  const opening = excerpt(textContent).split('\n')[0].slice(0, 80).trim();
+  const head = `[ประกาศใหม่] ${courseName || 'ไม่ระบุวิชา'}`;
+  return opening ? `${head} — ${opening}` : head;
+}
+
+function buildAnnouncementBody({
+  studentName, courseName, creatorName, textContent, postedAt, originLink,
+}) {
+  const lines = [
+    `สวัสดี ${studentName || 'นักศึกษา'}`,
+    '',
+    `มีประกาศใหม่ในวิชา ${courseName || 'ไม่ระบุวิชา'}`,
+    '',
+    `ผู้ประกาศ:  ${creatorName || 'ไม่ระบุ'}`,
+    `เวลา:       ${formatThaiDateTime(postedAt)}`,
+    '',
+    excerpt(textContent) || '(ไม่มีข้อความ)',
+  ];
+  if (originLink) lines.push('', `เปิดใน Google Classroom: ${originLink}`);
+  lines.push(
+    '',
+    // Announcements live on /stream, not on an assignment page.
+    `ดูในระบบ: ${FRONTEND_URL}/stream`,
+    '',
+    'ปิดการแจ้งเตือนประกาศใหม่ได้ที่หน้าตั้งค่า',
+    '— Assignment Hub'
+  );
+  return lines.join('\n');
+}
+
 // Time conditions run in MySQL so there is one clock. due_date is wall-clock
 // (utils/dueDate.js), so backend and db must share TZ — docker-compose.yml sets it.
+//
+// Driven from User_Account, not Notification_Setting. routes/notifications.js
+// returns DEFAULTS without inserting a row (":18-26"), so a student who has
+// never opened the settings panel has no row at all — and an inner join here
+// meant the panel told them reminders were on while the sender could not see
+// them. COALESCE below is what makes the two agree.
 const LEAD_REMINDER_SQL = `
   SELECT a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
          s.email, s.full_name,
          lt.minutes
-  FROM Notification_Setting ns
-  JOIN User_Account s                 ON s.user_id = ns.user_id
-  JOIN Notification_Lead_Time lt ON lt.user_id = ns.user_id
-  JOIN Course c                  ON c.student_id = ns.user_id
-  JOIN Assignment a              ON a.course_id = c.course_id
-  JOIN Assignment_Detail d       ON d.assignment_id = a.assignment_id
-  WHERE ns.enabled = TRUE
+  FROM User_Account s
+  LEFT JOIN Notification_Setting ns ON ns.user_id = s.user_id
+  JOIN (
+    SELECT user_id, minutes FROM Notification_Lead_Time
+    UNION ALL
+    -- The documented default, for accounts that have never saved settings.
+    -- Clearing every lead time *after* saving is a different, real state: the
+    -- row exists, so this arm does not fire and they get nothing.
+    SELECT u.user_id, ?
+    FROM User_Account u
+    WHERE NOT EXISTS (SELECT 1 FROM Notification_Setting x WHERE x.user_id = u.user_id)
+  ) lt                     ON lt.user_id = s.user_id
+  JOIN Course c            ON c.student_id = s.user_id
+  JOIN Assignment a        ON a.course_id = c.course_id
+  JOIN Assignment_Detail d ON d.assignment_id = a.assignment_id
+  WHERE COALESCE(ns.enabled, TRUE) = TRUE
     AND s.account_status = 'active'
     AND d.due_date IS NOT NULL
     AND (d.status IS NULL OR d.status NOT IN (?, ?))
@@ -167,6 +248,9 @@ const LEAD_REMINDER_SQL = `
 // FR-07.2 — one mail per unfinished task after the chosen hour, deduplicated by
 // the daily:<date> key. CURDATE() rides along so the key uses the database's
 // clock: a pass crossing midnight must not straddle two dates.
+//
+// Inner join here, unlike LEAD_REMINDER_SQL, and deliberately: daily_repeat
+// defaults to false, so "no settings row" already means "no daily repeat".
 const DAILY_REPEAT_SQL = `
   SELECT a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
@@ -188,18 +272,46 @@ const DAILY_REPEAT_SQL = `
   ORDER BY d.due_date
 `;
 
-// The whole concurrency story: whoever inserts the row owns the send. A second
-// pass or container gets affectedRows 0 and skips, so nothing is mailed twice.
-const CLAIM_SQL = `
-  INSERT IGNORE INTO Notification
-    (assignment_id, trigger_type, is_sent, attempt_count, next_attempt_at)
-  VALUES (?, ?, FALSE, 0, DATE_ADD(NOW(), INTERVAL ? MINUTE))
+// New Classroom announcements, gated by two clocks rather than one.
+//
+// created_at alone is not enough: a first sync of an old course brings back a
+// term of posts at once, all stamped "seen just now". posted_at alone is not
+// enough either, because we may only have learned of a week-old post today.
+// Requiring both — seen recently AND posted around the time we saw it — is what
+// keeps 200 archived announcements from becoming 200 emails.
+const ANNOUNCEMENT_SQL = `
+  SELECT an.announcement_id, an.text_content, an.creator_name,
+         an.origin_link, an.posted_at,
+         c.course_name,
+         s.email, s.full_name
+  FROM User_Account s
+  LEFT JOIN Notification_Setting ns ON ns.user_id = s.user_id
+  JOIN Course c        ON c.student_id = s.user_id
+  JOIN Announcement an ON an.course_id = c.course_id
+  WHERE COALESCE(ns.enabled, TRUE) = TRUE
+    AND COALESCE(ns.announcement_notify, TRUE) = TRUE
+    AND s.account_status = 'active'
+    AND an.created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+    AND (an.posted_at IS NULL OR an.posted_at >= DATE_SUB(an.created_at, INTERVAL ? DAY))
+  ORDER BY an.posted_at DESC
 `;
 
+// The whole concurrency story: whoever inserts the row owns the send. A second
+// pass or container gets affectedRows 0 and skips, so nothing is mailed twice.
+// Exactly one of the two target columns is set; chk_notification_target says so.
+const CLAIM_SQL = `
+  INSERT IGNORE INTO Notification
+    (assignment_id, announcement_id, trigger_type, is_sent, attempt_count, next_attempt_at)
+  VALUES (?, ?, ?, FALSE, 0, DATE_ADD(NOW(), INTERVAL ? MINUTE))
+`;
+
+// Keyed on the primary key rather than the target columns: CLAIM_SQL hands back
+// insertId in the branch that won the claim, and the retry sweep selects it, so
+// neither caller has to know which kind of target the row carries.
 const MARK_SENT_SQL = `
   UPDATE Notification
      SET sent_at = NOW(), is_sent = TRUE, next_attempt_at = NULL
-   WHERE assignment_id = ? AND trigger_type = ?
+   WHERE notification_id = ?
 `;
 
 // Retries left. sent_at stays NULL, which keeps the row out of readFailures():
@@ -208,7 +320,7 @@ const MARK_RETRY_SQL = `
   UPDATE Notification
      SET attempt_count = attempt_count + 1,
          next_attempt_at = DATE_ADD(NOW(), INTERVAL ? MINUTE)
-   WHERE assignment_id = ? AND trigger_type = ?
+   WHERE notification_id = ?
 `;
 
 // Out of retries. sent_at set with is_sent false is what readFailures() counts,
@@ -217,13 +329,13 @@ const MARK_FAILED_SQL = `
   UPDATE Notification
      SET sent_at = NOW(), is_sent = FALSE,
          attempt_count = attempt_count + 1, next_attempt_at = NULL
-   WHERE assignment_id = ? AND trigger_type = ?
+   WHERE notification_id = ?
 `;
 
 // Rows whose lease or retry delay expired. attempt_count 0 is included: that is
 // a claim whose pass died before sending, and it deserves the same second chance.
 const RETRY_SWEEP_SQL = `
-  SELECT n.trigger_type, n.attempt_count,
+  SELECT n.notification_id, n.trigger_type, n.attempt_count,
          a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
          s.email, s.full_name
@@ -232,15 +344,43 @@ const RETRY_SWEEP_SQL = `
   JOIN Assignment a             ON a.assignment_id = d.assignment_id
   JOIN Course c                 ON c.course_id = a.course_id
   JOIN User_Account s                ON s.user_id = c.student_id
-  JOIN Notification_Setting ns  ON ns.user_id = s.user_id
+  -- LEFT, for the same reason LEAD_REMINDER_SQL is: a claim can belong to a
+  -- student with no settings row, and an inner join would strand it unsent.
+  LEFT JOIN Notification_Setting ns  ON ns.user_id = s.user_id
   WHERE n.is_sent = FALSE
     AND n.sent_at IS NULL
     AND n.attempt_count < ?
     AND n.next_attempt_at IS NOT NULL
     AND n.next_attempt_at <= NOW()
-    AND ns.enabled = TRUE
+    AND COALESCE(ns.enabled, TRUE) = TRUE
     AND s.account_status = 'active'
     AND (d.status IS NULL OR d.status NOT IN (?, ?))
+  ORDER BY n.next_attempt_at
+`;
+
+// The announcement half of the sweep. RETRY_SWEEP_SQL inner-joins
+// Assignment_Detail and filters on d.status, so an announcement row matches
+// none of it and would never be retried. The two select disjoint columns, which
+// is why this is a second statement rather than a UNION.
+const ANNOUNCEMENT_RETRY_SWEEP_SQL = `
+  SELECT n.notification_id, n.trigger_type, n.attempt_count,
+         an.announcement_id, an.text_content, an.creator_name,
+         an.origin_link, an.posted_at,
+         c.course_name,
+         s.email, s.full_name
+  FROM Notification n
+  JOIN Announcement an              ON an.announcement_id = n.announcement_id
+  JOIN Course c                     ON c.course_id = an.course_id
+  JOIN User_Account s               ON s.user_id = c.student_id
+  LEFT JOIN Notification_Setting ns ON ns.user_id = s.user_id
+  WHERE n.is_sent = FALSE
+    AND n.sent_at IS NULL
+    AND n.attempt_count < ?
+    AND n.next_attempt_at IS NOT NULL
+    AND n.next_attempt_at <= NOW()
+    AND COALESCE(ns.enabled, TRUE) = TRUE
+    AND COALESCE(ns.announcement_notify, TRUE) = TRUE
+    AND s.account_status = 'active'
   ORDER BY n.next_attempt_at
 `;
 
@@ -264,6 +404,23 @@ async function defaultLogFailure(err, context) {
 // The trigger key decides which mail this is, so a retry rebuilds the right one
 // without having to remember which pass first claimed it.
 function buildMessage(row, triggerType) {
+  if (isAnnouncementTrigger(triggerType)) {
+    return {
+      subject: buildAnnouncementSubject({
+        courseName: row.course_name,
+        textContent: row.text_content,
+      }),
+      text: buildAnnouncementBody({
+        studentName: row.full_name,
+        courseName: row.course_name,
+        creatorName: row.creator_name,
+        textContent: row.text_content,
+        postedAt: row.posted_at,
+        originLink: row.origin_link,
+      }),
+    };
+  }
+
   const common = {
     studentName: row.full_name,
     title: row.title,
@@ -273,40 +430,50 @@ function buildMessage(row, triggerType) {
     originLink: row.origin_link,
   };
 
-  // No lead time in the key means this is a daily repeat.
-  if (leadMinutesFromTrigger(triggerType) === null) {
+  if (leadMinutesFromTrigger(triggerType) !== null) {
+    return {
+      subject: buildSubject({ title: row.title, dueDate: row.due_date }),
+      text: buildBody(common),
+    };
+  }
+  if (String(triggerType).startsWith('daily:')) {
     return {
       subject: buildDailySubject({ title: row.title, dueDate: row.due_date }),
       text: buildDailyBody(common),
     };
   }
-  return {
-    subject: buildSubject({ title: row.title, dueDate: row.due_date }),
-    text: buildBody(common),
-  };
+
+  // Dispatched on the key prefix, with no fall-through. This used to be a
+  // two-way branch where anything that was not a lead time counted as daily —
+  // which would have rendered an announcement against an undefined due_date and
+  // mailed the student about a task that does not exist. A fourth kind should
+  // fail here, loudly, rather than quietly pick the wrong template.
+  throw new Error(`unknown notification trigger: ${triggerType}`);
 }
 
 // Sends one reminder and records the outcome. Shared by the first attempt and
 // every retry so the two cannot drift. `attemptsSoFar` picks the retry delay.
-async function deliver({ db, sendMail, logFailure, row, triggerType, attemptsSoFar }) {
+async function deliver({ db, sendMail, logFailure, row, triggerType, notificationId, attemptsSoFar }) {
   try {
     const { subject, text } = buildMessage(row, triggerType);
     await sendMail({ to: row.email, subject, text });
-    await db.query(MARK_SENT_SQL, [row.assignment_id, triggerType]);
+    await db.query(MARK_SENT_SQL, [notificationId]);
     return 'sent';
   } catch (err) {
+    // FR-07.7 — recorded on the row and in System_Error_Log either way. One bad
     // address must not stop the pass.
     const delayMinutes = RETRY_MINUTES[attemptsSoFar];
     const outcome = delayMinutes === undefined ? 'failed' : 'retrying';
 
     if (outcome === 'retrying') {
-      await db.query(MARK_RETRY_SQL, [delayMinutes, row.assignment_id, triggerType]);
+      await db.query(MARK_RETRY_SQL, [delayMinutes, notificationId]);
     } else {
-      await db.query(MARK_FAILED_SQL, [row.assignment_id, triggerType]);
+      await db.query(MARK_FAILED_SQL, [notificationId]);
     }
 
     await logFailure(err, {
-      assignment_id: row.assignment_id,
+      assignment_id: row.assignment_id ?? null,
+      announcement_id: row.announcement_id ?? null,
       trigger_type: triggerType,
       attempt: attemptsSoFar + 1,
       outcome,
@@ -327,33 +494,52 @@ async function runNotificationPass({
   const tally = { sent: 0, failed: 0, retrying: 0, skipped: 0 };
   const count = (outcome) => { tally[outcome] += 1; };
 
-  // Retries first: already-claimed work the system promised to finish.
-  const [retries] = await db.query(RETRY_SWEEP_SQL, [MAX_ATTEMPTS, ...DONE_STATUSES]);
-  for (const row of retries) {
-    count(await deliver({
-      db,
-      sendMail,
-      logFailure,
-      row,
-      triggerType: row.trigger_type,
-      leadMinutes: leadMinutesFromTrigger(row.trigger_type),
-      attemptsSoFar: row.attempt_count,
-    }));
-  }
+  // Retries first: already-claimed work the system promised to finish. Two
+  // sweeps because the two kinds of row reach their student through different
+  // tables — see ANNOUNCEMENT_RETRY_SWEEP_SQL.
+  const sweep = async (rows) => {
+    for (const row of rows) {
+      count(await deliver({
+        db,
+        sendMail,
+        logFailure,
+        row,
+        triggerType: row.trigger_type,
+        notificationId: row.notification_id,
+        attemptsSoFar: row.attempt_count,
+      }));
+    }
+  };
 
-  // Claim, then send. Shared by both kinds of fresh candidate.
+  const [retries] = await db.query(RETRY_SWEEP_SQL, [MAX_ATTEMPTS, ...DONE_STATUSES]);
+  await sweep(retries);
+
+  const [announcementRetries] = await db.query(ANNOUNCEMENT_RETRY_SWEEP_SQL, [MAX_ATTEMPTS]);
+  await sweep(announcementRetries);
+
+  // Claim, then send. Shared by all three kinds of fresh candidate; exactly one
+  // of the two target columns is set, and chk_notification_target enforces it.
   const claimAndSend = async (row, triggerType) => {
-    const [claim] = await db.query(CLAIM_SQL, [row.assignment_id, triggerType, CLAIM_LEASE_MINUTES]);
+    const [claim] = await db.query(CLAIM_SQL, [
+      row.assignment_id ?? null,
+      row.announcement_id ?? null,
+      triggerType,
+      CLAIM_LEASE_MINUTES,
+    ]);
 
     // Already claimed or already sent — someone else owns this reminder.
     if (!claim.affectedRows) {
       count('skipped');
       return;
     }
-    count(await deliver({ db, sendMail, logFailure, row, triggerType, attemptsSoFar: 0 }));
+    count(await deliver({
+      db, sendMail, logFailure, row, triggerType, notificationId: claim.insertId, attemptsSoFar: 0,
+    }));
   };
 
-  const [rows] = await db.query(LEAD_REMINDER_SQL, DONE_STATUSES);
+  // The default lead time is bound first: its placeholder sits in the FROM
+  // clause, ahead of the status filters in the WHERE.
+  const [rows] = await db.query(LEAD_REMINDER_SQL, [DEFAULT_LEAD_MINUTES, ...DONE_STATUSES]);
   for (const row of rows) {
     await claimAndSend(row, leadTriggerType(row.minutes, row.due_date));
   }
@@ -367,11 +553,20 @@ async function runNotificationPass({
     await claimAndSend(row, dailyTriggerType(row.today));
   }
 
+  const [announcements] = await db.query(ANNOUNCEMENT_SQL, [
+    ANNOUNCEMENT_SEEN_HOURS,
+    ANNOUNCEMENT_FRESH_DAYS,
+  ]);
+  for (const row of announcements) {
+    await claimAndSend(row, announcementTriggerType());
+  }
+
   return {
     cancelled: cancelled?.affectedRows ?? 0,
     candidates: rows.length,
     dailyCandidates: daily.length,
-    retried: retries.length,
+    announcementCandidates: announcements.length,
+    retried: retries.length + announcementRetries.length,
     ...tally,
   };
 }
@@ -405,15 +600,22 @@ module.exports = {
   buildBody,
   buildDailySubject,
   buildDailyBody,
+  buildAnnouncementSubject,
+  buildAnnouncementBody,
   buildMessage,
   formatThaiDateTime,
   humanizeGap,
   minutesUntil,
   leadTriggerType,
   dailyTriggerType,
+  announcementTriggerType,
   leadMinutesFromTrigger,
+  isAnnouncementTrigger,
   DONE_STATUSES,
   RETRY_MINUTES,
   MAX_ATTEMPTS,
   DAILY_WINDOW_DAYS,
+  DEFAULT_LEAD_MINUTES,
+  ANNOUNCEMENT_SEEN_HOURS,
+  ANNOUNCEMENT_FRESH_DAYS,
 };

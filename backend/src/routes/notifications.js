@@ -22,6 +22,7 @@ const DEFAULTS = {
   lead_times: [1440],
   daily_repeat: false,
   daily_repeat_time: '08:00',
+  announcement_notify: true,
   last_custom_minutes: null,
 };
 
@@ -31,16 +32,17 @@ function toHhMm(value) {
   return String(value).slice(0, 5);
 }
 
-// Notification hangs off Assignment_Detail, so reaching the owning student means
-// walking up to Course. A failed send is one with sent_at stamped but is_sent
-// still false — see MARK_FAILED_SQL in services/notificationSender.js.
+// A notification hangs off either an assignment or an announcement, so the
+// owning student is reached through whichever one is set — both routes end at
+// Course. A failed send is one with sent_at stamped but is_sent still false;
+// see MARK_FAILED_SQL in services/notificationSender.js.
 async function readFailures(userId) {
   const [rows] = await pool.query(
     `SELECT COUNT(*) AS failed_count, MAX(n.sent_at) AS last_failed_at
      FROM Notification n
-     JOIN Assignment_Detail d ON n.assignment_id = d.assignment_id
-     JOIN Assignment a        ON d.assignment_id = a.assignment_id
-     JOIN Course c            ON a.course_id = c.course_id
+     LEFT JOIN Assignment a    ON a.assignment_id = n.assignment_id
+     LEFT JOIN Announcement an ON an.announcement_id = n.announcement_id
+     JOIN Course c             ON c.course_id = COALESCE(a.course_id, an.course_id)
      WHERE c.student_id = ? AND n.is_sent = FALSE AND n.sent_at IS NOT NULL`,
     [userId]
   );
@@ -52,7 +54,7 @@ async function readFailures(userId) {
 
 async function readSettings(userId) {
   const [settings] = await pool.query(
-    `SELECT enabled, daily_repeat, daily_repeat_time, last_custom_minutes
+    `SELECT enabled, daily_repeat, daily_repeat_time, announcement_notify, last_custom_minutes
      FROM Notification_Setting WHERE user_id = ? LIMIT 1`,
     [userId]
   );
@@ -73,6 +75,7 @@ async function readSettings(userId) {
     lead_times: leadTimes.map((r) => r.minutes),
     daily_repeat: Boolean(row.daily_repeat),
     daily_repeat_time: toHhMm(row.daily_repeat_time),
+    announcement_notify: Boolean(row.announcement_notify),
     last_custom_minutes: row.last_custom_minutes,
     ...failures,
   };
@@ -97,9 +100,18 @@ function parseLeadMinutes(value) {
 
 // The panel always sends its whole state, so this replaces rather than merges.
 router.put('/api/notification-settings', requireAuth, async (req, res) => {
-  const { enabled, daily_repeat: dailyRepeat, daily_repeat_time: dailyRepeatTime } = req.body ?? {};
+  const {
+    enabled,
+    daily_repeat: dailyRepeat,
+    daily_repeat_time: dailyRepeatTime,
+    announcement_notify: announcementNotify,
+  } = req.body ?? {};
 
-  if (typeof enabled !== 'boolean' || typeof dailyRepeat !== 'boolean') {
+  if (
+    typeof enabled !== 'boolean'
+    || typeof dailyRepeat !== 'boolean'
+    || typeof announcementNotify !== 'boolean'
+  ) {
     return res.status(400).json({ error: 'ค่าเปิด/ปิดการแจ้งเตือนไม่ถูกต้อง' });
   }
   if (typeof dailyRepeatTime !== 'string' || !TIME_RE.test(dailyRepeatTime)) {
@@ -138,14 +150,15 @@ router.put('/api/notification-settings', requireAuth, async (req, res) => {
 
     await conn.query(
       `INSERT INTO Notification_Setting
-         (user_id, enabled, daily_repeat, daily_repeat_time, last_custom_minutes)
-       VALUES (?, ?, ?, ?, ?)
+         (user_id, enabled, daily_repeat, daily_repeat_time, announcement_notify, last_custom_minutes)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          enabled = VALUES(enabled),
          daily_repeat = VALUES(daily_repeat),
          daily_repeat_time = VALUES(daily_repeat_time),
+         announcement_notify = VALUES(announcement_notify),
          last_custom_minutes = VALUES(last_custom_minutes)`,
-      [req.session.userId, enabled, dailyRepeat, `${dailyRepeatTime}:00`, lastCustom]
+      [req.session.userId, enabled, dailyRepeat, `${dailyRepeatTime}:00`, announcementNotify, lastCustom]
     );
 
     await conn.query('DELETE FROM Notification_Lead_Time WHERE user_id = ?', [req.session.userId]);
@@ -252,4 +265,8 @@ router.post('/api/notification-settings/test', requireAuth, async (req, res) => 
   res.json({ ok: true, to: student.email, delivered: delivery.delivered !== false });
 });
 
+// DEFAULTS rides along so a test can hold it against the sender's own idea of
+// the same defaults — the panel promising a reminder nobody sends is exactly
+// the bug that made the sender start from User_Account instead of this table.
 module.exports = router;
+module.exports.DEFAULTS = DEFAULTS;

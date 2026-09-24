@@ -44,6 +44,7 @@ const snapshot = (s) =>
     [...s.leadTimes].sort((a, b) => a - b),
     s.dailyRepeat,
     s.dailyRepeatTime,
+    s.announcementNotify,
     s.lastCustom ?? null,
   ]);
 
@@ -55,6 +56,7 @@ function NotificationSettings({ email }) {
   const [leadTimes, setLeadTimes] = useState([]);
   const [dailyRepeat, setDailyRepeat] = useState(false);
   const [dailyRepeatTime, setDailyRepeatTime] = useState('08:00');
+  const [announcementNotify, setAnnouncementNotify] = useState(true);
   const [lastCustom, setLastCustom] = useState(null);
   const [failures, setFailures] = useState({ failed_count: 0, last_failed_at: null });
 
@@ -80,6 +82,7 @@ function NotificationSettings({ email }) {
     setLeadTimes(data.lead_times);
     setDailyRepeat(data.daily_repeat);
     setDailyRepeatTime(data.daily_repeat_time);
+    setAnnouncementNotify(data.announcement_notify);
     setLastCustom(data.last_custom_minutes);
     setFailures({
       failed_count: data.failed_count ?? 0,
@@ -91,6 +94,7 @@ function NotificationSettings({ email }) {
         leadTimes: data.lead_times,
         dailyRepeat: data.daily_repeat,
         dailyRepeatTime: data.daily_repeat_time,
+        announcementNotify: data.announcement_notify,
         lastCustom: data.last_custom_minutes,
       })
     );
@@ -126,7 +130,9 @@ function NotificationSettings({ email }) {
     [tasks]
   );
 
-  const current = snapshot({ enabled, leadTimes, dailyRepeat, dailyRepeatTime, lastCustom });
+  const current = snapshot({
+    enabled, leadTimes, dailyRepeat, dailyRepeatTime, announcementNotify, lastCustom,
+  });
   const dirty = saved !== null && current !== saved;
 
   // Any edit invalidates the "saved" note, the same way the student-id form
@@ -178,6 +184,7 @@ function NotificationSettings({ email }) {
           lead_times: leadTimes,
           daily_repeat: dailyRepeat,
           daily_repeat_time: dailyRepeatTime,
+          announcement_notify: announcementNotify,
           last_custom_minutes: lastCustom,
         }),
       });
@@ -217,10 +224,9 @@ function NotificationSettings({ email }) {
     }
   };
 
-  // Everything below the master switch dims and stops responding when
-  // notifications are off — the switch still saves, so the settings survive.
-  const off = !enabled;
-  const bodyStyle = { ...styles.body, opacity: off ? 0.5 : 1 };
+  // The master switch decides whether mail goes out, not whether the settings
+  // below can be touched. Dimming and disabling them made the card read as
+  // broken; they stay editable and simply take effect when it is switched on.
 
   return (
     <div style={styles.card}>
@@ -246,7 +252,7 @@ function NotificationSettings({ email }) {
       {loadError && <p style={styles.error}>⚠️ {loadError}</p>}
 
       {!loading && !loadError && (
-        <div style={bodyStyle}>
+        <div style={styles.body}>
           <div style={styles.section}>
             <div style={styles.sectionTitle}>แจ้งเตือนล่วงหน้าก่อนกำหนดส่ง</div>
 
@@ -257,13 +263,11 @@ function NotificationSettings({ email }) {
                   <button
                     key={minutes}
                     type="button"
-                    disabled={off}
                     onClick={() => toggleLead(minutes)}
                     aria-pressed={on}
                     style={{
                       ...styles.chip,
                       ...(on ? styles.chipOn : null),
-                      cursor: off ? 'default' : 'pointer',
                     }}
                   >
                     {formatLeadTime(minutes)}
@@ -273,18 +277,17 @@ function NotificationSettings({ email }) {
 
               <button
                 type="button"
-                disabled={off}
                 onClick={() => {
                   setCustomOpen((v) => !v);
                   setCustomError(null);
                 }}
-                style={{ ...styles.chip, ...styles.chipCustom, cursor: off ? 'default' : 'pointer' }}
+                style={{ ...styles.chip, ...styles.chipCustom }}
               >
                 + กำหนดเอง
               </button>
             </div>
 
-            {customOpen && !off && (
+            {customOpen && (
               <div style={styles.customRow}>
                 <input
                   type="number"
@@ -326,9 +329,8 @@ function NotificationSettings({ email }) {
                   <span>ล่าสุดที่กำหนดเอง</span>
                   <button
                     type="button"
-                    disabled={off}
                     onClick={() => toggleLead(lastCustom)}
-                    style={{ ...styles.hintPill, cursor: off ? 'default' : 'pointer' }}
+                    style={{ ...styles.hintPill, cursor: 'pointer' }}
                   >
                     {formatLeadTime(lastCustom)}
                   </button>
@@ -345,15 +347,27 @@ function NotificationSettings({ email }) {
             <input
               type="time"
               value={dailyRepeatTime}
-              disabled={off}
               onChange={edit((e) => setDailyRepeatTime(e.target.value))}
               style={{ ...styles.input, width: 96 }}
             />
             <Toggle
               checked={dailyRepeat}
               onChange={edit(setDailyRepeat)}
-              disabled={off}
               label="แจ้งเตือนซ้ำรายวัน"
+            />
+          </div>
+
+          <div style={styles.repeatBox}>
+            <div style={styles.repeatText}>
+              <div style={styles.repeatTitle}>แจ้งเตือนประกาศใหม่</div>
+              <div style={styles.subtitle}>
+                ส่งอีเมลเมื่อมีประกาศใหม่ในวิชาที่ซิงก์มาจาก Google Classroom
+              </div>
+            </div>
+            <Toggle
+              checked={announcementNotify}
+              onChange={edit(setAnnouncementNotify)}
+              label="แจ้งเตือนประกาศใหม่"
             />
           </div>
 
@@ -395,12 +409,23 @@ function NotificationSettings({ email }) {
             </div>
           )}
 
+        </div>
+      )}
+
+      {/* Its own block, outside the settings body: these act on the card as a
+          whole rather than on any one setting. */}
+      {!loading && !loadError && (
+        <div style={styles.footer}>
           <div style={styles.actions}>
+            {/* Always pressable. Dimming it when nothing had changed made it
+                read as broken, especially under an already-dimmed card — and
+                re-saving identical settings is an idempotent upsert anyway.
+                Whether there is anything to save is said in words below. */}
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !dirty}
-              style={{ ...styles.primaryBtn, opacity: saving || !dirty ? 0.6 : 1 }}
+              disabled={saving}
+              style={{ ...styles.primaryBtn, opacity: saving ? 0.6 : 1 }}
             >
               {saving ? 'กำลังบันทึก…' : 'บันทึกการตั้งค่า'}
             </button>
@@ -414,6 +439,11 @@ function NotificationSettings({ email }) {
             </button>
           </div>
 
+          {/* Replaces the dimmed button as the "you have unsaved changes"
+              signal, so the state is stated rather than implied by a colour. */}
+          {dirty && !saving && (
+            <p style={styles.subtitle}>ยังไม่ได้บันทึกการเปลี่ยนแปลง</p>
+          )}
           {saveError && <p style={styles.error}>⚠️ {saveError}</p>}
           {justSaved && <p style={styles.success}>บันทึกการตั้งค่าแล้ว</p>}
           {testResult && (
@@ -518,6 +548,8 @@ const styles = {
   failBox: { padding: 14, borderRadius: R.card, background: C.pinkBg },
   failTitle: { fontSize: 13, fontWeight: 700, color: C.pinkDark },
   failMeta: { fontSize: 12.5, color: C.pinkDark, marginTop: 4, opacity: 0.85 },
+
+  footer: { marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 },
 
   actions: { display: 'flex', gap: 10, flexWrap: 'wrap' },
 

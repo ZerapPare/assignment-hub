@@ -183,40 +183,30 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
         const creator = await getCreatorProfile(classroom, ann.creatorUserId, profileCache);
         const postedAt = isoToMysqlDateTime(ann.creationTime);
 
-        const [existingAnn] = await pool.query(
-          'SELECT announcement_id FROM Announcement WHERE external_announcement_id = ? AND course_id = ? LIMIT 1',
-          [ann.id, courseId]
+        // One upsert against uq_announcement_external, rather than a SELECT and
+        // a branch: two syncs running at once both used to miss and both
+        // insert. created_at is left alone on the update path, so it keeps
+        // meaning "when we first saw this post" — which is what the reminder
+        // sender uses to tell a new announcement from an edited old one.
+        await pool.query(
+          `INSERT INTO Announcement (external_announcement_id, text_content, creator_name, creator_email, origin_link, posted_at, course_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             text_content  = VALUES(text_content),
+             creator_name  = VALUES(creator_name),
+             creator_email = VALUES(creator_email),
+             origin_link   = VALUES(origin_link),
+             posted_at     = VALUES(posted_at)`,
+          [
+            ann.id,
+            ann.text || '',
+            creator.name,
+            creator.email,
+            ann.alternateLink || null,
+            postedAt,
+            courseId,
+          ]
         );
-
-        if (existingAnn.length) {
-          await pool.query(
-            `UPDATE Announcement
-             SET text_content = ?, creator_name = ?, creator_email = ?, origin_link = ?, posted_at = ?
-             WHERE announcement_id = ?`,
-            [
-              ann.text || '',
-              creator.name,
-              creator.email,
-              ann.alternateLink || null,
-              postedAt,
-              existingAnn[0].announcement_id,
-            ]
-          );
-        } else {
-          await pool.query(
-            `INSERT INTO Announcement (external_announcement_id, text_content, creator_name, creator_email, origin_link, posted_at, course_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
-              ann.id,
-              ann.text || '',
-              creator.name,
-              creator.email,
-              ann.alternateLink || null,
-              postedAt,
-              courseId,
-            ]
-          );
-        }
         announcementsSynced++;
       }
     }

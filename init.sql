@@ -224,17 +224,24 @@ CREATE TABLE Course (
 
 CREATE TABLE IF NOT EXISTS Announcement (
     announcement_id           INT AUTO_INCREMENT PRIMARY KEY,
-    external_announcement_id  VARCHAR(100),
+    external_announcement_id  VARCHAR(100) NOT NULL,
     title                     VARCHAR(255),
     text_content              TEXT NOT NULL,
     creator_name              VARCHAR(255),
     creator_email             VARCHAR(255),
     origin_link               VARCHAR(500),
     posted_at                 DATETIME,
+    -- When we first saw it, which is not when it was posted: a first sync of an
+    -- old course brings back a term of history at once. The reminder sender
+    -- needs both to tell a genuinely new post from one that is merely new to us.
+    created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     course_id                 INT NOT NULL,
     CONSTRAINT fk_announcement_course
         FOREIGN KEY (course_id) REFERENCES Course(course_id)
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+    -- Makes the sync an upsert instead of SELECT-then-branch, so two overlapping
+    -- passes cannot both insert the same post.
+    CONSTRAINT uq_announcement_external UNIQUE (course_id, external_announcement_id)
 );
 
 CREATE TABLE Assignment (
@@ -273,10 +280,12 @@ CREATE TABLE Schedule (
 
 CREATE TABLE Notification (
     notification_id  INT AUTO_INCREMENT PRIMARY KEY,
-    assignment_id    INT NOT NULL,
-    -- Which reminder this is: 'lead:<minutes>:<due date>' or
-    -- 'daily:<YYYY-MM-DD>'. The due date is in the key so moving a deadline
-    -- re-arms the reminder. See backend/src/services/notificationSender.js.
+    -- Exactly one of these is set; chk_notification_target enforces it.
+    assignment_id    INT NULL,
+    announcement_id  INT NULL,
+    -- Which reminder this is: 'lead:<minutes>:<due date>', 'daily:<YYYY-MM-DD>'
+    -- or 'ann:new'. The due date is in the key so moving a deadline re-arms the
+    -- reminder. See backend/src/services/notificationSender.js.
     trigger_type     VARCHAR(50) NOT NULL,
     sent_at          DATETIME,
     is_sent          BOOLEAN DEFAULT FALSE,
@@ -286,9 +295,19 @@ CREATE TABLE Notification (
     next_attempt_at  DATETIME NULL,
     CONSTRAINT fk_notification_detail
         FOREIGN KEY (assignment_id) REFERENCES Assignment_Detail(assignment_id),
-    -- The claiming INSERT races on this to decide who sends; without it every
-    -- pass would mail the same reminder again.
+    -- CASCADE so pruning old announcements takes their reminders with them.
+    CONSTRAINT fk_notification_announcement
+        FOREIGN KEY (announcement_id) REFERENCES Announcement(announcement_id)
+        ON DELETE CASCADE,
+    CONSTRAINT chk_notification_target
+        CHECK ((assignment_id IS NULL) <> (announcement_id IS NULL)),
+    -- One unique key per kind of target, and together they are the whole
+    -- concurrency story: whoever inserts owns the send. They can be separate
+    -- because MySQL treats NULLs as distinct — each key only constrains the
+    -- rows whose column is set, and the other kind falls through it. A single
+    -- key over both columns would never collide and every pass would re-mail.
     CONSTRAINT uq_notification_trigger UNIQUE (assignment_id, trigger_type),
+    CONSTRAINT uq_notification_announcement UNIQUE (announcement_id, trigger_type),
     INDEX idx_notification_retry (next_attempt_at, is_sent)
 );
 
@@ -297,6 +316,7 @@ CREATE TABLE Notification_Setting (
     enabled             BOOLEAN NOT NULL DEFAULT TRUE,
     daily_repeat        BOOLEAN NOT NULL DEFAULT FALSE,
     daily_repeat_time   TIME NULL,
+    announcement_notify BOOLEAN NOT NULL DEFAULT TRUE,
     last_custom_minutes INT NULL,
     CONSTRAINT fk_notification_setting_student FOREIGN KEY (user_id) REFERENCES User_Account(user_id)
 );
