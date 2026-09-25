@@ -19,8 +19,11 @@ const REPO_ROOT = path.join(__dirname, '..', '..');
 const read = (...parts) => fs.readFileSync(path.join(REPO_ROOT, ...parts), 'utf8');
 
 const initSql = read('init.sql');
+// The fold used to be its own migration (013) and the admin rename another
+// (014). Running in sequence they largely undid 012's work, so all three are
+// now one file — which is why both names below read the same one.
 const rbacSql = read('migrations', '012_rbac.sql');
-const foldSql = read('migrations', '013_single_user_table.sql');
+const foldSql = rbacSql;
 
 const RBAC_TABLES = ['Role', 'Permission', 'Role_Permission', 'User_Role'];
 

@@ -6,7 +6,7 @@ A student assignment manager, split into **three independent services** run with
 
 ```
 Browser
-  │  http://localhost:5173
+  │  http://localhost:4173
   ▼
 frontend  (Vite dev server, React, hot reload)
   │  proxies /api/*  →  backend:3000
@@ -48,7 +48,7 @@ cd assignment-hub
 docker compose up --build
 ```
 
-Then open **http://localhost:5173**.
+Then open **http://localhost:4173**.
 
 > First run: MySQL takes ~10–20s to initialize. If the page shows a "waiting for database" warning, wait and refresh.
 
@@ -62,7 +62,7 @@ Then open **http://localhost:5173**.
 
 | Service    | Build / Image   | Port          | Role                                          |
 |------------|-----------------|---------------|-----------------------------------------------|
-| `frontend` | `./frontend`    | `5173`        | Vite dev server, hot reload, proxies `/api`   |
+| `frontend` | `./frontend`    | `4173`        | `vite preview` — serves `frontend/dist`, proxies `/api` |
 | `backend`  | `./backend`     | `3000`        | Express REST API, connects to MySQL           |
 | `db`       | `mysql:8.0`     | `3306`        | Database `assignment_hub`, root pw `root123`  |
 | `caddy`    | `caddy:2-alpine`| `80`, `443`   | TLS reverse proxy — **profile `tls` only**, not started locally |
@@ -73,9 +73,26 @@ host uses. See [Deploying over HTTPS](#deploying-over-https).
 
 ### Hot reload
 
-Both app services mount their source folder as a volume (`./frontend:/app`, `./backend:/app`) with an anonymous volume for `node_modules`. Edit a file on your machine → the container picks it up live:
-- **frontend** — Vite HMR (`usePolling` is on so changes are detected inside Docker on Windows)
-- **backend** — `node --watch` restarts the server on change
+Both app services mount their source folder as a volume (`./frontend:/app`, `./backend:/app`) with an anonymous volume for `node_modules`.
+
+- **backend** — `node --watch` restarts the server on change. Edit a file, it is live.
+- **frontend** — **no hot reload.** The container runs `vite preview`, which serves the
+  already-built `frontend/dist` rather than compiling from `src`. Editing a component changes
+  nothing in the browser until you rebuild:
+
+  ```bash
+  cd frontend && npm run build      # writes frontend/dist, which the container serves
+  ```
+
+  `dist/` is committed for this reason — the container never builds it. Rebuild and commit it
+  alongside any frontend change, or a teammate pulls source they cannot see the effect of.
+
+  For an edit-refresh loop, run the dev server outside Docker instead. It proxies `/api` to
+  the same backend container, so nothing else has to change:
+
+  ```bash
+  cd frontend && npm run dev        # http://localhost:5173, HMR on
+  ```
 
 ### Environment variables — three separate places
 
@@ -98,10 +115,10 @@ This trips people up, so be precise about which file a variable belongs in:
 | `OAUTH_REDIRECT_URL`    | compose          | derived — `${PUBLIC_URL}/api/auth/google/callback` |
 | `MS_OAUTH_REDIRECT_URL` | compose          | derived — `${PUBLIC_URL}/api/auth/microsoft/callback` |
 | `FRONTEND_URL`          | compose          | derived — `${PUBLIC_URL}`                        |
-| `PUBLIC_URL`            | **.env**         | origin the browser uses. Defaults to `http://localhost:5173`. Builds the default callback URLs above, so it must match what is registered with Google/Azure exactly |
+| `PUBLIC_URL`            | **.env**         | origin the browser uses. Defaults to `http://localhost:4173`. Builds the default callback URLs above, so it must match what is registered with Google/Azure exactly |
 | `SITE_HOST`             | **.env**         | hostname Caddy requests a certificate for        |
 | `BIND`                  | **.env**         | interface the app ports publish on. `127.0.0.1` on a deployed host keeps frontend/backend/db off the internet; defaults to `0.0.0.0` |
-| `FRONTEND_PORT`         | **.env**         | host port mapped to Vite's 5173; defaults to `5173`. Leave it alone when Caddy is in front — Caddy owns 80/443 |
+| `FRONTEND_PORT`         | **.env**         | host port mapped to Vite's 4173; defaults to `4173`. Leave it alone when Caddy is in front — Caddy owns 80/443 |
 | `HMR_CLIENT_PORT`       | **.env**         | public port the hot-reload websocket dials (`443` behind TLS). Unset locally |
 | `GOOGLE_CLIENT_ID`      | **.env.local**   | Google OAuth client ID                           |
 | `GOOGLE_CLIENT_SECRET`  | **.env.local**   | Google OAuth client secret — must come from the *same* client as the ID |
@@ -188,12 +205,25 @@ Two details of that control matter:
 to display. Lead times are multi-select over four presets (60 / 180 / 1440 / 4320 minutes)
 plus a custom value; **every selected chip uses one style** (filled `C.navy`), and custom
 values that are currently selected render as chips beside the presets so they can be
-deselected the same way. `Toggle.jsx` is a new shared `role="switch"` control, used twice here.
+deselected the same way. `Toggle.jsx` is a shared `role="switch"` control, used three times
+here: the master switch, daily repeat, and new announcements.
 
-The master switch dims and disables the rest of the card rather than hiding it, and saving
-still works while off — turning notifications off must not discard the schedule behind them.
-The save button stays disabled until something actually changes, compared against a snapshot
-of what was loaded.
+The card is split into two groups — **แจ้งเตือนประกาศ** then **แจ้งเตือนงาน** — because it
+answers two unrelated questions and only the master switch is common to both.
+
+Three details of the off state are deliberate, and each one fixed a real bug:
+
+- **The sub-switches read off and stop responding** (`checked={enabled && x}`,
+  `disabled={!enabled}`) while their stored values stay untouched, so switching back on
+  restores them. Leaving them sitting on "on" while nothing was sent was simply a lie.
+- **The dimming is applied per part, never to the whole block.** A disabled `Toggle` fades
+  itself to `0.5`; inside a block already at `0.45` the two multiply out to `0.22` and the
+  switch disappears — CSS gives no way for a child to be more opaque than its parent.
+- **The save button never dims and is never disabled**, and lives in a footer outside the
+  dimmed area. It used to fade both with the master switch and again when nothing had
+  changed, which read as disabled — so people turned notifications off, did not dare press
+  save, and kept getting mail. "ยังไม่ได้บันทึกการเปลี่ยนแปลง" says it in words instead, and
+  re-saving identical settings is an idempotent upsert anyway.
 
 **Email reminders are live** — see [Email reminders](#email-reminders-fr-07). `ส่งอีเมลทดสอบ`
 now posts to `/api/notification-settings/test`, and the failure banner reports real rows.
@@ -211,7 +241,7 @@ rather than declared in `index.html`.
 
 ## Authentication (OAuth)
 
-Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on a single origin (`localhost:5173` locally, `PUBLIC_URL` when deployed) via the Vite `/api` proxy, so the session cookie is same-host. Each flow sends a random `state` held in the session and rejects a callback that doesn't match it (`/login?error=state`). The callback upserts the user into `User_Account` and stores provider tokens.
+Both providers use the **OAuth 2.0 Authorization Code flow** on the backend. The whole redirect stays on a single origin (`localhost:4173` locally, `PUBLIC_URL` when deployed) via the Vite `/api` proxy, so the session cookie is same-host. Each flow sends a random `state` held in the session and rejects a callback that doesn't match it (`/login?error=state`). The callback upserts the user into `User_Account` and stores provider tokens.
 
 There is one login for everybody. The session holds a single `userId` and nothing else — no "admin mode", no second identity — because what an account may do comes from the roles attached to that id. An administrator is simply an account someone granted an administrative role to.
 
@@ -221,8 +251,8 @@ There is one login for everybody. The session holds a single `userId` and nothin
 
 **Prerequisites — create OAuth apps and a `.env.local`:**
 
-1. **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External, add yourself as a Test user) → Credentials → OAuth client ID (Web application). Register `http://localhost:5173/api/auth/google/callback`. Enable the **Google Classroom API** and add the three `classroom.*.readonly` scopes below, or `/api/classroom/sync` will fail.
-2. **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration (accounts: *organizations* / work-school). Register `http://localhost:5173/api/auth/microsoft/callback` and create a client secret.
+1. **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External, add yourself as a Test user) → Credentials → OAuth client ID (Web application). Register `http://localhost:4173/api/auth/google/callback`. Enable the **Google Classroom API** and add the three `classroom.*.readonly` scopes below, or `/api/classroom/sync` will fail.
+2. **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration (accounts: *organizations* / work-school). Register `http://localhost:4173/api/auth/microsoft/callback` and create a client secret.
 3. Create **`.env.local`** at the repo root (git-ignored via `.env*`):
 
    ```env
@@ -410,7 +440,7 @@ Server-side events are recorded directly by the routes through `safeTrackEvent`.
 ### Notification preferences
 
 `PUT /api/notification-settings` takes the panel's entire state
-(`{ enabled, lead_times, daily_repeat, daily_repeat_time, last_custom_minutes }`) and
+(`{ enabled, lead_times, daily_repeat, daily_repeat_time, announcement_notify, last_custom_minutes }`) and
 **replaces** rather than merges — `Notification_Lead_Time` rows for that student are deleted
 and re-inserted inside the same transaction as the `Notification_Setting` upsert. Validation
 runs before any write: `lead_times` must be integers in `1`–`40320` minutes (28 days, max 10
@@ -425,10 +455,18 @@ Two behaviours are deliberate:
 - **An empty `lead_times` is a real saved state**, not a reason to fall back to the default.
   A student who deselects every chip and saves must not find `1 วัน` selected again on reload.
 
+Because `GET` never writes, the sender cannot inner-join `Notification_Setting` — a student
+with no row would be invisible to it while the panel told them reminders were on. It drives
+from `User_Account` with `COALESCE(ns.enabled, TRUE)` instead, and supplies the documented
+default lead time through a `UNION` arm. `DEFAULTS.lead_times` in `routes/notifications.js`
+and `DEFAULT_LEAD_MINUTES` in the sender must agree; a test asserts it.
+
 Both responses also carry `failed_count` and `last_failed_at`, counted from `Notification`
 rows where `is_sent = FALSE AND sent_at IS NOT NULL`, scoped to the student by walking
-`Assignment_Detail → Assignment → Course`. That pair of conditions is the sender's
-"failed for good" state, so the banner in the panel lights up on its own.
+`Assignment_Detail → Assignment → Course` **or** `Announcement → Course` — the join is
+`LEFT` on both sides with `COALESCE(a.course_id, an.course_id)`, or a failed announcement
+mail would never raise the banner. That pair of conditions is the sender's "failed for good"
+state, so the banner in the panel lights up on its own.
 
 ### Email reminders (FR-07)
 
@@ -450,16 +488,44 @@ Tasks that are `submitted` or `completed` are excluded (FR-07.4), as are suspend
 
 #### `trigger_type` is the deduplication key
 
-`Notification` had no unique constraint, so migration `009` adds
+`Notification` had no unique constraint, so `015_notifications.sql` adds
 `UNIQUE (assignment_id, trigger_type)` and the sender claims work with `INSERT IGNORE`:
 
 ```sql
-INSERT IGNORE INTO Notification (assignment_id, trigger_type, ...) VALUES (...)
+INSERT IGNORE INTO Notification (assignment_id, announcement_id, trigger_type, ...) VALUES (...)
 ```
 
 `affectedRows = 1` means this pass owns the send; `0` means someone else already does. That
 one index is what stops every pass from re-mailing the same reminder — and it holds across
 processes, unlike the metrics flush, which has no locking at all.
+
+There are three kinds of key, and `buildMessage()` dispatches on the prefix with no
+fall-through — a fourth kind throws rather than quietly rendering the wrong template:
+
+| Key | Sent when |
+|---|---|
+| `lead:<minutes>:<due date>` | `NOW()` has passed `due_date - minutes` and the deadline has not. The due date is in the key, so moving a deadline re-arms the reminder |
+| `daily:<YYYY-MM-DD>` | once a day past `daily_repeat_time`, for unfinished work due within ±7 days |
+| `ann:new` | a new Classroom announcement — see below |
+
+#### Announcements need two clocks, not one
+
+An announcement has no deadline, so freshness is the only thing that can gate it, and
+`Announcement.created_at` (when the sync first saw the post) is not enough on its own: the
+first sync of an old course pulls a term of posts in at once, all stamped "seen just now".
+`posted_at` alone is not enough either, because a week-old post may only have reached us
+today. The sender requires **both** — seen within 24 hours *and* posted within 2 days of
+being seen — which is what keeps 200 archived announcements from becoming 200 emails.
+
+`Notification` carries `announcement_id` beside `assignment_id`, with
+`CHECK ((assignment_id IS NULL) <> (announcement_id IS NULL))` so exactly one is set. Without
+that check a row with neither would satisfy both unique keys as a NULL pair and claim nothing.
+The retry sweep is two statements rather than one: an announcement row matches none of the
+`Assignment_Detail` joins the assignment sweep needs, so it would otherwise never be retried.
+
+> Announcements only enter the database when someone presses **ซิงก์ Classroom** — there is no
+> background sync yet. A post nobody syncs within 24 hours falls outside the window and is
+> never mailed.
 
 The key encodes **which** reminder a row is, and includes the due date:
 
@@ -559,20 +625,22 @@ curl -i http://localhost:3000/api/auth/google  # 302 to accounts.google.com
 assignment-hub/
 ├── docker-compose.yml        # defines frontend + backend + db
 ├── init.sql                  # schema only, no seed data (runs on first DB start)
-│                             # NOTE: behind migrations 006_announcement + 007_score
+│                             # the current shape — migrations only bring older DBs to it
 ├── migrations/               # ALTERs for databases created before a schema change
 │   ├── 001_identity.sql      # unique email domain + (student_id, university_id)
 │   ├── 002_task_type.sql     # Assignment.task_type
 │   ├── 003_status_updated_at.sql  # Assignment_Detail.status_updated_at
-│   ├── 004_notification_settings.sql  # Notification_Setting + Notification_Lead_Time
 │   ├── 005_admin_monitoring.sql       # monitoring tables and Student account status
 │   ├── 006_product_analytics.sql      # privacy-safe Product_Event stream
 │   ├── 006_announcement.sql           # Announcement table (Classroom stream)
 │   ├── 007_admin_identity.sql          # separate Admin allowlist identity
 │   ├── 007_score.sql                   # Assignment_Detail.max_points + assigned_grade
 │   ├── 008_admin_microsoft_identity.sql # immutable Microsoft identity columns
-│   └── 009_notification_delivery.sql    # Notification dedupe key + retry columns
-├── migrate.sh / migrate.bat  # run every migration in order (keep the two in step)
+│   ├── 010_schedule_setting.sql        # Schedule_Setting table
+│   ├── 011_assignment_time_estimate.sql # Assignment_Detail.time_estimate
+│   ├── 012_rbac.sql                    # one User_Account + roles and permissions
+│   └── 015_notifications.sql           # settings, delivery bookkeeping, announcements
+├── migrate.sh / migrate.bat  # loop over migrations/*.sql in filename order
 ├── Caddyfile                 # TLS reverse proxy config (used by the `tls` profile)
 ├── .env                      # deploy settings for Compose substitution (git-ignored)
 ├── .env.local                # OAuth secrets (git-ignored) — you create this
@@ -652,26 +720,31 @@ Auto-created on first DB start. Tables:
 
 ### Identity and access control
 
-`User_Account` is the central account table. `Student` and `Admin` are **disjoint subtypes**
-of it — each keeps its own primary key and its own type-specific columns (OAuth tokens on
-one side, Microsoft tenant/object ids on the other) and carries a foreign key up to
-`User_Account`. Roles attach to `User_Account`, never to a subtype, so there is a single
-`User_Role` assignment table:
+`User_Account` is the **only** user table. `Student` and `Admin` no longer exist — everything
+about a person lives in one row, and `User_Role` answers every access question:
 
 ```
 User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
-     │
-     ├── Student
-     └── Admin
 ```
 
-Student ids were preserved through the RBAC migration and administrator ids were reissued,
-because the two tables' AUTO_INCREMENT sequences had already collided — id 1 existed in
-both and meant two different people. Six tables reference `Student(user_id)`, so that side
-had to stay fixed.
+There are exactly **two roles**, `admin` and `student`, and a person holds one of them.
 
-`Student.role` still exists and still reads `'student'` for every row. It is a denormalised
-discriminator kept for the metrics queries that filter on it (about fifteen clauses across
+An earlier design made `Student` and `Admin` disjoint subtypes hanging off `User_Account`.
+It was abandoned because nothing needed to know which kind of row a user was, and because it
+blocked a single login page: `requireAuth` looked people up in `Student`, where an
+administrator simply was not, so the two needed separate flows.
+
+The fold in `012_rbac.sql` renames `Student` to `User_Account` rather than copying rows —
+MySQL rewrites incoming foreign keys on a rename, so the six tables that referenced
+`Student(user_id)` follow untouched and **no student id moves**. Administrators are then
+reinserted at fresh ids above the student range, because the two tables' AUTO_INCREMENT
+sequences had already collided: id 1 existed in both and meant two different people.
+
+`Admin_Audit_Log.admin_user_id` used to store `admin_id`. The migration remaps it to the new
+`user_id` before dropping `Admin`, or every historical row would lose its actor.
+
+`User_Account.user_type` holds `'student'` or `'admin'`. It is a denormalised discriminator
+kept for the metrics queries that filter on it (about fifteen clauses across
 `routes/admin.js`, `services/adminMetrics.js` and `services/businessMetrics.js`);
 `User_Role` is the authoritative source for what anyone may actually do.
 
@@ -744,22 +817,34 @@ do not rerun a migration that has already been applied.
 | `001_identity.sql` | unique `University.email_domain`; unique `Student (student_id, university_id)` | UR02, UR03 |
 | `002_task_type.sql` | `Assignment.task_type` | UR06, A5.1 |
 | `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` | UC-5, A3.3, UR12 |
-| `004_notification_settings.sql` | `Notification_Setting` + `Notification_Lead_Time` tables | UC-6, UR12 |
 | `005_admin_monitoring.sql` | monitoring tables and Student account status | admin console |
 | `006_product_analytics.sql` | privacy-safe `Product_Event` stream | business analytics |
 | `006_announcement.sql` | `Announcement` table | `/stream`, Classroom announcements |
 | `007_admin_identity.sql` | separate `Admin` allowlist identity | admin login |
 | `007_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` | the คะแนน column |
 | `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs | admin login |
-| `009_notification_delivery.sql` | `Notification` unique key + retry columns | FR-07 email reminders |
 | `010_schedule_setting.sql` | `Schedule_Setting` table | auto-scheduling |
 | `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` | `/api/assignments`, auto-scheduling |
-| `012_rbac.sql` | `User_Account` + `Role` / `Permission` / `Role_Permission` / `User_Role`; `Student` and `Admin` become subtypes | role-based access control |
+| `012_rbac.sql` | folds `Student` and `Admin` into one `User_Account`; `Role` / `Permission` / `Role_Permission` / `User_Role`; the two roles `admin` and `student` | role-based access control, one login page |
+| `015_notifications.sql` | `Notification_Setting` + `Notification_Lead_Time`; `Notification` unique key and retry columns; announcement targets and their on/off column | UC-6, UC-8, FR-07, UR12 |
+
+**Two of these are merges.** RBAC was `012` (build a `User_Account` supertype with `Student`
+and `Admin` under it), `013` (throw that table away and rename `Student` into its place) and
+`014` (rename a role `012` had just seeded). Notifications were `004`, `009` and `015`,
+all reshaping the same three tables. Run in sequence each group largely undid its own work,
+so each is now a single file that goes straight to the shape the code expects.
+
+The notification file sits at `015` rather than `004` because of what it now depends on:
+`Notification_Setting` references `User_Account`, which only exists after the fold in `012`,
+and the announcement half needs `Announcement` from `006`.
 
 **Two pairs share a number** (`006_product_analytics` / `006_announcement`, and
 `007_admin_identity` / `007_score`) because the features landed on separate branches. They
-touch different tables, so either order works; `migrate.sh` fixes one anyway. Pick `009`
-for the next migration rather than adding a third to either pair.
+touch different tables, so either order works. Pick `016` for the next migration rather than
+adding a third to either pair.
+
+> `012` and `015` guard every step with an `information_schema` lookup, so rerunning them is
+> a no-op rather than an error. `001`–`011` are bare `ALTER TABLE`s and are not guarded.
 
 `migrate.sh` (and `migrate.bat` for cmd) runs them all in order against a running stack:
 
@@ -768,23 +853,26 @@ for the next migration rather than adding a third to either pair.
 migrate.bat         # Windows cmd
 ```
 
-Both scripts contain the same ordered sequence, and new migrations must be appended to **both** by hand.
-Run them only against a database that has not already applied those files.
+Both scripts loop over `migrations/*.sql` in filename order rather than naming the files.
+The hand-written list they replaced had drifted badly — it named a `001_init.sql` that does
+not exist, ran `010` before `009`, and never ran `011` at all, so databases ended up missing
+columns the code already queried. A new migration is picked up the moment it is added; there
+is nothing to append.
 
-A fresh database from current `init.sql` is **not** fully up to date: it is missing
-`006_announcement.sql` and `007_score.sql`. Those two are the exception to "only for older
-databases" — apply them after a first `docker compose up` too:
+Neither script records what it has already applied, so every run applies every file. That is
+safe, and it is why merging files above changed nothing for a database that was already up
+to date.
 
-```bash
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_announcement.sql
-docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_score.sql
-```
+Running `./migrate.sh` against a fresh database from `init.sql` is a no-op, but a noisy one:
+`001`–`011` are plain `ALTER TABLE` with no `IF NOT EXISTS` guard, so each one MySQL has
+already applied prints a `Duplicate column name` / `Duplicate key name` error. The script
+does not stop on error and nothing is corrupted — a duplicate `ALTER` is rejected outright.
+The noise is expected, not a failed run.
 
-Running the whole of `./migrate.sh` against a fresh database also works, but every other
-file is plain `ALTER TABLE` with no `IF NOT EXISTS` guard, so each one MySQL has already
-applied prints a `Duplicate column name` / `Duplicate key name` error. The script does not
-stop on error, so **the two that matter still land** — the noise is expected, not a failed
-run. Nothing is corrupted either way; a duplicate `ALTER` is rejected outright.
+> Two migrations still fail for a different reason on a fresh database: `005_admin_monitoring`
+> and `007_admin_identity` both reference `Student`, which `012` folded away. They have
+> nothing left to add to a current `init.sql`, so this is harmless — but it is why the output
+> is worth reading rather than skimming.
 
 Applying one on its own:
 
@@ -873,9 +961,9 @@ certificates per domain per week.
 
 ## Troubleshooting
 
-- **`port is already allocated`** — an old container is holding 3306/3000/5173. `docker ps -a`, then `docker rm -f <name>`.
+- **`port is already allocated`** — an old container is holding 3306/3000/4173. `docker ps -a`, then `docker rm -f <name>`.
 - **`403 Blocked request. This host is not allowed`** — Vite rejects Host headers it doesn't recognise. Add the hostname to `server.allowedHosts` in `frontend/vite.config.js`, then recreate the frontend container (the setting is read once at startup, so a reload won't pick it up).
-- **`ERR_CONNECTION_REFUSED` on the bare domain** — nothing is listening on port 80. Either `FRONTEND_PORT` is still 5173, or the `tls` profile wasn't used so Caddy never started. `docker compose ps` shows what is actually published. A *refused* connection means the firewall let the packet through and no process answered; a firewall block shows up as a **timeout** instead — a useful way to tell the two apart.
+- **`ERR_CONNECTION_REFUSED` on the bare domain** — nothing is listening on port 80. Either `FRONTEND_PORT` is still 4173, or the `tls` profile wasn't used so Caddy never started. `docker compose ps` shows what is actually published. A *refused* connection means the firewall let the packet through and no process answered; a firewall block shows up as a **timeout** instead — a useful way to tell the two apart.
 - **Every `/api/*` route returns `500`, including `/api/health`** — the request never reached Express. `/api/health` can only answer `200` or `503`, so a `500` there is Vite's proxy failing to connect to `backend:3000`. Check `docker compose logs backend` for a crash; `docker compose logs frontend | grep proxy` confirms it (`[vite] http proxy error`).
 - **`Error 400: redirect_uri_mismatch`** — Google compares the `redirect_uri` byte-for-byte against what is registered on **that specific OAuth client**. Before editing anything in the Console, confirm which client the server is actually sending:
 
@@ -894,14 +982,16 @@ certificates per domain per week.
 - **Code changed on disk but the backend still runs the old version** — `node --watch` uses `fs.watch`, which frequently misses writes arriving through a Docker bind mount (the same reason Vite needs `usePolling`). `docker compose exec backend grep …` will show the new source while the running process still holds the old one in memory. `docker compose restart backend` after a `git pull` on a deployed host.
 - **`redirect_uri` is correct but login still fails on a deployed host while localhost works** — the two hosts are probably using different OAuth clients. Compare `GOOGLE_CLIENT_ID` in each machine's `.env.local`; `.env.local` is git-ignored, so a deployed checkout never inherits the one you use locally. Copy the ID **and** secret together — a mixed pair fails with `invalid_client`.
 - **`Unknown column 'status_updated_at' in 'field list'`** (or `'task_type'`) — the database predates the schema change and `init.sql` does not re-run on an existing volume. Apply the migrations: `./migrate.sh`, or the single file with `docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/003_status_updated_at.sql`. Every `/api/assignments` read fails with this, so the dashboard shows the DB-not-ready state rather than an empty list.
-- **`Unknown column 'd.max_points'` or `Table 'assignment_hub.Announcement' doesn't exist` — on a database you just created** — this is not a stale volume. `init.sql` is behind migrations `006_announcement.sql` and `007_score.sql`, so a first `docker compose up` produces a schema the code has already moved past. Apply just those two:
+- **`Unknown column` or `Table ... doesn't exist` on a database that has been around a while** — `init.sql` only runs when the volume is created, so an older database never picked the change up. Run `./migrate.sh`. A missing column in `Assignment_Detail` takes out the whole assignments list (the dashboard falls back to "waiting for database"); a missing table usually takes out one page only.
+
+  Two things are in `init.sql` with **no migration behind them**, so a database that has only ever been migrated will not have them: the `Working_Hours` table and `Schedule.segments`. Both are used by `routes/workingHours.js` and `routes/schedules.js`. Check with:
 
   ```bash
-  docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/006_announcement.sql
-  docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/007_score.sql
+  docker compose exec db mysql -uroot -proot123 assignment_hub -e \
+    "SHOW TABLES LIKE 'Working_Hours'; SHOW COLUMNS FROM Schedule LIKE 'segments';"
   ```
 
-  The score column takes out the whole assignments list (the dashboard falls back to "waiting for database"); the missing table takes out `/stream` and the announcement half of a Classroom sync only.
+  Empty output means recreating the volume (`docker compose down -v`, then up) is currently the only fix — the data can be synced back from Classroom.
 - **`./migrate.sh` prints a wall of `Duplicate column name` errors** — expected on a database that already has those columns. The migrations are unguarded `ALTER`s and the script doesn't stop on error, so the files that *are* missing still apply. Check the schema rather than the output: `docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assignment_Detail; SHOW TABLES LIKE 'Announcement';"`.
 - **A status set by hand reverts after the next Classroom sync** — the sync only skips rows whose `status_updated_at` is non-`NULL`, so a status that keeps getting overwritten means the column never got stamped. Check the row directly:
 

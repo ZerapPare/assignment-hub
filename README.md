@@ -21,7 +21,7 @@
 **บนเครื่องตัวเอง — 3 services**
 
 ```
-Browser  →  frontend (:5173, Vite)  →  backend (:3000, Express)  →  db (:3306, MySQL)
+Browser  →  frontend (:4173, Vite)  →  backend (:3000, Express)  →  db (:3306, MySQL)
 ```
 
 **บนเซิร์ฟเวอร์ — เพิ่ม Caddy คุม TLS ข้างหน้า**
@@ -62,9 +62,9 @@ SESSION_SECRET=<สุ่มข้อความยาวๆ>
 ```
 
 วิธีเอา client id/secret:
-- **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External + ใส่อีเมลตัวเองเป็น Test user) → Credentials → OAuth client ID (Web) → redirect URI: `http://localhost:5173/api/auth/google/callback`
+- **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External + ใส่อีเมลตัวเองเป็น Test user) → Credentials → OAuth client ID (Web) → redirect URI: `http://localhost:4173/api/auth/google/callback`
   - ต้องเปิด **Google Classroom API** และเพิ่ม scope `classroom.courses.readonly`, `classroom.coursework.me.readonly`, `classroom.student-submissions.me.readonly` ด้วย ไม่งั้นปุ่มซิงก์จะไม่ทำงาน
-- **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration → เพิ่ม Web redirect URI: `http://localhost:5173/api/auth/microsoft/callback` แล้วสร้าง client secret
+- **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration → เพิ่ม Web redirect URI: `http://localhost:4173/api/auth/microsoft/callback` แล้วสร้าง client secret
 
 > ยังไม่ใส่ก็รันได้ แต่กดปุ่ม login แล้วจะ error จนกว่าจะมี `.env.local`
 
@@ -78,13 +78,13 @@ docker compose up --build
 
 ```
 backend-1   | Backend API running on http://localhost:3000
-frontend-1  | ➜  Local:   http://localhost:5173/
+frontend-1  | ➜  Local:   http://localhost:4173/
 db-1        | ... ready for connections
 ```
 
 ### 4. เปิดใช้งาน
 
-เปิดเบราว์เซอร์ไปที่ **http://localhost:5173**
+เปิดเบราว์เซอร์ไปที่ **http://localhost:4173**
 
 จะเจอหน้า **login** ก่อน → กด "เข้าสู่ระบบด้วย Google/Microsoft" → ไปหน้า consent ของ provider → กลับมาที่ **dashboard** (ระบบสร้าง user ในตาราง `User_Account` + เก็บ token ให้อัตโนมัติ) กด "ออกจากระบบ" ที่ sidebar เพื่อออก
 
@@ -144,12 +144,19 @@ db-1        | ... ready for connections
 
 การ์ด **การแจ้งเตือน** ใน `/settings` ให้ตั้งว่าจะให้เตือนก่อนกำหนดส่งล่วงหน้าเท่าไร
 
-- สวิตช์หลักเปิด/ปิดทั้งการ์ด ปิดแล้วส่วนที่เหลือจะจางและกดไม่ได้ (แต่ค่ายังถูกเก็บไว้ — ปุ่มบันทึกอยู่นอกส่วนที่จาง จึงยังกดได้เสมอ)
+การ์ดแบ่งเป็น 2 กลุ่ม — **แจ้งเตือนประกาศ** ไว้บน **แจ้งเตือนงาน** ไว้ล่าง — ใต้สวิตช์หลักที่คุมทั้งใบ
+
+- **สวิตช์หลัก** ปิดแล้วส่วนตั้งค่าจะจาง และสวิตช์ของทั้งสองกลุ่มแสดงเป็นปิดตามไปด้วย
+  ค่าที่เก็บไว้ไม่ถูกแตะ — เปิดกลับมาเมื่อไรก็เด้งกลับเป็นค่าเดิม
+- **แจ้งเตือนประกาศใหม่** — ส่งอีเมลเมื่อมีประกาศใหม่ในวิชาที่ซิงก์มาจาก Classroom
 - **ช่วงเวลาล่วงหน้า** เลือกได้หลายค่าพร้อมกัน — preset `1 ชั่วโมง` · `3 ชั่วโมง` · `1 วัน` · `3 วัน`
   และ `+ กำหนดเอง` (ใส่ตัวเลข + หน่วย นาที/ชั่วโมง/วัน ได้ถึง 28 วัน) ค่ากำหนดเองที่เลือกอยู่จะขึ้นเป็นชิปให้กดเอาออกได้
 - **แจ้งเตือนซ้ำรายวัน** + เวลาที่จะส่ง สำหรับงานที่ยังไม่เสร็จ
-- **แจ้งเตือนประกาศใหม่** — ส่งอีเมลเมื่อมีประกาศใหม่ในวิชาที่ซิงก์มาจาก Classroom
-- กด `บันทึกการตั้งค่า` เพื่อเขียนลง database (ปุ่มจะกดไม่ได้ถ้ายังไม่มีอะไรเปลี่ยน)
+- กด `บันทึกการตั้งค่า` เพื่อเขียนลง database
+
+> **ปุ่มบันทึกกดได้เสมอ** และอยู่นอกส่วนที่จาง — เดิมมันจางตามสวิตช์หลักและจางอีกทีเมื่อไม่มีอะไรเปลี่ยน
+> จนดูเหมือนกดไม่ได้ คนจึงปิดแจ้งเตือนแล้วไม่กล้ากดบันทึก ค่าเลยไม่เคยถูกเก็บและอีเมลยังส่งต่อ
+> ตอนนี้บอกด้วยข้อความว่า "ยังไม่ได้บันทึกการเปลี่ยนแปลง" แทนการหรี่ปุ่ม
 
 ทุกค่าเก็บเป็น**นาที** ทั้ง preset และค่ากำหนดเอง จึงไม่ต้องมีคอลัมน์หน่วย และเทียบกับ `due_date` ได้ตรง ๆ
 
@@ -240,20 +247,26 @@ migrate.bat         # Windows cmd
 | `001_identity.sql` | unique `University.email_domain` + unique `Student (student_id, university_id)` |
 | `002_task_type.sql` | `Assignment.task_type` |
 | `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` — **อย่า backfill** ค่านี้ `NULL` แปลว่า "นักศึกษายังไม่เคยตั้งสถานะเอง" ถ้าใส่ค่าให้ทุกแถว ซิงก์จะหยุดอัปเดตสถานะจาก Classroom ทั้งหมด |
-| `004_notification_settings.sql` | ตาราง `Notification_Setting` + `Notification_Lead_Time` |
 | `005_admin_monitoring.sql` | role/status ของ Student + system error/audit/request metric tables |
 | `006_product_analytics.sql` | ตาราง `Product_Event` สำหรับ business analytics |
 | `006_announcement.sql` | ตาราง `Announcement` (ประกาศจาก Classroom) |
 | `007_admin_identity.sql` | ตาราง `Admin` + ย้าย identity ผู้ดูแลออกจาก Student |
 | `007_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` |
 | `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs สำหรับ Admin |
-| `009_notification_delivery.sql` | unique key กันส่งอีเมลซ้ำ + คอลัมน์ retry บน `Notification` |
 | `010_schedule_setting.sql` | ตาราง `Schedule_Setting` สำหรับจัดตารางอัตโนมัติ |
 | `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` — database ที่สร้างก่อนคอลัมน์นี้จะทำให้ `/api/assignments` ตอบ `ER_BAD_FIELD_ERROR` |
-| `012_rbac.sql` | RBAC: `User_Account` + `Role`/`Permission`/`Role_Permission`/`User_Role` และย้าย `Student`/`Admin` เป็น subtype |
-| `013_single_user_table.sql` | ยุบ `Student` กับ `Admin` เหลือ `User_Account` ตารางเดียว + รวมหน้า login เป็นหน้าเดียว |
-| `014_rename_admin_role.sql` | เหลือ 2 บทบาท — เปลี่ยน `super_admin` เป็น `admin` และลบบทบาทที่ไม่มีใครถือทิ้ง |
-| `015_announcement_notifications.sql` | แจ้งเตือนประกาศใหม่ — `Announcement.created_at` + unique key, `Notification` รับเป้าหมายที่เป็นประกาศได้, และคอลัมน์เปิด/ปิด |
+| `012_rbac.sql` | ยุบ `Student`/`Admin` เหลือ `User_Account` ตารางเดียว + `Role`/`Permission`/`Role_Permission`/`User_Role` และ 2 บทบาท (`admin`, `student`) · รวมหน้า login เป็นหน้าเดียว |
+| `015_notifications.sql` | ตาราง `Notification_Setting` + `Notification_Lead_Time` · unique key กันส่งอีเมลซ้ำ + คอลัมน์ retry บน `Notification` · แจ้งเตือนประกาศใหม่พร้อมสวิตช์เปิด/ปิด |
+
+**012 กับ 015 เป็นไฟล์ที่รวมมาจากหลายไฟล์** — เดิม RBAC แยกเป็น `012`/`013`/`014` และการแจ้งเตือนแยกเป็น
+`004`/`009`/`015` รันเรียงกันแล้วทำงานทับล้างกันเอง (`012` สร้าง `User_Account` เป็น supertype แล้ว `013`
+ทิ้งตารางนั้น · `012` สร้าง role ที่ `014` เปลี่ยนชื่อทันที) ตอนนี้แต่ละเรื่องเหลือไฟล์เดียวที่ทำตรงทาง
+
+`015` อยู่เลขนี้ไม่ใช่ `004` เพราะ `Notification_Setting` ชี้ `User_Account` ซึ่งเกิดหลังการยุบตารางใน `012`
+และฝั่งประกาศต้องรอตาราง `Announcement` จาก `006`
+
+> **ทุกขั้นใน `012` และ `015` มี guard** เช็ก `information_schema` ก่อนทำ รันซ้ำจึงไม่ error และไม่เปลี่ยนอะไร
+> ต่างจากไฟล์ `001`–`011` ที่เป็น `ALTER TABLE` เปล่า ๆ รันซ้ำแล้วขึ้น `Duplicate column name` (ไม่เป็นอันตราย)
 
 เช็คว่าลงครบ:
 
@@ -396,7 +409,7 @@ assignment-hub/
 
 ## Deploy บนเซิร์ฟเวอร์ (HTTPS ผ่านโดเมน)
 
-ค่า default ทั้งหมดตั้งไว้สำหรับ `localhost:5173` — local dev ไม่ต้องแตะอะไรเลย
+ค่า default ทั้งหมดตั้งไว้สำหรับ `localhost:4173` — local dev ไม่ต้องแตะอะไรเลย
 ส่วนบนเซิร์ฟเวอร์จะใช้ **Caddy** เป็น TLS reverse proxy ออก cert Let's Encrypt ให้อัตโนมัติและต่ออายุเอง
 
 **ทำไมต้อง HTTPS:** Google ไม่รับ OAuth redirect URI ที่เป็น `http://` กับโดเมนจริง (อนุญาตเฉพาะ `localhost`)

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Toggle from './Toggle';
-import { BellIcon } from '../icons';
+import { BellIcon, DocIcon, MegaphoneIcon } from '../icons';
 import { fmtDate, fmtTime, isDone, withDerived } from '../tasks';
 import { C, FONT, R, TH_MONTHS_SHORT } from '../theme';
 
@@ -224,9 +224,17 @@ function NotificationSettings({ email }) {
     }
   };
 
-  // The master switch decides whether mail goes out, not whether the settings
-  // below can be touched. Dimming and disabling them made the card read as
-  // broken; they stay editable and simply take effect when it is switched on.
+  // Switched off, nothing below sends, so the two sub-switches read off and
+  // stop responding — the master switch alone left them sitting on "on" while
+  // no mail went out. Their saved values are untouched and come back as soon
+  // as it is switched on again.
+  //
+  // Applied per part rather than to the whole block, because a child cannot be
+  // more opaque than its parent: a disabled Toggle already fades itself to 0.5
+  // (Toggle.jsx), and inside a faded block the two multiplied out to 0.22.
+  // Everything except the switches fades; the heading and the footer keep out
+  // of it entirely, or the card reads as broken rather than switched off.
+  const dimmed = enabled ? null : { opacity: 0.45 };
 
   return (
     <div style={styles.card}>
@@ -235,7 +243,7 @@ function NotificationSettings({ email }) {
           <BellIcon size={17} color={C.pink} />
         </span>
         <div style={styles.headText}>
-          <div style={styles.cardTitle}>การแจ้งเตือน</div>
+          <div style={styles.cardTitle}>การแจ้งเตือนทั้งหมด</div>
           <div style={styles.subtitle}>
             แจ้งเตือนก่อนถึงกำหนดส่งงาน ผ่านอีเมล{email ? ` ${email}` : 'ของบัญชีที่เข้าสู่ระบบ'}
           </div>
@@ -253,151 +261,171 @@ function NotificationSettings({ email }) {
 
       {!loading && !loadError && (
         <div style={styles.body}>
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>แจ้งเตือนล่วงหน้าก่อนกำหนดส่ง</div>
+          {/* Two groups, because the card answers two separate questions: when
+              to chase a deadline, and whether to hear about a new post. They
+              share only the master switch above.
 
-            <div style={styles.chipRow}>
-              {chips.map((minutes) => {
-                const on = leadTimes.includes(minutes);
-                return (
-                  <button
-                    key={minutes}
-                    type="button"
-                    onClick={() => toggleLead(minutes)}
-                    aria-pressed={on}
-                    style={{
-                      ...styles.chip,
-                      ...(on ? styles.chipOn : null),
-                    }}
-                  >
-                    {formatLeadTime(minutes)}
-                  </button>
-                );
-              })}
+              One switch and nothing else, so this group carries it in the
+              heading rather than in a box of its own — a box titled
+              "แจ้งเตือนประกาศใหม่" inside a group of the same name would say it
+              twice. */}
+          <section style={styles.group}>
+            <div style={styles.groupHead}>
+              <span style={{ ...styles.groupIcon, color: C.navy, ...dimmed }}>
+                <MegaphoneIcon size={15} />
+              </span>
+              <div style={{ ...styles.groupTitle, ...dimmed }}>แจ้งเตือนประกาศ</div>
+              <Toggle
+                checked={enabled && announcementNotify}
+                onChange={edit(setAnnouncementNotify)}
+                disabled={!enabled}
+                label="แจ้งเตือนประกาศใหม่"
+              />
+            </div>
+            <div style={{ ...styles.subtitle, ...dimmed }}>
+              ส่งอีเมลเมื่อมีประกาศใหม่ในวิชาที่ซิงก์มาจาก Google Classroom
+            </div>
+          </section>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomOpen((v) => !v);
-                  setCustomError(null);
-                }}
-                style={{ ...styles.chip, ...styles.chipCustom }}
-              >
-                + กำหนดเอง
-              </button>
+          <section style={{ ...styles.group, ...styles.groupDivided }}>
+            <div style={styles.groupHead}>
+              <span style={{ ...styles.groupIcon, ...dimmed }}><DocIcon size={15} color={C.navy} /></span>
+              <div style={{ ...styles.groupTitle, ...dimmed }}>แจ้งเตือนงาน</div>
             </div>
 
-            {customOpen && (
-              <div style={styles.customRow}>
-                <input
-                  type="number"
-                  min="1"
-                  value={customValue}
-                  onChange={(e) => setCustomValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addCustom();
-                    }
+            <div style={{ ...styles.section, ...dimmed }}>
+              <div style={styles.sectionTitle}>แจ้งเตือนล่วงหน้าก่อนกำหนดส่ง</div>
+
+              <div style={styles.chipRow}>
+                {chips.map((minutes) => {
+                  const on = leadTimes.includes(minutes);
+                  return (
+                    <button
+                      key={minutes}
+                      type="button"
+                      onClick={() => toggleLead(minutes)}
+                      aria-pressed={on}
+                      style={{
+                        ...styles.chip,
+                        ...(on ? styles.chipOn : null),
+                      }}
+                    >
+                      {formatLeadTime(minutes)}
+                    </button>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomOpen((v) => !v);
+                    setCustomError(null);
                   }}
-                  placeholder="เช่น 12"
-                  style={{ ...styles.input, width: 96 }}
-                />
-                <select
-                  value={customUnit}
-                  onChange={(e) => setCustomUnit(Number(e.target.value))}
-                  style={{ ...styles.input, width: 104 }}
+                  style={{ ...styles.chip, ...styles.chipCustom }}
                 >
-                  {UNITS.map((u) => (
-                    <option key={u.value} value={u.value}>
-                      {u.label}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" onClick={addCustom} style={styles.ghostBtn}>
-                  เพิ่ม
+                  + กำหนดเอง
                 </button>
               </div>
-            )}
-            {customError && <p style={styles.error}>⚠️ {customError}</p>}
 
-            <div style={styles.hint}>
-              <span>เลือกได้มากกว่า 1 ช่วงเวลา</span>
-              {lastCustom !== null && !leadTimes.includes(lastCustom) && (
-                <>
-                  <span>·</span>
-                  <span>ล่าสุดที่กำหนดเอง</span>
-                  <button
-                    type="button"
-                    onClick={() => toggleLead(lastCustom)}
-                    style={{ ...styles.hintPill, cursor: 'pointer' }}
+              {customOpen && (
+                <div style={styles.customRow}>
+                  <input
+                    type="number"
+                    min="1"
+                    value={customValue}
+                    onChange={(e) => setCustomValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addCustom();
+                      }
+                    }}
+                    placeholder="เช่น 12"
+                    style={{ ...styles.input, width: 96 }}
+                  />
+                  <select
+                    value={customUnit}
+                    onChange={(e) => setCustomUnit(Number(e.target.value))}
+                    style={{ ...styles.input, width: 104 }}
                   >
-                    {formatLeadTime(lastCustom)}
+                    {UNITS.map((u) => (
+                      <option key={u.value} value={u.value}>
+                        {u.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={addCustom} style={styles.ghostBtn}>
+                    เพิ่ม
                   </button>
-                </>
+                </div>
               )}
-            </div>
-          </div>
+              {customError && <p style={styles.error}>⚠️ {customError}</p>}
 
-          <div style={styles.repeatBox}>
-            <div style={styles.repeatText}>
-              <div style={styles.repeatTitle}>แจ้งเตือนซ้ำรายวัน</div>
-              <div style={styles.subtitle}>ส่งซ้ำทุกวันสำหรับงานที่ยังไม่เสร็จ จนกว่าจะส่งงาน</div>
-            </div>
-            <input
-              type="time"
-              value={dailyRepeatTime}
-              onChange={edit((e) => setDailyRepeatTime(e.target.value))}
-              style={{ ...styles.input, width: 96 }}
-            />
-            <Toggle
-              checked={dailyRepeat}
-              onChange={edit(setDailyRepeat)}
-              label="แจ้งเตือนซ้ำรายวัน"
-            />
-          </div>
-
-          <div style={styles.repeatBox}>
-            <div style={styles.repeatText}>
-              <div style={styles.repeatTitle}>แจ้งเตือนประกาศใหม่</div>
-              <div style={styles.subtitle}>
-                ส่งอีเมลเมื่อมีประกาศใหม่ในวิชาที่ซิงก์มาจาก Google Classroom
+              <div style={styles.hint}>
+                <span>เลือกได้มากกว่า 1 ช่วงเวลา</span>
+                {lastCustom !== null && !leadTimes.includes(lastCustom) && (
+                  <>
+                    <span>·</span>
+                    <span>ล่าสุดที่กำหนดเอง</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleLead(lastCustom)}
+                      style={{ ...styles.hintPill, cursor: 'pointer' }}
+                    >
+                      {formatLeadTime(lastCustom)}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
-            <Toggle
-              checked={announcementNotify}
-              onChange={edit(setAnnouncementNotify)}
-              label="แจ้งเตือนประกาศใหม่"
-            />
-          </div>
 
-          <div style={styles.taskBlock}>
-            <div style={styles.taskHead}>
-              งานที่จะได้รับการแจ้งเตือน
-              {upcoming.length > 0 && <span style={styles.taskCount}>{upcoming.length}</span>}
+            <div style={styles.repeatBox}>
+              <div style={{ ...styles.repeatText, ...dimmed }}>
+                <div style={styles.repeatTitle}>แจ้งเตือนซ้ำรายวัน</div>
+                <div style={styles.subtitle}>ส่งซ้ำทุกวันสำหรับงานที่ยังไม่เสร็จ จนกว่าจะส่งงาน</div>
+              </div>
+              <input
+                type="time"
+                value={dailyRepeatTime}
+                onChange={edit((e) => setDailyRepeatTime(e.target.value))}
+                style={{ ...styles.input, width: 96, ...dimmed }}
+              />
+              <Toggle
+                checked={enabled && dailyRepeat}
+                onChange={edit(setDailyRepeat)}
+                disabled={!enabled}
+                label="แจ้งเตือนซ้ำรายวัน"
+              />
             </div>
 
-            {upcoming.length === 0 ? (
-              <p style={styles.taskEmpty}>
-                ยังไม่มีงานค้างที่มีกำหนดส่ง — ซิงก์จาก Google Classroom หรือเพิ่มงานเองที่หน้างานทั้งหมด
-              </p>
-            ) : (
-              <ul style={styles.taskList}>
-                {upcoming.slice(0, 5).map((t) => (
-                  <li key={t.assignment_id} style={styles.taskItem}>
-                    <span style={styles.taskTitle}>{t.title}</span>
-                    <span style={styles.taskMeta}>
-                      {t.course_name} · {fmtDate(t.due)} {fmtTime(t.due)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <div style={{ ...styles.taskBlock, ...dimmed }}>
+              <div style={styles.taskHead}>
+                งานที่จะได้รับการแจ้งเตือน
+                {upcoming.length > 0 && <span style={styles.taskCount}>{upcoming.length}</span>}
+              </div>
 
-            {upcoming.length > 5 && (
-              <p style={styles.taskMore}>และอีก {upcoming.length - 5} งาน</p>
-            )}
-          </div>
+              {upcoming.length === 0 ? (
+                <p style={styles.taskEmpty}>
+                  ยังไม่มีงานค้างที่มีกำหนดส่ง — ซิงก์จาก Google Classroom หรือเพิ่มงานเองที่หน้างานทั้งหมด
+                </p>
+              ) : (
+                <ul style={styles.taskList}>
+                  {upcoming.slice(0, 5).map((t) => (
+                    <li key={t.assignment_id} style={styles.taskItem}>
+                      <span style={styles.taskTitle}>{t.title}</span>
+                      <span style={styles.taskMeta}>
+                        {t.course_name} · {fmtDate(t.due)} {fmtTime(t.due)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {upcoming.length > 5 && (
+                <p style={styles.taskMore}>และอีก {upcoming.length - 5} งาน</p>
+              )}
+            </div>
+          </section>
 
           {failures.failed_count > 0 && (
             <div style={styles.failBox}>
@@ -474,6 +502,16 @@ const styles = {
     flexDirection: 'column',
     gap: 18,
   },
+
+  group: { display: 'flex', flexDirection: 'column', gap: 14 },
+  // A rule above the second group, not a border around each: one line between
+  // them reads as a split, four lines read as two more boxes in a card that
+  // already has several.
+  groupDivided: { paddingTop: 18, borderTop: `1px solid ${C.lineSoft}` },
+  groupHead: { display: 'flex', alignItems: 'center', gap: 8 },
+  groupIcon: { display: 'flex', flexShrink: 0 },
+  // Bigger than sectionTitle, which now sits one level under it.
+  groupTitle: { flex: '1 1 auto', fontSize: 14.5, fontWeight: 700, color: C.navy },
 
   section: { display: 'flex', flexDirection: 'column', gap: 10 },
   sectionTitle: { fontSize: 13.5, fontWeight: 700, color: C.ink },
