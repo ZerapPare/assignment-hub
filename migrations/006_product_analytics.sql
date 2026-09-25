@@ -1,12 +1,4 @@
--- =========================================================
--- 006 — product/business analytics events
---
--- Apply after migrations 001–005:
---
---   docker compose exec -T db mysql -uroot -proot123 assignment_hub \
---     < migrations/006_product_analytics.sql
--- =========================================================
-
+-- 006 — product/business analytics events.
 CREATE TABLE Product_Event (
     event_id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,

@@ -16,12 +16,9 @@ function updateLastSeen(userId) {
     });
 }
 
-// One session shape for everybody: req.session.userId and nothing else. No
-// "admin mode" — the roles on that user_id decide everything, which is why one
-// login page serves both apps.
-//
-// Roles are read every request, not cached in the session, so a revocation
-// takes effect immediately. The two queries run in parallel.
+// One session shape for everybody: req.session.userId and nothing else, with
+// the roles on it deciding the rest. Read every request, not cached, so a
+// revocation takes effect immediately.
 async function loadAccount(userId) {
   const [[rows], [grants]] = await Promise.all([
     pool.query(
@@ -75,10 +72,8 @@ async function requireAuth(req, res, next) {
   }
 }
 
-// Guards the console shell — the layout and /api/admin/me. Answers "does the
-// admin console concern you at all"; requirePermission decides what you may do
-// inside it. Permissive about *which* admin permission on purpose, so a
-// narrowly-scoped account can still load the console and see its own sections.
+// Guards the console shell; requirePermission decides what you may do inside.
+// Any admin permission will do, so a narrow account can still load the console.
 async function requireAdmin(req, res, next) {
   return requireAuth(req, res, (err) => {
     if (err) return next(err);

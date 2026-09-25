@@ -1,10 +1,5 @@
--- =========================================================
--- 008 — immutable Microsoft administrator identities
---
--- Apply only to databases where 007_admin_identity.sql was already applied
--- before the Microsoft identity columns were added.
--- =========================================================
-
+-- 008 — immutable Microsoft administrator identities.
+-- Only for databases that applied 007 before these columns existed.
 ALTER TABLE Admin
     ADD COLUMN microsoft_tenant_id VARCHAR(36) NULL,
     ADD COLUMN microsoft_object_id VARCHAR(36) NULL,

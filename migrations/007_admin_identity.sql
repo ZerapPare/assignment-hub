@@ -1,12 +1,4 @@
--- =========================================================
--- 007 — separate administrator identities
---
--- Apply after migrations 001–006:
---
---   docker compose exec -T db mysql -uroot -proot123 assignment_hub \
---     < migrations/007_admin_identity.sql
--- =========================================================
-
+-- 007 — separate administrator identities. Folded into User_Account by 012.
 CREATE TABLE Admin (
     admin_id INT AUTO_INCREMENT PRIMARY KEY,
     email VARCHAR(255) NOT NULL UNIQUE,

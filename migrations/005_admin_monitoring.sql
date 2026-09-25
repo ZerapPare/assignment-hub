@@ -1,12 +1,4 @@
--- =========================================================
--- 005 — admin monitoring, account status, and audit history
---
--- Apply once on an existing database after migrations 001–004:
---
---   docker compose exec -T db mysql -uroot -proot123 assignment_hub \
---     < migrations/005_admin_monitoring.sql
--- =========================================================
-
+-- 005 — admin monitoring, account status, and audit history.
 ALTER TABLE Student
     ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student',
     ADD COLUMN account_status VARCHAR(20) NOT NULL DEFAULT 'active',

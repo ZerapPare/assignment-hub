@@ -37,8 +37,7 @@ function candidate(overrides = {}) {
   };
 }
 
-// A row as RETRY_SWEEP_SQL returns it: already claimed, carrying its own
-// trigger_type, notification_id and how many attempts it has burned.
+// As RETRY_SWEEP_SQL returns it: already claimed, carrying its own key.
 function retryRow(overrides = {}) {
   const { minutes, ...rest } = candidate();
   return {
@@ -55,8 +54,7 @@ function dailyRow(overrides = {}) {
   return { ...rest, today: '2026-09-16', ...overrides };
 }
 
-// Shaped like ANNOUNCEMENT_SQL's projection — no due date, no title, because a
-// Classroom announcement has neither.
+// Like ANNOUNCEMENT_SQL's projection: no due date, no title.
 function announcementRow(overrides = {}) {
   return {
     announcement_id: 42,
@@ -71,9 +69,8 @@ function announcementRow(overrides = {}) {
   };
 }
 
-// Dispatch on a distinctive fragment of each statement, return the mysql2
-// [rows, fields] tuple, and throw on anything unrecognised so query drift is
-// caught loudly.
+// Dispatch on a fragment of each statement and throw on anything unrecognised,
+// so query drift is caught loudly.
 function createFakeDb({
   candidates = [], retries = [], daily = [], announcements = [],
   announcementRetries = [], claimResults = null, cancelled = 0,
@@ -93,9 +90,7 @@ function createFakeDb({
         state.cancelCalls++;
         return [{ affectedRows: cancelled }, []];
       }
-      // Order matters: every one of these mentions Notification or
-      // Notification_Setting, so each matcher has to be more specific than the
-      // ones below it.
+      // Order matters: each matcher must be more specific than the ones below.
       if (sql.includes('an.announcement_id = n.announcement_id')) {
         return [announcementRetries, []];
       }
@@ -108,8 +103,7 @@ function createFakeDb({
       if (sql.includes('announcement_notify')) {
         return [announcements, []];
       }
-      // The lead query is driven from User_Account and joins in the lead times,
-      // which is the one table only it names.
+      // Notification_Lead_Time is the one table only the lead query names.
       if (sql.includes('Notification_Lead_Time')) {
         return [candidates, []];
       }
@@ -118,8 +112,7 @@ function createFakeDb({
           assignmentId: params[0], announcementId: params[1], triggerType: params[2],
         });
         const affectedRows = claimResults ? Number(claimResults[claimIndex]) : 1;
-        // The claim hands its primary key to deliver(), which is what the MARK_*
-        // statements key on now.
+        // The claim hands its primary key to deliver(), which MARK_* keys on.
         const insertId = 5000 + claimIndex;
         claimIndex += 1;
         return [{ affectedRows, insertId }, []];
@@ -191,8 +184,7 @@ test('thai dates are rendered in the buddhist era', () => {
   assert.equal(formatThaiDateTime('not a date'), 'ไม่ระบุกำหนดส่ง');
 });
 
-// The lead time that triggered the mail is not the same thing as the time left
-// by the moment it goes out — a retry can be hours behind.
+// The lead time is not the time left when the mail goes out; a retry lags.
 test('the countdown is measured from the due date, not the lead time', () => {
   const now = new Date('2026-09-20T02:00:00');       // 21h59m before DUE
   const text = buildBody({
@@ -265,9 +257,8 @@ test('the first failed send schedules a retry and is handed to the error log', a
   assert.equal(db.state.failuresLogged[0].attempt, 1);
 });
 
-// The banner is driven by readFailures(), which counts only rows carrying a
-// sent_at. Writing one mid-ladder would nag the student about a send the system
-// is still perfectly willing to retry (UC-8 7a.3).
+// readFailures() counts only rows with sent_at, so writing one mid-ladder
+// would nag about a send the system is still willing to retry (UC-8 7a.3).
 test('a retry in flight never writes sent_at, so the banner stays quiet', async () => {
   for (const attemptsSoFar of [0, 1, 2]) {
     const db = createFakeDb({
@@ -314,8 +305,7 @@ test('a retry that succeeds is marked sent and stops the ladder', async () => {
   assert.equal(db.state.marked[0].result, 'sent');
 });
 
-// A retry has no Notification_Lead_Time row to consult — the student may have
-// deselected it since. The key is the only record of which mail this was.
+// The student may have deselected the lead time, so the key is the only record.
 test('a retry rebuilds the countdown mail from the trigger key', async () => {
   const db = createFakeDb({
     retries: [retryRow({ trigger_type: 'lead:180:2026-09-20 23:59', attempt_count: 1 })],
@@ -402,8 +392,7 @@ test('a second daily pass on the same day sends nothing', async () => {
   assert.equal(mailer.sent.length, 0);
 });
 
-// Telling someone a deadline they already missed is "coming up" is worse than
-// not writing, so overdue work gets its own wording.
+// Calling a missed deadline "coming up" is worse than silence.
 test('an overdue task says so instead of counting down', async () => {
   const past = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const db = createFakeDb({ daily: [dailyRow({ due_date: past })] });
@@ -447,8 +436,7 @@ test('gaps read as days, hours or minutes', () => {
   assert.equal(humanizeGap(0), '1 นาที');
 });
 
-// A daily row has no lead time in its key; that absence is what selects the
-// daily wording when a retry rebuilds the mail.
+// No lead time in the key is what selects the daily wording on a retry.
 test('a retry of a daily mail rebuilds the daily wording', () => {
   const row = {
     title: 'งานค้าง', course_name: 'วิชา', due_date: DUE,
@@ -463,8 +451,7 @@ test('the daily window is seven days either side', () => {
   assert.equal(DAILY_WINDOW_DAYS, 7);
 });
 
-// Retries are work already promised to someone; a burst of new candidates should
-// not push them behind.
+// Retries are already promised; new candidates must not push them behind.
 test('retries are attempted before fresh candidates', async () => {
   const db = createFakeDb({
     retries: [retryRow({ assignment_id: 99 })],
@@ -476,8 +463,7 @@ test('retries are attempted before fresh candidates', async () => {
 
   assert.equal(result.sent, 2);
   assert.deepEqual(mailer.sent.map(() => true), [true, true]);
-  // The retry carries its own notification_id; the fresh candidate gets the one
-  // its claim just created.
+  // The retry carries its own id; the fresh one gets what its claim created.
   assert.deepEqual(db.state.marked.map((m) => m.notificationId), [900, 5000]);
 });
 
@@ -492,9 +478,7 @@ test('a new announcement is claimed and mailed', async () => {
   assert.match(mailer.sent[0].subject, /^\[ประกาศใหม่\] ฐานข้อมูล/);
 });
 
-// The claim carries the announcement in its own column and leaves assignment_id
-// NULL — chk_notification_target rejects a row that sets both or neither, so
-// getting this order wrong fails at the database rather than silently.
+// Exactly one target column is set; chk_notification_target rejects the rest.
 test('an announcement claim targets the announcement, not an assignment', async () => {
   const db = createFakeDb({
     announcements: [announcementRow()],
@@ -509,8 +493,7 @@ test('an announcement claim targets the announcement, not an assignment', async 
   ]);
 });
 
-// Losing the claim is how a second pass — or a second container — finds out
-// somebody else already owns this announcement.
+// Losing the claim is how a second pass learns somebody else owns this.
 test('losing the claim on an announcement sends nothing', async () => {
   const db = createFakeDb({ announcements: [announcementRow()], claimResults: [0] });
   const mailer = collectingMailer();
@@ -522,8 +505,7 @@ test('losing the claim on an announcement sends nothing', async () => {
   assert.equal(mailer.sent.length, 0);
 });
 
-// RETRY_SWEEP_SQL inner-joins Assignment_Detail, so without a sweep of its own
-// a failed announcement mail would sit unsent forever.
+// RETRY_SWEEP_SQL joins Assignment_Detail, which an announcement never matches.
 test('a failed announcement mail is retried by its own sweep', async () => {
   const db = createFakeDb({
     announcementRetries: [announcementRow({ notification_id: 77, trigger_type: 'ann:new', attempt_count: 1 })],
@@ -543,9 +525,7 @@ test('the announcement mail links to the stream, not to an assignment', () => {
   assert.doesNotMatch(text, /\/assignments\//);
 });
 
-// The dispatch used to treat anything that was not a lead time as a daily
-// repeat, which would have rendered an announcement against an undefined due
-// date. A fourth kind must fail loudly instead of picking the wrong template.
+// A fourth kind must fail loudly instead of picking the wrong template.
 test('buildMessage dispatches on the key prefix and refuses an unknown one', () => {
   assert.match(buildMessage(announcementRow(), 'ann:new').subject, /ประกาศใหม่/);
   assert.match(buildMessage(candidate(), 'lead:1440:x').subject, /ใกล้ครบกำหนด/);
@@ -558,11 +538,8 @@ test('the announcement freshness gate is two clocks wide', () => {
   assert.equal(ANNOUNCEMENT_FRESH_DAYS, 2);
 });
 
-// The settings panel returns DEFAULTS without writing a row, so a student who
-// has never opened it has nothing in Notification_Setting. The sender has to
-// assume the same defaults or the panel promises a reminder nobody sends —
-// which is exactly what it did before LEAD_REMINDER_SQL started from
-// User_Account. These two constants are the contract between the two files.
+// The panel returns DEFAULTS without writing a row, so the sender must assume
+// the same ones or promise a reminder nobody sends. This is that contract.
 test('the sender and the settings panel agree on the default lead time', () => {
   assert.deepEqual(DEFAULTS.lead_times, [DEFAULT_LEAD_MINUTES]);
   assert.equal(DEFAULTS.enabled, true);

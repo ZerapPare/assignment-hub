@@ -1,9 +1,6 @@
-// Identity normalisation helpers.
-//
-// completeAdminLogin used to live here, looking administrators up in the `Admin`
-// allowlist. Migration 013 folded that table away and roles replaced the
-// allowlist. The normalisers stay: they keep an email or a Microsoft object id
-// comparable however a provider spells it.
+// Identity normalisation. 012 folded the `Admin` allowlist away and roles
+// replaced it; these stay, keeping an address or object id comparable however
+// a provider spells it.
 
 const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

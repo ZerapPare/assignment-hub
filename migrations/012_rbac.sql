@@ -1,48 +1,11 @@
--- =========================================================
--- 012 — role-based access control on one user table
---
--- Was three migrations (012 RBAC core, 013 fold, 014 rename admin). Run in
--- sequence they largely undid each other: 012 built User_Account as a supertype
--- with Student and Admin hanging off it, 013 threw that table away and renamed
--- Student into its place, and 014 renamed a role 012 had just seeded. This does
--- the same job in the order the final schema actually wants.
---
---   User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
---
--- One user table, and User_Role answers every access question. That is also
--- what unblocked a single login page: requireAuth used to look users up in
--- Student, where an administrator simply was not.
---
--- Strategy: RENAME Student TO User_Account rather than copying rows. MySQL
--- rewrites incoming foreign keys on a rename, so the six tables referencing
--- Student(user_id) follow untouched and no student id moves. Administrators are
--- then inserted at fresh ids above the student range — the two tables were
--- separate AUTO_INCREMENT sequences that already overlap, so id 1 was two
--- different people.
---
--- The RBAC tables are created *after* the fold, so User_Role's foreign keys
--- point at the surviving table from the start and never have to be juggled.
---
--- Everything but the row backfills is duplicated in init.sql;
--- test/rbacSchema.test.js keeps the two in step.
---
--- Apply after migrations 001–011:
---
---   docker compose exec -T db mysql -uroot -proot123 assignment_hub \
---     < migrations/012_rbac.sql
--- =========================================================
+-- 012 — RBAC on one user table. Merged from the old 012/013/014.
+-- User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
+-- Apply after 001–011. Mirrored in init.sql; rbacSchema.test.js keeps them in step.
 
--- The role and permission names below are Thai. Without this the mysql client
--- reads these UTF-8 bytes as latin1 and stores mojibake, and it also picks the
--- charset of string literals inside CHECK constraints.
+-- Thai names below; without this the client stores latin1 mojibake.
 SET NAMES utf8mb4;
 
--- ---------------------------------------------------------
--- 1. One user table
---
--- Wrapped in a procedure so re-running migrate.sh is a no-op rather than an
--- error, and so the branching below is expressible at all.
--- ---------------------------------------------------------
+-- 1. One user table. In a procedure so a rerun is a no-op.
 
 DROP PROCEDURE IF EXISTS migrate_012_fold_user_tables;
 DROP PROCEDURE IF EXISTS migrate_012_drop_fk;
@@ -59,8 +22,7 @@ BEGIN
     FROM information_schema.TABLES
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Student';
 
-    -- Nothing to fold: either a fresh database from init.sql, or one that has
-    -- already been through this.
+    -- Nothing to fold: fresh from init.sql, or already done.
     IF has_student = 0 THEN
         SELECT 'Student already folded into User_Account — skipping' AS note;
     ELSE
@@ -69,11 +31,7 @@ BEGIN
     FROM information_schema.TABLES
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'User_Account';
 
-    -- A database that ran the *old* 012 and stopped there has both tables: the
-    -- supertype User_Account plus the Student it hung off. That table is the
-    -- one thing this migration no longer builds, so clear it out of the way
-    -- before the rename needs its name. Each drop is guarded because the same
-    -- database may have got only partway through.
+    -- Ran the old 012 and stopped: drop its supertype so the rename can take the name.
     IF has_user_account > 0 THEN
         SELECT COUNT(*) INTO has_user_role
         FROM information_schema.TABLES
@@ -89,12 +47,10 @@ BEGIN
         DROP TABLE User_Account;
     END IF;
 
-    -- Student becomes the one user table. MySQL rewrites the six foreign keys
-    -- referencing it as part of the rename.
+    -- MySQL rewrites the six incoming foreign keys as part of the rename.
     RENAME TABLE Student TO User_Account;
 
-    -- Reshape it to describe any user, not only a student. `role` would read as
-    -- the RBAC role, which it is not — User_Role is.
+    -- `role` renamed: it would read as the RBAC role, which User_Role owns.
     ALTER TABLE User_Account
         RENAME COLUMN student_name     TO full_name,
         RENAME COLUMN university_email TO email,
@@ -116,14 +72,8 @@ BEGIN
         ADD CONSTRAINT fk_user_account_university
             FOREIGN KEY (university_id) REFERENCES University(university_id);
 
-    -- Administrators come in at fresh ids, above the student range by virtue of
-    -- the AUTO_INCREMENT they now share. is_active collapses into
-    -- account_status: both answered the same question, one checked by
-    -- requireAdmin and the other by requireAuth.
-    --
-    -- A plain INSERT, not INSERT IGNORE: a student and an administrator sharing
-    -- an address would be silently dropped here and then lose their access at
-    -- step 6. Failing on the unique index is the honest outcome.
+    -- Fresh ids above the student range; is_active collapses into account_status.
+    -- Plain INSERT: a shared address must fail loudly, not lose someone's access.
     INSERT INTO User_Account
         (full_name, email, user_type,
          microsoft_tenant_id, microsoft_object_id,
@@ -138,8 +88,7 @@ BEGIN
            a.last_login_at
     FROM Admin a;
 
-    -- The audit log recorded admin_id. Translate to the new user_id before
-    -- Admin goes, or every historical row loses its actor.
+    -- Remap admin_id to user_id before Admin goes, or every row loses its actor.
     ALTER TABLE Admin_Audit_Log DROP FOREIGN KEY fk_audit_log_admin;
 
     UPDATE Admin_Audit_Log l
@@ -156,8 +105,7 @@ BEGIN
     END IF;
 END //
 
--- Dropping a foreign key that is not there is an error, and the states this
--- migration has to survive differ in which ones exist.
+-- Dropping an absent foreign key is an error, and the states here differ.
 CREATE PROCEDURE migrate_012_drop_fk(IN tbl VARCHAR(64), IN fk VARCHAR(64))
 BEGIN
     DECLARE present INT;
@@ -181,20 +129,10 @@ CALL migrate_012_fold_user_tables();
 DROP PROCEDURE migrate_012_fold_user_tables;
 DROP PROCEDURE migrate_012_drop_fk;
 
--- Belt and braces. The fold above drops Admin on the path that had rows to
--- move, but 007_admin_identity.sql recreates it on a database built from the
--- current init.sql, where it has no business existing at all — nothing reads it
--- any more and init.sql itself lists it among the tables to drop. Leaving it
--- behind is how a teammate ends up looking at a user table that has not been
--- written to since the fold.
+-- 007_admin_identity recreates Admin on a fresh database. Nothing reads it.
 DROP TABLE IF EXISTS Admin;
 
--- ---------------------------------------------------------
--- 2. RBAC tables
---
--- After the fold, so User_Role can reference the surviving User_Account
--- directly instead of being pointed at one table and later moved to another.
--- ---------------------------------------------------------
+-- 2. RBAC tables. After the fold, so User_Role points at the surviving table.
 
 CREATE TABLE IF NOT EXISTS Role (
     role_id     INT AUTO_INCREMENT PRIMARY KEY,
@@ -237,8 +175,7 @@ CREATE TABLE IF NOT EXISTS User_Role (
     PRIMARY KEY (user_id, role_id),
     CONSTRAINT fk_user_role_user
         FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE,
-    -- No ON DELETE on purpose: a role still assigned to somebody must not be
-    -- silently deletable.
+    -- No ON DELETE: a role still assigned must not be silently deletable.
     CONSTRAINT fk_user_role_role
         FOREIGN KEY (role_id) REFERENCES Role(role_id),
     CONSTRAINT fk_user_role_granted_by
@@ -246,11 +183,7 @@ CREATE TABLE IF NOT EXISTS User_Role (
     INDEX idx_user_role_role (role_id)
 );
 
--- A database that ran the old 012 gave administrators ids in the supertype
--- table the fold has just dropped; they come back above the student range
--- instead, so any grant still pointing at an old id now points at nobody.
--- Step 5 re-grants from user_type, so this costs no one their access — but the
--- rows have to go before the foreign key below can be trusted to hold.
+-- Admin ids changed in the fold, so old grants point at nobody. Step 5 re-grants.
 DELETE ur FROM User_Role ur
 LEFT JOIN User_Account u ON u.user_id = ur.user_id
 WHERE u.user_id IS NULL;
@@ -260,8 +193,7 @@ LEFT JOIN User_Account u ON u.user_id = ur.granted_by_user_id
    SET ur.granted_by_user_id = NULL
  WHERE ur.granted_by_user_id IS NOT NULL AND u.user_id IS NULL;
 
--- A database that ran the old 012 lost those two foreign keys above, and
--- CREATE TABLE IF NOT EXISTS will not put them back on a table that survived.
+-- CREATE TABLE IF NOT EXISTS will not re-add these to a table that survived.
 SET @has_user_fk = (
     SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
     WHERE CONSTRAINT_SCHEMA = DATABASE()
@@ -280,28 +212,15 @@ PREPARE readd_fk_stmt FROM @readd_fk_sql;
 EXECUTE readd_fk_stmt;
 DEALLOCATE PREPARE readd_fk_stmt;
 
--- ---------------------------------------------------------
--- 3. Retired role codes
---
--- Before the reference data, not after: seeding `admin` first would leave a
--- legacy database holding both codes, and the rename could no longer take the
--- name. Written as a rename so role_id stays stable and every User_Role and
--- Role_Permission row follows without being touched.
--- ---------------------------------------------------------
-
--- The derived table is required: MySQL rejects a subquery on the target of an
--- UPDATE.
+-- 3. Retired role codes. Before the seed, or `admin` would already be taken.
+-- A rename keeps role_id stable, so every grant follows untouched.
+-- The derived table is required: MySQL rejects a subquery on an UPDATE target.
 UPDATE Role
    SET role_code = 'admin'
  WHERE role_code = 'super_admin'
    AND NOT EXISTS (SELECT 1 FROM (SELECT role_code FROM Role) r WHERE r.role_code = 'admin');
 
--- ---------------------------------------------------------
--- 4. Reference data
---
--- admin holds exactly the seven capabilities the single requireAdmin guard
--- granted before RBAC — no more, no less.
--- ---------------------------------------------------------
+-- 4. Reference data. admin holds exactly what requireAdmin granted before RBAC.
 
 INSERT INTO Role (role_code, role_name, description, is_system) VALUES
     ('admin',   'ผู้ดูแลระบบ', 'สิทธิ์ทั้งหมดของ admin console', TRUE),
@@ -327,18 +246,14 @@ ON DUPLICATE KEY UPDATE
     permission_name = VALUES(permission_name),
     description     = VALUES(description);
 
--- Move anyone still holding a retired code onto `admin`, which step 3 has by now
--- guaranteed exists. UPDATE IGNORE skips a user who already holds it rather
--- than failing on the primary key.
+-- UPDATE IGNORE skips someone who already holds `admin`.
 UPDATE IGNORE User_Role ur
   JOIN Role old ON old.role_id = ur.role_id
   JOIN Role new ON new.role_code = 'admin'
    SET ur.role_id = new.role_id
  WHERE old.role_code IN ('super_admin', 'support_admin', 'analytics_viewer');
 
--- fk_user_role_role has no ON DELETE on purpose, so a grant the step above
--- missed makes this fail loudly instead of orphaning somebody.
--- Role_Permission follows via ON DELETE CASCADE.
+-- Fails loudly on a grant the step above missed. Role_Permission cascades.
 DELETE FROM Role WHERE role_code IN ('super_admin', 'support_admin', 'analytics_viewer');
 
 INSERT IGNORE INTO Role_Permission (role_id, permission_id)
@@ -359,17 +274,9 @@ WHERE (r.role_code, p.permission_code) IN (
     ('student', 'profile.manage')
 );
 
--- ---------------------------------------------------------
--- 5. Grant roles — migration only
---
--- init.sql stops at step 4: a fresh database has no rows to grant to. Structure
--- and reference data belong to initdb; moving existing data belongs here.
---
--- Reads user_type rather than the old Student and Admin tables, so it works
--- whether this run did the fold or found it already done. Suspended accounts
--- are included: the guards already reject them on account_status, and
--- reinstating one must not leave them with no role.
--- ---------------------------------------------------------
+-- 5. Grant roles — migration only; init.sql has no rows to grant to.
+-- Reads user_type, so it works whether this run folded or found it done.
+-- Suspended accounts included: reinstating one must not leave it roleless.
 
 INSERT IGNORE INTO User_Role (user_id, role_id)
 SELECT u.user_id, r.role_id

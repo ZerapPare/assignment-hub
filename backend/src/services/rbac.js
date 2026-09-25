@@ -1,10 +1,7 @@
 const pool = require('../db');
 
-// Best-effort, like trySetStudentId beside it in the login path: a missing role
-// is a database problem to fix, not a reason to refuse entry.
-//
-// Takes an executor so a caller already in a transaction (the dev seeder) can
-// keep the grant on its own connection.
+// Best-effort, like trySetStudentId: a missing role is a database problem, not
+// a reason to refuse entry. Takes an executor so a transaction can keep its own.
 async function tryGrantRole(userId, roleCode, executor = pool) {
   if (!userId) return;
   try {

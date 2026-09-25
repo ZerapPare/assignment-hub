@@ -1,10 +1,6 @@
-// Walks the admin routers and checks that every endpoint asks for the
-// permission it is supposed to. Catches the obvious regression — someone adds
-// an admin endpoint and forgets the guard, leaving it open to any administrator
-// regardless of role.
-//
-// No database: requiring a route module only builds the router, and the mysql
-// pool does not connect until something queries it.
+// Walks the admin routers and checks each endpoint asks for the right
+// permission, catching an endpoint added without a guard. No database needed:
+// requiring a route module only builds the router.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -53,10 +49,8 @@ test('no admin endpoint is left unguarded', () => {
   }
 });
 
-// This one is guarded by router.use rather than per route, because the router
-// owns /api/admin/business outright and every endpoint under it needs the same
-// permission. The prefix guard in admin.js cannot do the same: its /api/admin
-// prefix also matches these paths.
+// Guarded by router.use, not per route: it owns /api/admin/business outright.
+// admin.js cannot do the same — its /api/admin prefix also matches these.
 test('business analytics is guarded at the router', () => {
   const prefixGuards = adminBusinessRouter.stack
     .filter((layer) => !layer.route)

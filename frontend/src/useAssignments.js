@@ -1,17 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-// ─────────── test error ───────────
-// ตั้งเป็น null เมื่อเทสเสร็จ แล้วลบบล็อกนี้กับที่ใช้ TEST_ERROR ทิ้ง
-//   'load'   → โหลดหน้าไม่สำเร็จ  
-//   'status' → เปลี่ยนสถานะไม่สำเร็จ 
-//   'delete' → ลบงานไม่สำเร็จ   บัค
+// Debug switch: 'load' | 'status' | 'delete' forces that failure; anything
+// else is off. Remove this and its uses when the testing is done.
 const TEST_ERROR = 'null';
-// ──────────────────────────────────────────────────────────
 
-// The dashboard and the assignments page both need the same list, the same
-// bounce to /login on 401, and the same row handlers. Sharing one hook keeps a
-// change to how a task is edited from having to be made twice.
+// One hook for both pages: same list, same 401 bounce, same row handlers.
 export default function useAssignments() {
   const navigate = useNavigate();
   const [assignments, setAssignments] = useState([]);
@@ -19,9 +13,8 @@ export default function useAssignments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Per-row rather than the page-level `error`: that one blanks the whole
-  // screen (the body renders only when !error), and UC-5 ext 4a wants the
-  // failure shown while everything else — including the old status — stays put.
+  // Per-row, not the page-level `error`, which blanks the screen. UC-5 ext 4a
+  // wants the failure shown while the old status stays put.
   const [statusPending, setStatusPending] = useState({});
   const [statusErrors, setStatusErrors] = useState({});
 
@@ -81,8 +74,7 @@ export default function useAssignments() {
       }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || 'อัปเดตสถานะไม่สำเร็จ');
-      // Nothing else to do for UC-5 step 5: the dashboard's `view` is memoised
-      // on `assignments`, so its cards, donut and urgent lists all follow.
+      // UC-5 step 5: the dashboard is memoised on `assignments` and follows.
       setAssignments((prev) => prev.map((a) => (a.assignment_id === data.assignment_id ? data : a)));
     } catch (err) {
       // `assignments` is untouched, so the select snaps back on its own.

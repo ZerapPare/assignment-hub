@@ -8,15 +8,13 @@ const { buildSubject, buildBody } = require('../services/notificationSender');
 
 const router = express.Router();
 
-// 28 days. Anything longer is almost certainly a typo, and the sender would
-// have to look that far back on every pass.
+// 28 days. Longer is almost certainly a typo.
 const MAX_LEAD_MINUTES = 40320;
 const MAX_LEAD_TIMES = 10;
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-// What a student who has never opened this panel gets. Returned rather than
-// inserted, so "no row" still means "never saved settings".
+// Returned, never inserted, so "no row" still means "never saved settings".
 const DEFAULTS = {
   enabled: true,
   lead_times: [1440],
@@ -32,10 +30,8 @@ function toHhMm(value) {
   return String(value).slice(0, 5);
 }
 
-// A notification hangs off either an assignment or an announcement, so the
-// owning student is reached through whichever one is set — both routes end at
-// Course. A failed send is one with sent_at stamped but is_sent still false;
-// see MARK_FAILED_SQL in services/notificationSender.js.
+// Either target reaches its student through Course. A failed send is sent_at
+// stamped with is_sent still false — see MARK_FAILED_SQL in the sender.
 async function readFailures(userId) {
   const [rows] = await pool.query(
     `SELECT COUNT(*) AS failed_count, MAX(n.sent_at) AS last_failed_at
@@ -70,8 +66,7 @@ async function readSettings(userId) {
   const row = settings[0];
   return {
     enabled: Boolean(row.enabled),
-    // A saved row with no lead times is a real state — the student cleared them
-    // all — so this stays empty instead of falling back to DEFAULTS.
+    // A saved row with no lead times is a real state, not a reason for DEFAULTS.
     lead_times: leadTimes.map((r) => r.minutes),
     daily_repeat: Boolean(row.daily_repeat),
     daily_repeat_time: toHhMm(row.daily_repeat_time),
@@ -90,8 +85,7 @@ router.get('/api/notification-settings', requireAuth, async (req, res) => {
   }
 });
 
-// Numbers only: Number(true) is 1, which would sneak a boolean through as a
-// one-minute lead time.
+// Numbers only: Number(true) is 1, which would pass as a one-minute lead time.
 function parseLeadMinutes(value) {
   if (typeof value !== 'number' || !Number.isInteger(value)) return null;
   if (value < 1 || value > MAX_LEAD_MINUTES) return null;
@@ -141,8 +135,7 @@ router.put('/api/notification-settings', requireAuth, async (req, res) => {
     }
   }
 
-  // Both tables move together: half-applied lead times would silently change
-  // when the student gets reminded.
+  // Both tables move together, or the reminder times change silently.
   let conn;
   try {
     conn = await pool.getConnection();
@@ -200,9 +193,8 @@ router.put('/api/notification-settings', requireAuth, async (req, res) => {
   }
 });
 
-// Built by the same two functions the scheduler uses, so a test that arrives
-// proves the real thing will. Writes no Notification row: this is not a
-// reminder for any task, and assignment_id is NOT NULL.
+// Same builders the scheduler uses, so an arriving test proves the real one.
+// Writes no Notification row: this is not a reminder for any task.
 router.post('/api/notification-settings/test', requireAuth, async (req, res) => {
   let student;
   let sample;
@@ -260,13 +252,10 @@ router.post('/api/notification-settings/test', requireAuth, async (req, res) => 
     return res.status(502).json({ error: 'ส่งอีเมลทดสอบไม่สำเร็จ', request_id: req.requestId });
   }
 
-  // delivered:false means no SMTP account is configured and the mail only went
-  // to the log. Saying "sent" instead would send people hunting an empty inbox.
+  // delivered:false means no SMTP configured and the mail only went to the log.
   res.json({ ok: true, to: student.email, delivered: delivery.delivered !== false });
 });
 
-// DEFAULTS rides along so a test can hold it against the sender's own idea of
-// the same defaults — the panel promising a reminder nobody sends is exactly
-// the bug that made the sender start from User_Account instead of this table.
+// Exported so a test can hold it against the sender's own defaults.
 module.exports = router;
 module.exports.DEFAULTS = DEFAULTS;

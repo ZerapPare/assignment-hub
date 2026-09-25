@@ -12,8 +12,8 @@ const PROVIDERS = {
   microsoft: { accessCol: 'ms_access_token', refreshCol: 'ms_refresh_token' },
 };
 
-// `state` ties a callback to the session that started the flow. Without it a
-// crafted callback URL under ?link=1 binds an attacker's account to the victim's.
+// `state` ties a callback to the session that started it; without it a crafted
+// ?link=1 URL binds an attacker's account to the victim's.
 function beginOAuth(req) {
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = state;
@@ -33,9 +33,8 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
   const access = tokens.access_token || null;
   let userId;
 
-  // Link mode finds the row by session, never by email: a personal Google
-  // address rarely matches a university Microsoft one, and matching on email
-  // would create a second account instead of connecting the existing one.
+  // By session, never by email: the two addresses rarely match, and matching on
+  // email would create a second account instead of connecting this one.
   if (linkMode && req.session.userId) {
     userId = req.session.userId;
     const [[existing = {}]] = await pool.query(
@@ -58,9 +57,8 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
 
     if (rows.length) {
       userId = rows[0].user_id;
-      // university_id is refreshed every login so accounts created before their
-      // University row existed get backfilled. The refresh token is kept when
-      // the provider returns no new one.
+      // university_id refreshed every login to backfill older accounts; the
+      // refresh token is kept when the provider returns no new one.
       await pool.query(
         `UPDATE User_Account
          SET full_name = ?, university_id = ?, ${accessCol} = ?, ${refreshCol} = ?,
@@ -77,8 +75,7 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
       );
       userId = ins.insertId;
 
-      // Signing in makes an ordinary account and nothing more. The admin console
-      // needs a role granted afterwards — what replaced the old allowlist.
+      // Signing in makes an ordinary account; admin needs a role granted after.
       await tryGrantRole(userId, ROLES.STUDENT);
     }
 
@@ -86,8 +83,7 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
     await trySetStudentId(userId, studentIdFromEmail(email));
   }
 
-  // Tracked only after the account write succeeds. Link mode is an integration
-  // action; a normal callback is a login.
+  // Only after the write succeeds. Link mode is an integration, not a login.
   void safeTrackEvent({
     userId,
     eventName: linkMode ? `integration.${provider}_connected` : 'auth.login_success',

@@ -1,9 +1,6 @@
 USE assignment_hub;
 
--- The seed data below is Thai. Without this the mysql client reads these UTF-8
--- bytes as latin1 and stores mojibake, and it also picks the charset of string
--- literals inside CHECK constraints. Declaring it here keeps docker-entrypoint,
--- migrate.sh and a manual pipe identical.
+-- Thai seed data below; without this the client stores latin1 mojibake.
 SET NAMES utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 0;
@@ -31,9 +28,7 @@ DROP TABLE IF EXISTS University;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- =========================================================
 -- สร้างตารางทั้งหมด
--- =========================================================
 
 CREATE TABLE University (
     university_id   INT AUTO_INCREMENT PRIMARY KEY,
@@ -42,12 +37,9 @@ CREATE TABLE University (
     CONSTRAINT uq_university_domain UNIQUE (email_domain)
 );
 
--- One table for everybody — no separate administrator table, because the roles
--- on a user_id decide everything. user_type only tells the metrics queries
--- which rows to count; it is not an access-control field, User_Role is.
---
--- student_id is the number the university issues, not a key: NULL for
--- administrators, unique only within a university.
+-- One table for everybody; the roles on a user_id decide everything.
+-- user_type is for metrics only — User_Role is the access-control field.
+-- student_id is the university's number, not a key: NULL for administrators.
 CREATE TABLE User_Account (
     user_id           INT AUTO_INCREMENT PRIMARY KEY,
     student_id        VARCHAR(50),
@@ -90,18 +82,9 @@ CREATE TABLE IF NOT EXISTS Schedule_Setting (
         FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE
 );
 
--- =========================================================
--- RBAC — User–Role–Permission
---
---   User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
---
--- Every access decision is this join. No second identity table and no "admin
--- mode" on the session: the console opens exactly when the account holds an
--- administrative permission, which is why one login page serves everyone.
---
--- Duplicated in migrations/012_rbac.sql for databases that already exist.
--- Keep the two in step — test/rbacSchema.test.js fails if they drift.
--- =========================================================
+-- RBAC — User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
+-- Every access decision is this join, which is why one login page serves all.
+-- Mirrored in migrations/012_rbac.sql; rbacSchema.test.js fails on drift.
 
 CREATE TABLE IF NOT EXISTS Role (
     role_id     INT AUTO_INCREMENT PRIMARY KEY,
@@ -144,8 +127,7 @@ CREATE TABLE IF NOT EXISTS User_Role (
     PRIMARY KEY (user_id, role_id),
     CONSTRAINT fk_user_role_user
         FOREIGN KEY (user_id) REFERENCES User_Account(user_id) ON DELETE CASCADE,
-    -- No ON DELETE on purpose: a role still assigned to somebody must not be
-    -- silently deletable.
+    -- No ON DELETE: a role still assigned must not be silently deletable.
     CONSTRAINT fk_user_role_role
         FOREIGN KEY (role_id) REFERENCES Role(role_id),
     CONSTRAINT fk_user_role_granted_by
@@ -153,8 +135,7 @@ CREATE TABLE IF NOT EXISTS User_Role (
     INDEX idx_user_role_role (role_id)
 );
 
--- Reference data. admin holds exactly the seven capabilities the single
--- requireAdmin guard granted before RBAC — no more, no less.
+-- Reference data. admin holds exactly what requireAdmin granted before RBAC.
 
 INSERT INTO Role (role_code, role_name, description, is_system) VALUES
     ('admin',   'ผู้ดูแลระบบ', 'สิทธิ์ทั้งหมดของ admin console', TRUE),
@@ -231,16 +212,14 @@ CREATE TABLE IF NOT EXISTS Announcement (
     creator_email             VARCHAR(255),
     origin_link               VARCHAR(500),
     posted_at                 DATETIME,
-    -- When we first saw it, which is not when it was posted: a first sync of an
-    -- old course brings back a term of history at once. The reminder sender
-    -- needs both to tell a genuinely new post from one that is merely new to us.
+    -- When we first saw it, not when it was posted. The sender needs both to
+    -- tell a genuinely new post from one that is merely new to us.
     created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     course_id                 INT NOT NULL,
     CONSTRAINT fk_announcement_course
         FOREIGN KEY (course_id) REFERENCES Course(course_id)
         ON DELETE CASCADE,
-    -- Makes the sync an upsert instead of SELECT-then-branch, so two overlapping
-    -- passes cannot both insert the same post.
+    -- Makes the sync an upsert, so overlapping passes cannot both insert.
     CONSTRAINT uq_announcement_external UNIQUE (course_id, external_announcement_id)
 );
 
@@ -283,14 +262,12 @@ CREATE TABLE Notification (
     -- Exactly one of these is set; chk_notification_target enforces it.
     assignment_id    INT NULL,
     announcement_id  INT NULL,
-    -- Which reminder this is: 'lead:<minutes>:<due date>', 'daily:<YYYY-MM-DD>'
-    -- or 'ann:new'. The due date is in the key so moving a deadline re-arms the
-    -- reminder. See backend/src/services/notificationSender.js.
+    -- 'lead:<minutes>:<due date>' | 'daily:<YYYY-MM-DD>' | 'ann:new'. The due
+    -- date is in the key so moving a deadline re-arms the reminder.
     trigger_type     VARCHAR(50) NOT NULL,
     sent_at          DATETIME,
     is_sent          BOOLEAN DEFAULT FALSE,
-    -- Retry ladder. sent_at stays NULL while attempts remain, so the banner
-    -- only counts a send that failed for good.
+    -- Retry ladder. sent_at stays NULL while attempts remain.
     attempt_count    INT NOT NULL DEFAULT 0,
     next_attempt_at  DATETIME NULL,
     CONSTRAINT fk_notification_detail
@@ -301,11 +278,8 @@ CREATE TABLE Notification (
         ON DELETE CASCADE,
     CONSTRAINT chk_notification_target
         CHECK ((assignment_id IS NULL) <> (announcement_id IS NULL)),
-    -- One unique key per kind of target, and together they are the whole
-    -- concurrency story: whoever inserts owns the send. They can be separate
-    -- because MySQL treats NULLs as distinct — each key only constrains the
-    -- rows whose column is set, and the other kind falls through it. A single
-    -- key over both columns would never collide and every pass would re-mail.
+    -- Whoever inserts owns the send. Two keys, not one: MySQL treats NULLs as
+    -- distinct, so a single key over both columns would never collide.
     CONSTRAINT uq_notification_trigger UNIQUE (assignment_id, trigger_type),
     CONSTRAINT uq_notification_announcement UNIQUE (announcement_id, trigger_type),
     INDEX idx_notification_retry (next_attempt_at, is_sent)

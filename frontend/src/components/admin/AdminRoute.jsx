@@ -17,10 +17,8 @@ function AdminRoute() {
       const currentAdmin = await adminRequest('/api/admin/me');
       setAdmin(currentAdmin);
     } catch (err) {
-      // 401 and 403 mean different things now that there is one login for
-      // everyone: 401 is "nobody is signed in", 403 is "you are signed in but
-      // hold no administrative role". Sending the second case to the login page
-      // would just loop them back here.
+      // 401 is "nobody is signed in", 403 is "signed in, but no admin role".
+      // Sending the second to /login would loop them straight back here.
       if (err.status === 401) {
         setRedirect(true);
         return;

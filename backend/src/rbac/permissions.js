@@ -1,9 +1,6 @@
-// Single source of truth for permission codes.
-//
-// Guards reference these constants, not bare strings, so a typo crashes at
-// require-time instead of leaving an endpoint silently unreachable. Must stay
-// in step with the Permission seed rows in init.sql and migrations/012_rbac.sql
-// — test/rbacSchema.test.js asserts it.
+// Single source of truth for permission codes. Guards use these constants, not
+// strings, so a typo crashes at require-time. Must match the Permission seeds
+// in init.sql and migrations/012_rbac.sql — rbacSchema.test.js asserts it.
 
 const PERMISSIONS = {
   // Admin console
@@ -15,9 +12,7 @@ const PERMISSIONS = {
   BUSINESS_ANALYTICS_READ: 'business.analytics.read',
   AUDIT_LOG_READ: 'audit_log.read',
 
-  // Student scope — modelled and granted, not yet enforced. requireAuth already
-  // guards these endpoints, so checking here would only risk locking out a
-  // student whose User_Role row went missing.
+  // Student scope — granted but not enforced; requireAuth already guards these.
   ASSIGNMENT_MANAGE: 'assignment.manage',
   SCHEDULE_MANAGE: 'schedule.manage',
   NOTIFICATION_MANAGE: 'notification.manage',
@@ -26,8 +21,7 @@ const PERMISSIONS = {
 
 const ALL_PERMISSION_CODES = Object.freeze(Object.values(PERMISSIONS));
 
-// Holding any one of these is what makes the admin console relevant. There is
-// no "is an administrator" flag — being one means holding these permissions.
+// There is no "is an administrator" flag: being one means holding one of these.
 const ADMIN_PERMISSION_CODES = Object.freeze([
   PERMISSIONS.DASHBOARD_VIEW,
   PERMISSIONS.USER_READ,
@@ -38,8 +32,7 @@ const ADMIN_PERMISSION_CODES = Object.freeze([
   PERMISSIONS.AUDIT_LOG_READ,
 ]);
 
-// Two roles, and a user holds exactly one. An administrator is not also a
-// student — see docs/roles.md.
+// Two roles, and a user holds exactly one. An administrator is not a student.
 const ROLES = {
   ADMIN: 'admin',
   STUDENT: 'student',
@@ -47,8 +40,7 @@ const ROLES = {
 
 const ALL_ROLE_CODES = Object.freeze(Object.values(ROLES));
 
-// Takes the Set requireAdmin builds or a plain array, so callers holding only
-// the /api/admin/me payload can use the same helper.
+// Takes requireAdmin's Set or a plain array, so /api/admin/me callers fit too.
 function hasPermission(permissions, code) {
   if (permissions instanceof Set) return permissions.has(code);
   if (Array.isArray(permissions)) return permissions.includes(code);

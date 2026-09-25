@@ -1,9 +1,7 @@
 import { C, TH_MONTHS_SHORT } from './theme';
 
-// The task vocabulary both screens share. The dashboard summarises this data
-// and the assignments page lists it, so the labels, the status set and the
-// "what counts as done" rule have to come from one place — two copies would
-// drift the moment a status is added.
+// The task vocabulary both screens share. Two copies would drift the moment a
+// status is added.
 
 export const HOUR = 1000 * 60 * 60;
 export const URGENT_H = 48;

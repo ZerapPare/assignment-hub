@@ -1,13 +1,6 @@
-// Drift guard.
-//
-// init.sql only runs when a Docker volume is created from scratch; existing
-// databases get their changes from migrations/. Every time a feature has landed
-// in one file and not the other, the result has been code querying a table or
-// column that does not exist on somebody's machine — Working_Hours is still
-// missing from every SQL file in the repo, and time_estimate sat in init.sql
-// while migrate.sh never applied the migration that added it.
-//
-// These assertions are cheap and catch that class of bug before it ships.
+// Drift guard. init.sql runs only on a fresh volume; existing databases get
+// their changes from migrations/. Whenever a change landed in one and not the
+// other, somebody's machine ended up missing a table the code queries.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -19,9 +12,8 @@ const REPO_ROOT = path.join(__dirname, '..', '..');
 const read = (...parts) => fs.readFileSync(path.join(REPO_ROOT, ...parts), 'utf8');
 
 const initSql = read('init.sql');
-// The fold used to be its own migration (013) and the admin rename another
-// (014). Running in sequence they largely undid 012's work, so all three are
-// now one file — which is why both names below read the same one.
+// The fold (013) and the admin rename (014) are merged into 012, which is why
+// both names below read the same file.
 const rbacSql = read('migrations', '012_rbac.sql');
 const foldSql = rbacSql;
 
@@ -49,9 +41,8 @@ test('every role code the code uses is seeded in both SQL files', () => {
   }
 });
 
-// A fresh database must land on the shape migration 013 leaves an existing one
-// in: one user table, no Student, no Admin. Recreating either here is exactly
-// the drift that makes a teammate's database disagree with the code.
+// A fresh database must land where the fold leaves an existing one: one user
+// table, no Student, no Admin.
 test('init.sql builds the single-table model', () => {
   assert.match(initSql, /CREATE TABLE User_Account \(/);
   assert.ok(!/CREATE TABLE Student\b/.test(initSql), 'init.sql must not recreate Student');
@@ -68,8 +59,7 @@ test('nothing in init.sql still points a foreign key at the folded tables', () =
 
 test('the fold migration preserves ids rather than copying rows', () => {
   assert.match(foldSql, /RENAME TABLE Student TO User_Account/);
-  // The audit log stored admin_id. Those have to become user_id before the
-  // Admin table goes, or every historical row loses its actor.
+  // admin_id must become user_id before Admin goes, or rows lose their actor.
   assert.match(foldSql, /UPDATE Admin_Audit_Log/);
   assert.ok(
     foldSql.indexOf('UPDATE Admin_Audit_Log') < foldSql.indexOf('DROP TABLE Admin;'),
@@ -77,8 +67,7 @@ test('the fold migration preserves ids rather than copying rows', () => {
   );
 });
 
-// The split is the point: initdb creates structure and reference data, the
-// migration additionally moves rows that already exist.
+// initdb creates structure and reference data; the migration also moves rows.
 test('row backfills live in the migrations and not in init.sql', () => {
   assert.ok(
     rbacSql.includes('INSERT IGNORE INTO User_Role'),

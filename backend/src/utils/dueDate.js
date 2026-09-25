@@ -1,6 +1,5 @@
-// datetime-local sends 'YYYY-MM-DDTHH:mm' with no timezone. Parsing and
-// reformatting both in server-local time round-trips the wall clock the student
-// typed, whatever the container's TZ is.
+// datetime-local sends 'YYYY-MM-DDTHH:mm' with no timezone, so parsing and
+// reformatting in server-local time round-trips the wall clock as typed.
 // Returns a DATETIME string, null for "no due date", false if unparseable.
 function parseDueDate(value) {
   if (value === null || value === undefined || value === '') return null;

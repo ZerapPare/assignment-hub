@@ -4,8 +4,7 @@ import { BellIcon, DocIcon, MegaphoneIcon } from '../icons';
 import { fmtDate, fmtTime, isDone, withDerived } from '../tasks';
 import { C, FONT, R, TH_MONTHS_SHORT } from '../theme';
 
-// Minutes, matching what the API stores. Presets and custom values share one
-// representation so nothing has to carry a unit around.
+// Minutes, as the API stores them, so nothing has to carry a unit around.
 const PRESETS = [60, 180, 1440, 4320];
 
 const UNITS = [
@@ -34,10 +33,8 @@ function formatThaiDateTime(value) {
   );
 }
 
-// One string per settings state, so "has anything changed?" is a comparison
-// rather than a field-by-field diff. lastCustom counts: typing a custom value
-// that happens to be selected already changes nothing else, but still needs
-// saving so the hint line remembers it.
+// One string per state, so "has anything changed?" is a comparison, not a diff.
+// lastCustom counts: it still needs saving even when nothing else moved.
 const snapshot = (s) =>
   JSON.stringify([
     s.enabled,
@@ -73,8 +70,7 @@ function NotificationSettings({ email }) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null); // { ok, message }
 
-  // UC-8 step 2: the tasks these settings actually apply to. Read-only — every
-  // way of changing a task already lives on the assignments pages.
+  // UC-8 step 2: which tasks these settings apply to. Read-only.
   const [tasks, setTasks] = useState([]);
 
   const apply = (data) => {
@@ -111,9 +107,7 @@ function NotificationSettings({ email }) {
       .finally(() => setLoading(false));
   }, []);
 
-  // Reuses the list endpoint the rest of the app already reads; nothing here
-  // needs its own route. A failure is silent — the panel's job is the settings,
-  // and the same list is one click away under งานทั้งหมด.
+  // Reuses the list endpoint. A failure is silent: the panel's job is settings.
   useEffect(() => {
     fetch('/api/assignments')
       .then((r) => (r.ok ? r.json() : []))
@@ -121,8 +115,7 @@ function NotificationSettings({ email }) {
       .catch(() => setTasks([]));
   }, []);
 
-  // Unfinished work with a real deadline, soonest first — the same shape the
-  // sender picks from, so the list previews what will actually be mailed.
+  // The same shape the sender picks from, so this previews what gets mailed.
   const upcoming = useMemo(
     () => withDerived(tasks)
       .filter((t) => t.due && !isDone(t))
@@ -135,8 +128,7 @@ function NotificationSettings({ email }) {
   });
   const dirty = saved !== null && current !== saved;
 
-  // Any edit invalidates the "saved" note, the same way the student-id form
-  // clears its confirmation as soon as the field is touched.
+  // Any edit clears the "saved" note, as the student-id form does.
   const edit = (fn) => (...args) => {
     setJustSaved(false);
     setSaveError(null);
@@ -149,8 +141,7 @@ function NotificationSettings({ email }) {
     );
   });
 
-  // Presets plus whatever custom values are selected, so a custom choice is
-  // visible as a chip and can be removed the same way.
+  // Presets plus selected custom values, so a custom choice is a chip too.
   const chips = useMemo(() => {
     const extra = leadTimes.filter((m) => !PRESETS.includes(m));
     return [...PRESETS, ...extra.sort((a, b) => a - b)];
@@ -199,8 +190,7 @@ function NotificationSettings({ email }) {
     }
   };
 
-  // Sends to the address of the logged-in account, so there is nothing to ask
-  // for here. The reply carries it back only to confirm where it went.
+  // Goes to the logged-in account; the reply only confirms where it went.
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
@@ -224,16 +214,10 @@ function NotificationSettings({ email }) {
     }
   };
 
-  // Switched off, nothing below sends, so the two sub-switches read off and
-  // stop responding — the master switch alone left them sitting on "on" while
-  // no mail went out. Their saved values are untouched and come back as soon
-  // as it is switched on again.
-  //
-  // Applied per part rather than to the whole block, because a child cannot be
-  // more opaque than its parent: a disabled Toggle already fades itself to 0.5
-  // (Toggle.jsx), and inside a faded block the two multiplied out to 0.22.
-  // Everything except the switches fades; the heading and the footer keep out
-  // of it entirely, or the card reads as broken rather than switched off.
+  // Switched off, the sub-switches read off too; their saved values are kept.
+  // Applied per part, not to the block: a child cannot be more opaque than its
+  // parent, and a disabled Toggle already fades itself to 0.5 (Toggle.jsx), so
+  // the two multiplied out to 0.22. The heading and footer never fade.
   const dimmed = enabled ? null : { opacity: 0.45 };
 
   return (
@@ -261,14 +245,8 @@ function NotificationSettings({ email }) {
 
       {!loading && !loadError && (
         <div style={styles.body}>
-          {/* Two groups, because the card answers two separate questions: when
-              to chase a deadline, and whether to hear about a new post. They
-              share only the master switch above.
-
-              One switch and nothing else, so this group carries it in the
-              heading rather than in a box of its own — a box titled
-              "แจ้งเตือนประกาศใหม่" inside a group of the same name would say it
-              twice. */}
+          {/* Two groups: two unrelated questions sharing only the master switch.
+              One switch here, so it sits in the heading rather than its own box. */}
           <section style={styles.group}>
             <div style={styles.groupHead}>
               <span style={{ ...styles.groupIcon, color: C.navy, ...dimmed }}>
@@ -440,15 +418,12 @@ function NotificationSettings({ email }) {
         </div>
       )}
 
-      {/* Its own block, outside the settings body: these act on the card as a
-          whole rather than on any one setting. */}
+      {/* Outside the body: these act on the card, not on any one setting. */}
       {!loading && !loadError && (
         <div style={styles.footer}>
           <div style={styles.actions}>
-            {/* Always pressable. Dimming it when nothing had changed made it
-                read as broken, especially under an already-dimmed card — and
-                re-saving identical settings is an idempotent upsert anyway.
-                Whether there is anything to save is said in words below. */}
+            {/* Always pressable: dimming it read as broken, and re-saving is
+                an idempotent upsert. The state is said in words below. */}
             <button
               type="button"
               onClick={handleSave}
@@ -467,8 +442,7 @@ function NotificationSettings({ email }) {
             </button>
           </div>
 
-          {/* Replaces the dimmed button as the "you have unsaved changes"
-              signal, so the state is stated rather than implied by a colour. */}
+          {/* Stated rather than implied by a dimmed button. */}
           {dirty && !saving && (
             <p style={styles.subtitle}>ยังไม่ได้บันทึกการเปลี่ยนแปลง</p>
           )}
@@ -504,9 +478,8 @@ const styles = {
   },
 
   group: { display: 'flex', flexDirection: 'column', gap: 14 },
-  // A rule above the second group, not a border around each: one line between
-  // them reads as a split, four lines read as two more boxes in a card that
-  // already has several.
+  // A rule above the second group, not a border around each: the card already
+  // has several boxes.
   groupDivided: { paddingTop: 18, borderTop: `1px solid ${C.lineSoft}` },
   groupHead: { display: 'flex', alignItems: 'center', gap: 8 },
   groupIcon: { display: 'flex', flexShrink: 0 },

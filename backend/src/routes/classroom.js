@@ -183,11 +183,9 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
         const creator = await getCreatorProfile(classroom, ann.creatorUserId, profileCache);
         const postedAt = isoToMysqlDateTime(ann.creationTime);
 
-        // One upsert against uq_announcement_external, rather than a SELECT and
-        // a branch: two syncs running at once both used to miss and both
-        // insert. created_at is left alone on the update path, so it keeps
-        // meaning "when we first saw this post" — which is what the reminder
-        // sender uses to tell a new announcement from an edited old one.
+        // One upsert, not SELECT-then-branch: two syncs at once both used to
+        // miss and both insert. created_at is untouched on the update path, so
+        // it keeps meaning "when we first saw this post".
         await pool.query(
           `INSERT INTO Announcement (external_announcement_id, text_content, creator_name, creator_email, origin_link, posted_at, course_id)
            VALUES (?, ?, ?, ?, ?, ?, ?)
