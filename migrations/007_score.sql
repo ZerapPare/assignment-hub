@@ -1,0 +1,3 @@
+ALTER TABLE Assignment_Detail
+ADD COLUMN max_points FLOAT DEFAULT NULL,
+ADD COLUMN assigned_grade FLOAT DEFAULT NULL;

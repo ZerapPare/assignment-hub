@@ -1,0 +1,572 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import AddTaskModal from '../components/AddTaskModal';
+import BarChart from '../components/BarChart';
+import Calendar from '../components/Calendar';
+import DeadlineList from '../components/DeadlineList';
+import DonutChart from '../components/DonutChart';
+import Sidebar from '../components/Sidebar';
+import StatCard from '../components/StatCard';
+import UrgentChecklist from '../components/UrgentChecklist';
+import useAssignments from '../useAssignments';
+import { trackClientEvent } from '../analytics';
+import { HOUR, URGENT_H, fmtDate, fmtTime, isDone, withDerived } from '../tasks';
+import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } from '../icons';
+import { C, FONT, R, SHADOW, WEEKDAYS } from '../theme';
+import AdPopup from '../components/AdPopup';
+import ToastNotification from '../components/ToastNotification';
+
+function HomePage() {
+  const { student, assignments, setAssignments, loading, error, setError, logout } =
+    useAssignments();
+
+  const navigate = useNavigate();
+
+  const [syncing, setSyncing] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [syncToast, setSyncToast] = useState(null);
+
+  const [cutoffDate, setCutoffDate] = useState(
+    () => localStorage.getItem('classroomSyncCutoff') || '2026-06-28'
+  );
+
+  const [cal, setCal] = useState(() => {
+    const n = new Date();
+    return { year: n.getFullYear(), month: n.getMonth() };
+  });
+
+  const dashboardTracked = useRef(false);
+
+  const [calendarView, setCalendarView] = useState('month');
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+
+  useEffect(() => {
+    if (!student || loading || error || dashboardTracked.current) return;
+    dashboardTracked.current = true;
+    void trackClientEvent('dashboard.viewed');
+  }, [student, loading, error]);
+
+  const handleCutoffChange = (e) => {
+    const val = e.target.value;
+    setCutoffDate(val);
+    localStorage.setItem('classroomSyncCutoff', val);
+  };
+
+  //ad
+  const [showAd, setShowAd] = useState(false);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setError(null);
+    //ad
+    setShowAd(true);
+    //Toast popup
+    setSyncToast(null);
+
+    try {
+      const r = await fetch('/api/classroom/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cutoffDate: cutoffDate || null }),
+      });
+
+      const data = await r.json();
+
+      if (!r.ok) throw new Error(data.message || data.error || 'Sync failed');
+
+      const a = await fetch('/api/assignments').then((res) => res.json());
+      setAssignments(a);
+
+      setSyncToast({
+        type: 'success',
+        message: 'ซิงก์ Classroom สำเร็จ',
+      });
+
+    } catch (e) {
+      setError(e.message);
+
+      setSyncToast({
+        type: 'error',
+        message: `ซิงก์ไม่สำเร็จ: ${e.message}`,
+      });
+
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const shiftMonth = (delta) =>
+    setCal((c) => {
+      const d = new Date(c.year, c.month + delta, 1);
+      return { year: d.getFullYear(), month: d.getMonth() };
+    });
+
+  const view = useMemo(() => {
+    const now = new Date();
+    const withDate = withDerived(assignments);
+
+    const total = withDate.length;
+    const inProgress = withDate.filter((a) => a.status === 'in_progress').length;
+    const submitted = withDate.filter((a) => a.status === 'submitted').length;
+    const completed = withDate.filter((a) => a.status === 'completed').length;
+    const notStarted = withDate.filter((a) => a.status === 'not_started').length;
+
+    // UR15: overall completion, where handed-in work already counts (UR26
+    // groups submitted with completed).
+    const progressPct = total ? Math.round(((submitted + completed) / total) * 100) : 0;
+
+    const notDone = withDate.filter((a) => !isDone(a) && a.due);
+    const urgentCount = notDone.filter(
+      (a) => a.due - now <= URGENT_H * HOUR && a.due - now >= 0
+    ).length;
+    const urgentList = [...notDone].sort((a, b) => a.due - b.due).slice(0, 3);
+
+    // Deliberately unfiltered by status: this one is a checklist, so finished
+    // work stays visible with a tick and feeds the "เหลือ X จาก Y" counter.
+    // UR26 is about not *notifying* — that's what notDone/urgentCount cover.
+    const checklist = withDate
+      .filter((a) => a.due && a.due - now >= 0 && a.due - now <= URGENT_H * HOUR)
+      .sort((a, b) => a.due - b.due)
+      .slice(0, 5);
+
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const week7 = Array.from({ length: 7 }, (_, i) => {
+      const s = new Date(dayStart);
+      s.setDate(s.getDate() + i);
+      const e = new Date(s);
+      e.setDate(e.getDate() + 1);
+      return {
+        label: WEEKDAYS[s.getDay()],
+        value: withDate.filter((a) => a.due && a.due >= s && a.due < e).length,
+        isToday: i === 0,
+      };
+    });
+
+    return {
+      now,
+      withDate,
+      total,
+      inProgress,
+      submitted,
+      completed,
+      notStarted,
+      progressPct,
+      urgentCount,
+      urgentList,
+      checklist,
+      week7,
+    };
+  }, [assignments]);
+
+  const eventsByDate = useMemo(() => {
+    const map = new Map();
+    view.withDate
+      .filter((a) => a.due && a.due.getFullYear() === cal.year && a.due.getMonth() === cal.month)
+      .forEach((a) => {
+        const d = a.due.getDate();
+        if (!map.has(d)) map.set(d, []);
+        map.get(d).push(a);
+      });
+    return map;
+  }, [view.withDate, cal.year, cal.month]);
+
+  const eventsByDayKey = useMemo(() => {
+    const map = new Map();
+
+    view.withDate
+      .filter((assignment) => assignment.due)
+      .forEach((assignment) => {
+        const due = assignment.due;
+        const key = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(assignment);
+      });
+
+    return map;
+  }, [view.withDate]);
+
+  const weekDays = useMemo(
+    () =>
+      Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(weekStart);
+        date.setDate(date.getDate() + index);
+
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+        return {
+          date,
+          events: eventsByDayKey.get(key) || [],
+        };
+      }),
+    [weekStart, eventsByDayKey]
+  );
+
+  const isCurrentMonth = cal.year === view.now.getFullYear() && cal.month === view.now.getMonth();
+
+  return (
+    <div style={styles.page}>
+
+      <ToastNotification
+        type={syncToast?.type}
+        message={syncToast?.message}
+        onClose={() => setSyncToast(null)}
+      />
+
+      <Sidebar active="home" student={student} onLogout={logout} />
+
+      <div style={styles.main}>
+        {loading && <p style={styles.muted}>กำลังโหลด…</p>}
+        {error && <p style={styles.error}>⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>}
+
+        {!loading && !error && (
+
+          <>
+            <div style={styles.header}>
+              <h1 style={styles.title}>แดชบอร์ด</h1>
+              <div style={styles.toolbar}>
+                <label style={styles.cutoff}>
+                  <span style={styles.cutoffText}>งานตั้งแต่วันที่</span>
+                  <input
+                    type="date"
+                    value={cutoffDate}
+                    onChange={handleCutoffChange}
+                    style={styles.cutoffInput}
+                  />
+                </label>
+                <button
+                  type="button"
+                  style={{ ...styles.ghostBtn, opacity: syncing ? 0.6 : 1 }}
+                  onClick={handleSync}
+                  disabled={syncing}
+                >
+                  <RefreshIcon size={14} color={C.muted} />
+                  {syncing ? 'กำลังซิงก์…' : 'ซิงก์ Classroom'}
+                </button>
+                <button type="button" style={styles.primaryBtn} onClick={() => setAddOpen(true)}>
+                  + เพิ่มงานใหม่
+                </button>
+              </div>
+            </div>
+
+            <div style={styles.body}>
+              <div style={styles.topSection}>
+                <div style={styles.statGrid}>
+                  <StatCard label="งานทั้งหมด" value={view.total} iconBg={C.indigoBg} icon={<PencilIcon size={16} color={C.navy} />} />
+                  <StatCard label="กำลังทำ" value={view.inProgress} iconBg={C.pinkBg} icon={<SpinnerIcon size={16} color={C.pink} />} />
+                  <StatCard label="ส่ง/เสร็จ" value={view.submitted + view.completed} iconBg={C.blueBg} icon={<CheckCircleIcon size={16} color="#3b82f6" />} />
+                  <StatCard label={`ด่วน ${URGENT_H} ชม.`} value={view.urgentCount} iconBg={C.navy} icon={<HourglassIcon size={16} color={C.pink} />} />
+                </div>
+
+                <div style={styles.chartGrid}>
+                  <div style={styles.card}>
+                    <div style={styles.cardHead}>
+                      <span style={styles.cardTitle}>ปริมาณงานต่อสัปดาห์</span>
+                      <span style={styles.badge}>7 วันข้างหน้า</span>
+                    </div>
+                    <BarChart data={view.week7} />
+                  </div>
+
+                  <div style={styles.card}>
+                    <div style={styles.cardHead}>
+                      <span style={styles.cardTitle}>สถานะงาน</span>
+                      <span style={styles.badge}>{view.total} งาน</span>
+                    </div>
+                    <DonutChart
+                      completed={view.completed}
+                      submitted={view.submitted}
+                      inProgress={view.inProgress}
+                      notStarted={view.notStarted}
+                      total={view.total}
+                    />
+                    <div style={styles.progressWrap}>
+                      <div style={styles.progressTrack}>
+                        <div style={{ ...styles.progressFill, width: `${view.progressPct}%` }} />
+                      </div>
+                      <span style={styles.progressLabel}>{view.progressPct}% สำเร็จ</span>
+                    </div>
+                  </div>
+                  <div style={styles.card}>
+                    <div style={styles.cardHead}>
+                      <span style={styles.cardTitle}>งานด่วน</span>
+                      {view.checklist.length > 0 && (
+                        <span style={styles.badgeFaint}>
+                          เหลือ {view.checklist.filter((a) => !isDone(a)).length} จาก{' '}
+                          {view.checklist.length}
+                        </span>
+                      )}
+                    </div>
+                    <UrgentChecklist
+                      items={view.checklist.map((a) => ({
+                        id: a.assignment_id,
+                        title: a.title,
+                        done: isDone(a),
+                      }))}
+                    />
+                  </div>
+                  <div style={styles.card}>
+                    <div style={styles.cardHead}>
+                      <span style={styles.cardTitle}>กำหนดส่งใกล้ถึง</span>
+                    </div>
+                    <DeadlineList
+                      items={view.urgentList.map((a) => ({
+                        id: a.assignment_id,
+                        dateText: a.due ? fmtDate(a.due) : '—',
+                        timeText: a.due ? fmtTime(a.due) : '',
+                        title: a.title,
+                        source: a.platform_source || 'เพิ่มเอง',
+                      }))}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div style={styles.bottomSection}>
+                <div style={{ ...styles.card, background: C.blue, padding: 24 }}>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                    <button
+                      type="button"
+                      style={
+                        calendarView === 'month'
+                          ? styles.primaryBtn
+                          : styles.ghostBtn
+                      }
+                      onClick={() => setCalendarView('month')}
+                    >
+                      เดือน
+                    </button>
+
+                    <button
+                      type="button"
+                      style={
+                        calendarView === 'week'
+                          ? styles.primaryBtn
+                          : styles.ghostBtn
+                      }
+                      onClick={() => {
+                        setCalendarView('week');
+                        setWeekStart(startOfWeek(view.now));
+                      }}
+                    >
+                      สัปดาห์
+                    </button>
+                  </div>
+                  <Calendar
+                    year={cal.year}
+                    month={cal.month}
+                    today={isCurrentMonth ? view.now.getDate() : null}
+                    eventsByDate={eventsByDate}
+                    view={calendarView}
+                    weekDays={weekDays}
+                    onEventClick={(assignment) => {
+                      navigate(`/assignments/${assignment.assignment_id}`);
+                    }}
+                    onPrev={() => {
+                      if (calendarView === 'month') {
+                        shiftMonth(-1);
+                        return;
+                      }
+
+                      setWeekStart((old) => {
+                        const next = new Date(old);
+                        next.setDate(next.getDate() - 7);
+                        return next;
+                      });
+                    }}
+
+                    onNext={() => {
+                      if (calendarView === 'month') {
+                        shiftMonth(1);
+                        return;
+                      }
+
+                      setWeekStart((old) => {
+                        const next = new Date(old);
+                        next.setDate(next.getDate() + 7);
+                        return next;
+                      });
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        <AddTaskModal
+          open={addOpen}
+          onClose={() => setAddOpen(false)}
+          onCreated={(a) => setAssignments((prev) => [...prev, a])}
+        />
+
+        <AdPopup open={showAd} onClose={() => setShowAd(false)} />
+
+      </div>
+    </div>
+  );
+}
+
+function startOfWeek(date) {
+  const result = new Date(date);
+  const day = result.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+
+  result.setDate(result.getDate() + diff);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+const styles = {
+  page: {
+    minHeight: '100vh',
+    width: '100%',
+    fontFamily: FONT,
+    background: C.pageBg,
+    display: 'flex',
+    overflow: 'hidden'
+  },
+  main: {
+    flex: 1,
+    minWidth: 0,
+    padding: '26px 28px 40px',
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100vh',
+    overflowY: 'auto'
+  },
+  muted: {
+    color: C.mutedLight,
+    fontSize: 13,
+    margin: '8px 0 0'
+  },
+  error: {
+    color: C.pinkDark,
+    fontSize: 14
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+    marginBottom: 22,
+    flexWrap: 'wrap',
+    flexShrink: 0,
+    background: C.pageBg,
+    zIndex: 10,
+    paddingBottom: 4,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: 700,
+    color: C.ink,
+    margin: 0
+  },
+  toolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap'
+  },
+  cutoff: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    background: C.card,
+    borderRadius: R.pill,
+    padding: '9px 14px',
+  },
+  cutoffText: {
+    fontSize: 13,
+    color: C.muted,
+    whiteSpace: 'nowrap'
+  },
+  cutoffInput: {
+    border: 'none',
+    fontSize: 13,
+    color: C.ink,
+    fontFamily: FONT,
+    background: 'transparent',
+  },
+  ghostBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '9px 16px',
+    borderRadius: R.pill,
+    border: `1px solid ${C.lineInput}`,
+    background: C.card,
+    color: C.ink,
+    fontFamily: FONT,
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  primaryBtn: {
+    padding: '9px 18px',
+    borderRadius: R.pill,
+    border: 'none',
+    background: C.navy,
+    color: 'white',
+    fontFamily: FONT,
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    boxShadow: SHADOW.primaryBtn,
+  },
+
+  body: { display: 'flex', flexDirection: 'column', gap: 24 },
+  leftCol: { display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 },
+  rightCol: { display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 },
+
+  topSection: { display: 'flex', flexDirection: 'column', gap: 18 },
+  bottomSection: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  statGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 10 },
+  chartGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 },
+
+  card: { background: C.card, borderRadius: R.card, padding: 20, minWidth: 0 },
+  cardHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    flexWrap: 'wrap',
+    marginBottom: 14,
+  },
+  cardTitle: { fontWeight: 700, fontSize: 14.5, color: C.ink },
+  badge: {
+    fontSize: 11.5,
+    padding: '5px 12px',
+    borderRadius: 8,
+    background: C.pageBg,
+    color: C.muted,
+    whiteSpace: 'nowrap',
+  },
+  badgeFaint: { fontSize: 11.5, color: C.mutedLight, whiteSpace: 'nowrap' },
+
+  // UR15 — overall completion, under the donut it summarises.
+  progressWrap: { marginTop: 12 },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    background: C.lineSoft,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+    background: C.navy,
+    transition: 'width .3s ease',
+  },
+  progressLabel: {
+    display: 'block',
+    marginTop: 6,
+    fontSize: 11,
+    color: C.muted,
+    textAlign: 'right',
+  },
+};
+
+export default HomePage;

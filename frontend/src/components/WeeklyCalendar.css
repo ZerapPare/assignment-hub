@@ -1,0 +1,527 @@
+.weekly-calendar {
+	width: 100%;
+	height: 600px;
+	overflow: auto;
+	background: #ffffff;
+	border: 1px solid #e5e7eb;
+	border-radius: 16px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+/* =========================
+   HEADER
+========================= */
+
+.cal-header {
+	position: sticky;
+	top: 0;
+	z-index: 1001;
+
+	display: grid;
+	grid-template-columns: 100px 2640px;
+
+	width: max-content;
+
+	background: #fafafa;
+	border-bottom: 1px solid #e5e7eb;
+}
+
+.cal-corner {
+	position: sticky;
+	left: 0;
+	z-index: 30;
+
+	width: 100px;
+	height: 56px;
+
+	display: flex;
+	align-items: center;
+	justify-content: center;
+
+	background: #fafafa;
+
+	font-size: 12px;
+	font-weight: 600;
+	color: #6b7280;
+
+	border-right: 1px solid #e5e7eb;
+}
+
+.cal-times {
+	position: relative;
+	height: 56px;
+}
+
+.cal-time-head {
+	position: absolute;
+	top: 0;
+
+	width: 110px;
+	height: 56px;
+
+	display: flex;
+	align-items: center;
+	justify-content: center;
+
+	font-size: 12px;
+	font-weight: 600;
+	color: #6b7280;
+
+	border-right: 1px solid #e5e7eb;
+}
+
+/* =========================
+   BODY
+========================= */
+
+.cal-body {
+	width: max-content;
+}
+
+.cal-row {
+	display: grid;
+	grid-template-columns: 100px 2640px;
+
+	height: 80px;
+
+	border-bottom: 1px solid #f0f1f3;
+}
+
+/* =========================
+   DAY
+========================= */
+
+.cal-day {
+	position: sticky;
+	left: 0;
+	z-index: 1000;
+
+	width: 100px;
+
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+
+	gap: 3px;
+
+	background: #fafafa;
+
+	border-right: 1px solid #e5e7eb;
+
+	box-shadow: 3px 0 6px rgba(0, 0, 0, 0.03);
+}
+
+.day-name {
+	font-size: 14px;
+	font-weight: 700;
+	color: #374151;
+}
+
+.day-date {
+	font-size: 11px;
+	color: #9ca3af;
+}
+
+/* =========================
+   TIMELINE
+========================= */
+
+.cal-timeline {
+	position: relative;
+
+	height: 80px;
+
+	background: #ffffff;
+}
+
+.timeline-line {
+	position: absolute;
+
+	top: 0;
+	bottom: 0;
+
+	width: 1px;
+
+	background: #f3f4f6;
+
+	pointer-events: none;
+}
+
+/* เส้นเต็มชั่วโมงเข้มกว่า */
+.timeline-line:nth-child(2n + 1) {
+	background: #e5e7eb;
+}
+
+/* =========================
+   TASK
+========================= */
+
+.task-block {
+	position: absolute;
+
+	top: 8px;
+	bottom: 8px;
+
+	box-sizing: border-box;
+
+	padding: 7px 9px;
+
+	min-width: 35px;
+
+	overflow: hidden;
+
+	white-space: nowrap;
+	text-overflow: ellipsis;
+
+	border-radius: 8px;
+
+	background: #eef2ff;
+	border-left: 3px solid #6366f1;
+
+	color: #3730a3;
+
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.3;
+
+	cursor: pointer;
+
+	z-index: 2;
+
+	transition:
+		transform 0.15s ease,
+		box-shadow 0.15s ease;
+}
+
+.task-block:hover {
+	transform: translateY(-1px);
+
+	box-shadow: 0 4px 10px rgba(99, 102, 241, 0.15);
+
+	z-index: 5;
+}
+
+.task-block.high {
+	background: #fff1f2;
+
+	border-left-color: #f43f5e;
+
+	color: #be123c;
+}
+
+.task-wrapper {
+	position: absolute;
+	top: 8px;
+	bottom: 8px;
+
+	z-index: 2;
+}
+
+.task-wrapper:hover {
+	z-index: 100;
+}
+
+.task-wrapper .task-block {
+	position: absolute;
+
+	top: 0;
+	bottom: 0;
+	left: 0;
+
+	width: 100%;
+}
+
+/* =========================
+   TOOLTIP
+========================= */
+
+.task-tooltip {
+	z-index: 1002;
+	position: fixed;
+
+	width: 280px;
+	box-sizing: border-box;
+
+	padding: 12px 14px;
+
+	background: #ffffff;
+
+	border: 1px solid #e5e7eb;
+	border-radius: 10px;
+
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+	color: #374151;
+	font-size: 12px;
+
+	z-index: 99999;
+
+	pointer-events: none;
+}
+
+.task-wrapper:hover .task-tooltip {
+	display: block;
+}
+
+.tooltip-title {
+	font-size: 14px;
+	font-weight: 700;
+	color: #111827;
+
+	margin-bottom: 4px;
+}
+
+.tooltip-course {
+	font-size: 11px;
+	color: #6b7280;
+
+	line-height: 1.4;
+}
+
+.tooltip-divider {
+	height: 1px;
+
+	background: #e5e7eb;
+
+	margin: 10px 0;
+}
+
+.tooltip-row {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+
+	margin-top: 6px;
+
+	font-size: 11px;
+}
+
+.tooltip-row span:first-child {
+	color: #9ca3af;
+}
+
+.tooltip-row span:last-child {
+	color: #374151;
+	font-weight: 500;
+
+	text-align: right;
+}
+
+/* Backdrop พื้นหลังดำโปร่งแสง */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+}
+
+/* กล่อง Pop-up รายละเอียด */
+.modal-content {
+    background: #ffffff;
+    padding: 24px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 480px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    animation: modalFadeIn 0.2s ease-out;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 12px;
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: #333;
+}
+
+.modal-close-btn {
+    background: transparent;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #666;
+}
+
+.modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.95rem;
+    color: #444;
+}
+
+.detail-row.description {
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* จัดการปัญหารายละเอียดล้นกล่อง */
+.modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 60vh; /* ตัดความสูงไม่ให้ล้นหน้าจอ */
+    overflow-y: auto;  /* ใส่ scrollbar เมื่อเนื้อหายาว */
+    padding-right: 4px;
+}
+
+/* บังคับตัดคำและขึ้นบรรทัดใหม่เมื่อข้อความยาวเกินไป */
+.description-text {
+    margin: 4px 0 0 0;
+    white-space: pre-line;       /* รักษาการขึ้นบรรทัดใหม่ */
+    word-break: break-word;       /* ตัดคำยาวๆ เช่น URL */
+    overflow-wrap: anywhere;    /* ป้องกันข้อความล้นขอบ */
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    color: #444;
+}
+
+/* ปุ่มกดไปยังลิงก์ปลายทาง */
+.modal-footer {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.origin-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background-color: #1a73e8;
+    color: #ffffff;
+    padding: 8px 16px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.9rem;
+    transition: background-color 0.2s;
+}
+
+.origin-link-btn:hover {
+    background-color: #1557b0;
+}
+
+/* กรอบของ Deadline */
+.task-wrapper.is-deadline {
+    z-index: 5; /* ให้อยู่ชั้นบนสุดของตาราง */
+}
+
+/* สไตล์กล่อง Deadline */
+.task-block.deadline-style {
+    background-color: #ffebe9 !important;
+    border: 1.5px solid #d93025 !important;
+    color: #d93025 !important;
+    font-weight: bold;
+    border-radius: 4px;
+}
+
+/* เอฟเฟกต์ตอน Hover */
+.task-wrapper.is-deadline:hover .task-block.deadline-style {
+    background-color: #d93025 !important;
+    color: #ffffff !important;
+}
+/* Container ของ Deadline Marker */
+.deadline-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    z-index: 10;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* เส้นขีดสีแดงแนวตั้งลากยาวเต็มแถว */
+.deadline-line {
+    width: 2px;
+    height: 100%;
+    background-color: #d93025;
+    box-shadow: 0 0 4px rgba(217, 48, 37, 0.4);
+}
+
+/* ป้ายเวลาสไตล์ Pill Badge ด้านบน */
+.deadline-badge {
+    position: absolute;
+    top: 4px;
+    background-color: #d93025;
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 10px;
+    white-space: nowrap;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    transition: transform 0.15s ease-in-out;
+}
+
+/* เอฟเฟกต์ตอนชี้เมาส์ */
+.deadline-marker:hover .deadline-badge {
+    transform: scale(1.1);
+    background-color: #b3261e;
+}
+
+.deadline-marker:hover .deadline-line {
+    width: 3px;
+    background-color: #b3261e;
+}
+
+/* เส้นเวลาปัจจุบัน */
+.now-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ef44d0;
+  z-index: 50;
+  pointer-events: none;
+  box-shadow: 0 0 4px rgba(176, 87, 150, 0.5);
+}
+
+.now-line-dot {
+  position: absolute;
+  top: 50%;
+  left: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #f673e5;
+  transform: translateY(-50%);
+  box-shadow: 0 0 6px rgba(176, 87, 150, 0.5);
+}
