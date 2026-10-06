@@ -129,7 +129,7 @@ This trips people up, so be precise about which file a variable belongs in:
 | `MAIL_FROM`             | **.env.local**   | sender address shown to the recipient. Gmail rewrites it to the authenticated account |
 | `SMTP_SECURE`           | **.env.local**   | *(optional)* `1` forces implicit TLS. Port `465` turns it on by itself; `587` uses STARTTLS |
 | `APP_TZ`                | **.env**         | timezone for the `backend` and `db` containers; defaults to `Asia/Bangkok`. Reminder scheduling compares wall-clock `due_date` against `NOW()`, so both must agree |
-| `SESSION_SECRET`        | **.env.local**   | random string that signs the session cookie. **Set this on any internet-facing host** — the fallback in `server.js` is a literal published in this repo, so leaving it empty lets anyone forge a session. Generate with `openssl rand -hex 32`; it does not need to match between machines |
+| `SESSION_SECRET`        | **.env.local**   | random string that signs the session cookie. **Required whenever `PUBLIC_URL` is `https://`** — the backend refuses to start without it there, because the dev fallback in `config.js` is a literal published in this repo and would let anyone forge a session. Generate with `openssl rand -hex 32`; it does not need to match between machines |
 
 ## Frontend routes
 
@@ -997,6 +997,22 @@ around.
 6. **Register the redirect URIs** with the providers — `https://<host>/api/auth/google/callback`
    in Google Cloud Console, `.../microsoft/callback` in Azure. Keep the `localhost`
    entries so local dev still works.
+
+Three things change on their own once `PUBLIC_URL` is `https://`, because compose derives
+`FRONTEND_URL` from it:
+
+- **`SESSION_SECRET` becomes mandatory.** `config.js` throws at startup without it, so a
+  backend that will not come up after a move to HTTPS is most likely missing it in `.env.local`.
+- **The session cookie is marked `Secure`.** TLS ends at Caddy and the hop to Express is
+  plain http, so `server.js` sets express-session's `proxy: true` to read
+  `X-Forwarded-Proto` instead of `req.secure`. Caddy sends that header and Vite's proxy is
+  expected to pass it through. If login does not stick after deploying (consent succeeds but
+  you land back on `/login`), the cookie was never set — check that header first.
+- Nothing else — local dev on `http://localhost:4173` keeps a non-secure cookie and the
+  dev fallback secret.
+
+Every service runs with `restart: unless-stopped`, so a crash or a VM reboot brings the stack
+back without anyone logging in. `docker compose stop` still stops it for good.
 
 Certificates live in the `caddy_data` named volume. Avoid `docker compose down -v`,
 which deletes it and forces a re-issue against Let's Encrypt's limit of 5

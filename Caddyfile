@@ -8,8 +8,8 @@
 {$SITE_HOST} {
 	encode zstd gzip
 
-	# Vite serves the app and proxies /api to backend:3000 itself, so one
-	# upstream is enough. reverse_proxy passes WebSocket upgrades through,
-	# which is what HMR needs.
-	reverse_proxy frontend:5173
+	# The frontend container runs `vite preview` on 4173 (see frontend/Dockerfile),
+	# which serves frontend/dist and proxies /api to backend:3000 itself, so one
+	# upstream is enough. Keep this port in step with that Dockerfile.
+	reverse_proxy frontend:4173
 }

@@ -4,6 +4,7 @@
 services:
   db:
     image: mysql:8.0
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: root123
       MYSQL_DATABASE: assignment_hub
@@ -17,6 +18,7 @@ services:
 
   backend:
     build: ./backend
+    restart: unless-stopped     # a crash or VM reboot brings it back without anyone logging in
     ports:
       - "${BIND:-0.0.0.0}:3000:3000"
     depends_on:
@@ -41,6 +43,7 @@ services:
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     ports:
       - "${BIND:-0.0.0.0}:${FRONTEND_PORT:-4173}:4173"
     depends_on:

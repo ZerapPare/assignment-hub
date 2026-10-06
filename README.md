@@ -477,6 +477,12 @@ HMR_CLIENT_PORT=443
 
 `BIND=127.0.0.1` ทำให้พอร์ต frontend/backend/db ไม่โผล่ออกอินเทอร์เน็ต เหลือแค่ Caddy ที่ 80/443
 
+เมื่อ `PUBLIC_URL` เป็น `https://` จะมีผลตามมาอัตโนมัติ 2 อย่าง:
+- **`.env.local` ต้องมี `SESSION_SECRET`** — ถ้าไม่มี backend จะไม่ยอมสตาร์ท (ดู `docker compose logs backend`)
+- **session cookie ถูกตั้งเป็น `Secure`** — ถ้า login ผ่านหน้า consent แล้วเด้งกลับ `/login` แปลว่า cookie ไม่ถูกเซ็ต ดูรายละเอียดที่ [PROJECT_SETUP.md](PROJECT_SETUP.md#deploying-over-https)
+
+ทุก service ตั้ง `restart: unless-stopped` ไว้ ถ้า backend ล้มหรือ VM reboot ระบบจะกลับขึ้นมาเอง
+
 ### 4. เพิ่มโดเมนใน `allowedHosts`
 
 ที่ [`frontend/vite.config.js`](frontend/vite.config.js) ไม่งั้น Vite ตอบ `403 Blocked request`

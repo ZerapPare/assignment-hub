@@ -1,6 +1,6 @@
 const express = require('express');
 const session = require('express-session');
-const { PORT, SESSION_SECRET } = require('./src/config');
+const { PORT, SESSION_SECRET, IS_HTTPS } = require('./src/config');
 const { requestContext } = require('./src/middleware/requestContext');
 const { requestMetrics, startMetricFlush } = require('./src/middleware/requestMetrics');
 const { errorHandler } = require('./src/middleware/errorHandler');
@@ -18,10 +18,14 @@ app.use(
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    // TLS ends at Caddy and the hop to Express is plain http, so req.secure is
+    // false here. proxy: true makes express-session trust X-Forwarded-Proto
+    // instead — without it a secure cookie is silently never set.
+    proxy: IS_HTTPS,
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
-      secure: false, // dev over http
+      secure: IS_HTTPS, // https on a deployed host, plain http in local dev
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     },
   })

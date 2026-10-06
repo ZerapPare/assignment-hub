@@ -3,6 +3,13 @@ const { createRemoteJWKSet } = require('jose');
 
 const PORT = process.env.PORT || 3000;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+// Served over https only on a deployed host (PUBLIC_URL → FRONTEND_URL in compose).
+const IS_HTTPS = FRONTEND_URL.startsWith('https://');
+// The fallback is published in this repo, so anyone could sign a session with it.
+// Refuse to start rather than run an internet-facing host on it.
+if (IS_HTTPS && !process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET must be set in .env.local when FRONTEND_URL is https');
+}
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-me';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -46,6 +53,7 @@ if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
 module.exports = {
   PORT,
   FRONTEND_URL,
+  IS_HTTPS,
   SESSION_SECRET,
   CLIENT_ID,
   CLIENT_SECRET,
