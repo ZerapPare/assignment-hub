@@ -102,7 +102,12 @@ db-1        | ... ready for connections
 | `/login` | หน้าเข้าสู่ระบบ (Google / Microsoft) |
 | `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน |
 | `/assignments` | งานทั้งหมด — ตารางงาน: ค้นหา + กรองตามแพลตฟอร์ม/สถานะ/รายวิชา, เปลี่ยนสถานะ, แก้ไข/ลบงานที่เพิ่มเอง |
+| `/assignments/:id` | รายละเอียดงานชิ้นเดียว — เข้าจากการกดชื่องานในตาราง |
+| `/stream` | ประกาศจาก Classroom + กรองตามรายวิชา |
+| `/schedule` | จัดตาราง — เวลาเริ่มทำงานแต่ละวัน, พักเที่ยง, เวลาที่คาดว่าใช้ต่องาน, ปุ่มจัดตารางอัตโนมัติ |
+| `/weekly` | ตารางที่จัดแล้วแบบรายสัปดาห์ (เข้าจากปุ่มในหน้า `/schedule`) |
 | `/settings` | ตั้งค่า — โปรไฟล์, แก้รหัสนักศึกษา, **การแจ้งเตือน**, สถานะเชื่อมต่อ Google/Microsoft |
+| `/admin/*` | คอนโซลผู้ดูแลระบบ — ต้องมี role `admin` (ดู [Admin access](#admin-access)) |
 
 ทุกตัวเลขบนหน้า dashboard คำนวณจาก response ของ `/api/assignments` จริง ไม่มีข้อมูลตัวอย่างฝังในโค้ด
 (บัญชีที่ยังไม่ซิงก์จะเห็น `0` และ empty state ทุกการ์ด)
@@ -197,7 +202,7 @@ db-1        | ... ready for connections
 
 ## Database
 
-Database ชื่อ `assignment_hub` ถูกสร้างอัตโนมัติจาก `init.sql` ตอน start ครั้งแรก มี 22 ตาราง:
+Database ชื่อ `assignment_hub` ถูกสร้างอัตโนมัติจาก `init.sql` ตอน start ครั้งแรก มี 21 ตาราง:
 
 | ตาราง | เก็บอะไร |
 |---|---|
@@ -207,15 +212,16 @@ Database ชื่อ `assignment_hub` ถูกสร้างอัตโน�
 | `Permission` | สิทธิ์ย่อยแบบ `resource` + `action` เช่น `user.suspend` |
 | `Role_Permission` | บทบาทไหนมีสิทธิ์อะไรบ้าง (m:n) |
 | `User_Role` | ผู้ใช้คนไหนถือบทบาทอะไร (m:n) |
-| `Schedule_Setting` | เวลาทำงาน/พักเที่ยงของนักศึกษาสำหรับจัดตารางอัตโนมัติ |
-| `User_Settings` | เวลาพักเที่ยงและชั่วโมงทำงาน (ของเดิม ทับซ้อนกับ `Schedule_Setting`) |
+| `Schedule_Setting` | **ไม่มีโค้ดไหนใช้** — สร้างจาก migration `010` แต่ตัวจัดตารางไปอ่าน 2 ตารางล่างแทน |
+| `User_Settings` | เวลาพักเที่ยงที่ตัวจัดตารางใช้ (คอลัมน์ `working_hours_start/end` เก็บไว้แต่ไม่ถูกอ่าน) |
+| `Working_Hours` | เวลาเริ่มทำงานรายวัน (0 = อาทิตย์) — วันที่ไม่มีแถวจะไม่ถูกจัดงานลง |
 | `Announcement` | ประกาศที่ดึงมาจาก Classroom |
 | `Product_Event` | event การใช้งานแบบ metadata ปลอดภัยสำหรับ business analytics |
 | `Course` | รายวิชา + แพลตฟอร์มต้นทาง (Classroom/Teams) |
 | `Assignment` | งาน: ชื่อ, ประเภท (`task_type`), ลิงก์ต้นทาง, วิชา |
 | `Assignment_Detail` | รายละเอียด: คำอธิบาย, deadline, สถานะ, `status_updated_at`, priority |
-| `Schedule` | ช่วงเวลาที่วางแผนทำ + เวลาที่คาดว่าจะใช้ |
-| `Notification` | การแจ้งเตือนของแต่ละงาน — **ยังไม่มีโค้ดไหนเขียนลงตารางนี้** |
+| `Schedule` | ช่วงเวลาที่ตัวจัดตารางอัตโนมัติวางไว้ (แตกเป็นหลายช่วงได้ใน `segments`) |
+| `Notification` | บันทึกการส่งอีเมลเตือนแต่ละฉบับ — ตัวส่งอีเมลใช้เป็นตัวกันส่งซ้ำและนับ retry |
 | `Notification_Setting` | ตั้งค่าการแจ้งเตือนของนักศึกษา (เปิด/ปิด, ซ้ำรายวัน + เวลา, ค่ากำหนดเองล่าสุด) |
 | `Notification_Lead_Time` | ช่วงเวลาล่วงหน้าที่เลือกไว้ เก็บเป็นนาที 1 แถวต่อ 1 ค่า |
 | `System_Error_Log` | error log ที่ตัดข้อมูลลับออกแล้ว |
@@ -247,25 +253,31 @@ migrate.bat         # Windows cmd
 | `001_identity.sql` | unique `University.email_domain` + unique `Student (student_id, university_id)` |
 | `002_task_type.sql` | `Assignment.task_type` |
 | `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` — **อย่า backfill** ค่านี้ `NULL` แปลว่า "นักศึกษายังไม่เคยตั้งสถานะเอง" ถ้าใส่ค่าให้ทุกแถว ซิงก์จะหยุดอัปเดตสถานะจาก Classroom ทั้งหมด |
-| `005_admin_monitoring.sql` | role/status ของ Student + system error/audit/request metric tables |
+| `004_admin_monitoring.sql` | role/status ของ Student + system error/audit/request metric tables |
+| `005_announcement.sql` | ตาราง `Announcement` (ประกาศจาก Classroom) |
 | `006_product_analytics.sql` | ตาราง `Product_Event` สำหรับ business analytics |
-| `006_announcement.sql` | ตาราง `Announcement` (ประกาศจาก Classroom) |
 | `007_admin_identity.sql` | ตาราง `Admin` + ย้าย identity ผู้ดูแลออกจาก Student |
-| `007_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` |
-| `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs สำหรับ Admin |
+| `008_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` |
+| `009_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs สำหรับ Admin |
 | `010_schedule_setting.sql` | ตาราง `Schedule_Setting` สำหรับจัดตารางอัตโนมัติ |
 | `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` — database ที่สร้างก่อนคอลัมน์นี้จะทำให้ `/api/assignments` ตอบ `ER_BAD_FIELD_ERROR` |
 | `012_rbac.sql` | ยุบ `Student`/`Admin` เหลือ `User_Account` ตารางเดียว + `Role`/`Permission`/`Role_Permission`/`User_Role` และ 2 บทบาท (`admin`, `student`) · รวมหน้า login เป็นหน้าเดียว |
-| `015_notifications.sql` | ตาราง `Notification_Setting` + `Notification_Lead_Time` · unique key กันส่งอีเมลซ้ำ + คอลัมน์ retry บน `Notification` · แจ้งเตือนประกาศใหม่พร้อมสวิตช์เปิด/ปิด |
+| `013_notifications.sql` | ตาราง `Notification_Setting` + `Notification_Lead_Time` · unique key กันส่งอีเมลซ้ำ + คอลัมน์ retry บน `Notification` · แจ้งเตือนประกาศใหม่พร้อมสวิตช์เปิด/ปิด |
 
-**012 กับ 015 เป็นไฟล์ที่รวมมาจากหลายไฟล์** — เดิม RBAC แยกเป็น `012`/`013`/`014` และการแจ้งเตือนแยกเป็น
-`004`/`009`/`015` รันเรียงกันแล้วทำงานทับล้างกันเอง (`012` สร้าง `User_Account` เป็น supertype แล้ว `013`
-ทิ้งตารางนั้น · `012` สร้าง role ที่ `014` เปลี่ยนชื่อทันที) ตอนนี้แต่ละเรื่องเหลือไฟล์เดียวที่ทำตรงทาง
+**012 กับ 013 เป็นไฟล์ที่รวมมาจากหลายไฟล์** — เดิม RBAC และการแจ้งเตือนแยกเป็นเรื่องละ 3 ไฟล์
+รันเรียงกันแล้วทำงานทับล้างกันเอง (ไฟล์แรกสร้าง `User_Account` เป็น supertype แล้วไฟล์ถัดมาทิ้งตารางนั้น ·
+role ที่เพิ่งสร้างถูกเปลี่ยนชื่อทันทีในไฟล์ถัดไป) ตอนนี้แต่ละเรื่องเหลือไฟล์เดียวที่ทำตรงทาง
 
-`015` อยู่เลขนี้ไม่ใช่ `004` เพราะ `Notification_Setting` ชี้ `User_Account` ซึ่งเกิดหลังการยุบตารางใน `012`
-และฝั่งประกาศต้องรอตาราง `Announcement` จาก `006`
+`013` ต้องอยู่หลัง `012` เพราะ `Notification_Setting` ชี้ `User_Account` ซึ่งเกิดหลังการยุบตารางใน `012`
+และฝั่งประกาศต้องรอตาราง `Announcement` จาก `005`
 
-> **ทุกขั้นใน `012` และ `015` มี guard** เช็ก `information_schema` ก่อนทำ รันซ้ำจึงไม่ error และไม่เปลี่ยนอะไร
+> **เรียงเลขใหม่เมื่อ 2026-10-07** ให้ต่อเนื่อง `001`–`013` และไม่มีเลขซ้ำ ลำดับการรันเหมือนเดิมทุกไฟล์
+> database ที่มีอยู่จึงไม่ได้รับผลกระทบ (สคริปต์ไม่ได้จำว่ารันไฟล์ไหนไปแล้ว)
+> เลขเก่า → ใหม่: `005_admin_monitoring` → `004` · `006_announcement` → `005` · `007_score` → `008` ·
+> `008_admin_microsoft_identity` → `009` · `015_notifications` → `013`
+> **migration ถัดไปใช้เลข `014`**
+
+> **ทุกขั้นใน `012` และ `013` มี guard** เช็ก `information_schema` ก่อนทำ รันซ้ำจึงไม่ error และไม่เปลี่ยนอะไร
 > ต่างจากไฟล์ `001`–`011` ที่เป็น `ALTER TABLE` เปล่า ๆ รันซ้ำแล้วขึ้น `Duplicate column name` (ไม่เป็นอันตราย)
 
 เช็คว่าลงครบ:
@@ -332,12 +344,27 @@ An account holding any administrative permission gets an extra "ผู้ดู�
 | PATCH | `/api/assignments/:id` | ต้อง | แก้งานที่เพิ่มเอง (งานที่ซิงก์มาแก้ไม่ได้ — คืน `404`) |
 | PATCH | `/api/assignments/:id/status` | ต้อง | เปลี่ยนสถานะ — **ใช้ได้กับงานที่ซิงก์มาด้วย** |
 | DELETE | `/api/assignments/:id` | ต้อง | ลบงานที่เพิ่มเอง คืน `204` (งานที่ซิงก์มาลบไม่ได้ — คืน `404`) |
-| POST | `/api/classroom/sync` | ต้อง | ดึงงานจาก Google Classroom มาลง DB |
+| GET | `/api/announcements` | ต้อง | ประกาศ Classroom ของผู้ใช้ เรียงใหม่สุดก่อน |
+| POST | `/api/classroom/sync` | ต้อง | ดึงงาน**และประกาศ**จาก Google Classroom มาลง DB |
 | GET | `/api/notification-settings` | ต้อง | ค่าตั้งการแจ้งเตือน (ยังไม่เคยบันทึก → คืนค่า default) |
 | PUT | `/api/notification-settings` | ต้อง | บันทึกค่าตั้งการแจ้งเตือนทั้งชุด |
+| POST | `/api/notification-settings/test` | ต้อง | ส่งอีเมลทดสอบ 1 ฉบับไปที่อีเมลของผู้ใช้เอง |
+| POST | `/api/analytics/events` | ต้อง | บันทึก event ฝั่ง client ที่อยู่ใน allow-list (ล้มเหลวก็ไม่ error) |
+| GET · PUT | `/api/user/working-hours` | ต้อง | เวลาเริ่มทำงานรายวัน `{ "0": "08:00:00" \| null, … }` |
+| GET · PUT | `/api/user/settings` | ต้อง | เวลาพักเที่ยง (GET ครั้งแรก**สร้างแถว default ให้**) |
+| PATCH | `/api/tasks/:id/duration` | ต้อง* | ตั้งเวลาที่คาดว่าใช้ `time_estimate` 1–1440 นาที |
+| GET | `/api/schedule/weekly` | ต้อง | งานที่ถูกจัดหรือครบกำหนดในสัปดาห์ (`?week_start=`) |
+| POST | `/api/schedule/generate` | ต้อง | ลบตารางเดิมแล้วจัดงานที่ยังไม่เสร็จลงเวลาว่างใหม่ทั้งหมด |
 
 `ต้อง` = ต้องมี session ไม่งั้นได้ `401` — และทุก query ผูกกับ `student_id` จาก session
 ไม่ได้รับ id มาจาก client ผู้ใช้จึงเห็นเฉพาะข้อมูลของตัวเอง
+
+\* `/api/tasks/:id/duration` ไม่มี `requireAuth` ถ้าไม่ได้ login จะได้ `404` แทน `401`
+
+> **route ที่ mount อยู่แต่พัง:** handler อื่นใน `routes/tasks.js` (`/api/tasks`) และ `routes/settings.js`
+> (mount ไว้ที่ root ไม่มี prefix) เป็นของเก่าที่อ่าน `req.user.id` ซึ่งไม่มีใครตั้งค่า และ query ตารางที่ไม่มีอยู่จริง
+> frontend ไม่ได้เรียกใช้ แต่ `DELETE /api/tasks/:id`, `GET /` และ `PUT /lunch` ไม่มี `try` —
+> request เดียวทำให้ backend ล้มได้ ดู [PROJECT_SETUP.md](PROJECT_SETUP.md#routes-that-are-mounted-but-broken)
 
 `POST /api/assignments` รับ `{ title, task_type, course_name, description, due_date }` บังคับแค่ `title`
 `task_type` เป็นหนึ่งใน `homework | project | quiz | exam | reading | other` ไม่ใส่ `course_name` จะไปอยู่ใต้วิชา `งานที่เพิ่มเอง`
@@ -349,7 +376,7 @@ An account holding any administrative permission gets an extra "ผู้ดู�
 แล้วเขียนแบบ upsert (แถวที่ยังไม่มี `Assignment_Detail` ก็ตั้งสถานะได้) พร้อมประทับ `status_updated_at`
 ซึ่งเป็นตัวบอกให้ซิงก์รอบต่อไป **ไม่ต้องไปยุ่งกับสถานะแถวนั้นอีก**
 
-`PUT /api/notification-settings` รับ `{ enabled, lead_times, daily_repeat, daily_repeat_time, last_custom_minutes }`
+`PUT /api/notification-settings` รับ `{ enabled, lead_times, daily_repeat, daily_repeat_time, announcement_notify, last_custom_minutes }`
 โดย `lead_times` เป็น array ของนาที (1–40320 คือ 28 วัน, ไม่เกิน 10 ค่า) และ `daily_repeat_time` เป็น `"HH:MM"`
 เขียนทับทั้งชุดใน transaction เดียว แล้วคืน payload หน้าตาเดียวกับ `GET`
 
@@ -358,7 +385,7 @@ An account holding any administrative permission gets an extra "ผู้ดู�
 ทั้งสอง endpoint คืน `failed_count` / `last_failed_at` ด้วย นับจากแถว `Notification` ที่ตัวส่งอีเมลบันทึกว่าล้มเหลว (`is_sent = FALSE` และมี `sent_at`)
 
 `/api/classroom/sync` รับ body `{ "cutoffDate": "YYYY-MM-DD" | null }` (เอาเฉพาะงานที่กำหนดส่งตั้งแต่วันนั้น
-งานเก่ากว่านั้นที่เคยซิงก์ไว้จะถูกลบ) แล้วคืน `{ ok, coursesSynced, assignmentsSynced, deletedCount, skippedCourses }`
+งานและประกาศเก่ากว่านั้นที่เคยซิงก์ไว้จะถูกลบ) แล้วคืน `{ ok, coursesSynced, assignmentsSynced, announcementsSynced, deletedCount, skippedCourses }`
 ปุ่ม "ซิงก์ Classroom" บน dashboard เรียก endpoint นี้ และจำค่า cutoff ไว้ใน `localStorage`
 (แยกตาม origin — `localhost` กับโดเมนจริงจำคนละค่า)
 
@@ -379,29 +406,35 @@ assignment-hub/
 ├── docker-compose.yml   # 3 services: frontend + backend + db
 ├── .env.local           # secret OAuth (git-ignored — สร้างเอง)
 ├── init.sql             # schema เปล่า ไม่มีข้อมูลตัวอย่าง (รันครั้งแรก)
-├── migrations/          # ALTER สำหรับ database ที่สร้างไปแล้ว (001–004)
+├── migrations/          # ALTER สำหรับ database ที่สร้างไปแล้ว (001–013)
 ├── migrate.sh           # รัน migration ทั้งหมดเรียงตามลำดับ (มี .bat สำหรับ Windows)
 ├── backend/             # Express API + mysql2 + OAuth + Classroom sync
 │   ├── server.js        # entry บาง ๆ — ตั้ง session แล้ว mount router
 │   └── src/
 │       ├── config.js    # รวม env var ไว้ที่เดียว
 │       ├── db.js        # mysql2 pool ตัวเดียวที่ทุก route ใช้ร่วมกัน
-│       ├── routes/      # health, auth, me, assignments, classroom, notifications
-│       ├── services/    # classroomSync, identity, oauthSession
+│       ├── routes/      # health, auth, me, assignments, announcements, classroom,
+│       │                # notifications, analytics, schedules, workingHours, admin*
+│       │                # (+ tasks, settings — ของเก่าที่พังเกือบทั้งไฟล์)
+│       ├── services/    # classroomSync, identity, oauthSession, notificationSender,
+│       │                # mailer, analytics, adminMetrics, businessMetrics, rbac, ...
 │       ├── utils/       # dueDate — แปลง datetime-local เป็น DATETIME ตามเวลาที่ผู้ใช้พิมพ์
-│       └── middleware/  # requireAuth
+│       └── middleware/  # requireAuth, requireAdmin, permissions, errorHandler, metrics
 └── frontend/            # React + Vite + react-router
     └── src/
-        ├── App.jsx          # router: /login, /home, /assignments, /settings
+        ├── App.jsx          # router: /login, /home, /assignments, /stream, /schedule,
+        │                    # /weekly, /settings, /admin/*
         ├── theme.js         # design token (สี, ฟอนต์, radius, ชื่อวัน/เดือนไทย)
         ├── tasks.js         # สถานะงาน, ตัวกรอง, ตัวจัดรูปแบบวันที่ — ใช้ร่วมทุกหน้า
         ├── useAssignments.js # hook: ดึงงาน + handler เปลี่ยนสถานะ/ลบ/แก้ไข
         ├── GlobalStyles.jsx # โหลดฟอนต์ Maitree + base CSS
-        ├── pages/           # LoginPage, HomePage, AssignmentsPage, SettingsPage
+        ├── pages/           # LoginPage, HomePage, AssignmentsPage, AssignmentDetailPage,
+        │                    # StreamPage, Schedule, WeeklyView, SettingsPage, admin/
         ├── components/      # Sidebar, StatCard, AssignmentTable, TaskRow, BarChart,
-        │                    # DonutChart, MiniCalendar, DeadlineList, UrgentChecklist,
+        │                    # DonutChart, Calendar, DeadlineList, UrgentChecklist,
         │                    # AddTaskModal, EditTaskModal, NotificationSettings,
-        │                    # Toggle, ProviderButton, BrandMark
+        │                    # Toggle, ProviderButton, BrandMark, AutoScheduleButton,
+        │                    # LunchTimeSetting, WeeklyCalendar, AdPopup, admin/
         └── icons/           # Google/Microsoft SVG + ไอคอน UI (index.jsx)
 ```
 
@@ -469,12 +502,14 @@ Caddy ออก cert ภายในไม่กี่วินาที ถ้�
 
 ### อัปเดตโค้ดหลัง deploy แล้ว
 
-**แก้โค้ดเฉย ๆ ไม่ต้องรันคำสั่ง docker เลย** — ซอร์สถูก mount เข้า container อยู่ (`./frontend:/app`, `./backend:/app`)
-Vite HMR กับ `node --watch` โหลดใหม่ให้เอง แค่ `git pull` บนเซิร์ฟเวอร์ก็พอ
+ซอร์สถูก mount เข้า container อยู่ (`./frontend:/app`, `./backend:/app`) แต่สองฝั่งโหลดใหม่ไม่เหมือนกัน:
+backend ใช้ `node --watch` ส่วน frontend รัน **`vite preview`** ที่เสิร์ฟ `frontend/dist` ซึ่ง build ไว้แล้ว
+**ไม่มี HMR** — แก้ `.jsx` แล้วต้อง `npm run build` และ commit `dist/` ไปด้วย ไม่งั้นเซิร์ฟเวอร์ยังเสิร์ฟของเก่า
 
 | แก้อะไร | ต้องทำ |
 |---|---|
-| โค้ด `.jsx` `.js` `server.js` | ไม่ต้องทำอะไร |
+| โค้ด frontend (`.jsx`, `.css`) | `cd frontend && npm run build` แล้ว commit `dist/` — บนเซิร์ฟเวอร์แค่ `git pull` |
+| โค้ด backend (`.js`, `server.js`) | ปกติไม่ต้องทำอะไร แต่ `node --watch` มักไม่เห็นไฟล์ที่มาทาง bind mount → `docker compose restart backend` |
 | `.env` / `docker-compose.yml` | `docker compose --profile tls up -d --force-recreate` |
 | `vite.config.js` | `docker compose restart frontend` |
 | `Caddyfile` | `docker compose restart caddy` |

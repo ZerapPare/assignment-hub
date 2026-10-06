@@ -8,7 +8,7 @@ A student assignment manager, split into **three independent services** run with
 Browser
   │  http://localhost:4173
   ▼
-frontend  (Vite dev server, React, hot reload)
+frontend  (vite preview serving the committed frontend/dist, React)
   │  proxies /api/*  →  backend:3000
   ▼
 backend   (Express + mysql2 REST API)
@@ -23,7 +23,7 @@ The frontend never talks to MySQL directly — it calls `/api/*`, which Vite pro
 
 | Layer     | Technology                                          |
 |-----------|-----------------------------------------------------|
-| Frontend  | React 18 + Vite 5 (dev server) + react-router-dom 6 |
+| Frontend  | React 18 + Vite 5 (`vite preview` in Docker) + react-router-dom 6 |
 | Fonts     | Maitree (Google Fonts) — covers Thai + Latin        |
 | Styling   | Inline style objects + shared tokens in `src/theme.js` (no CSS framework) |
 | Backend   | Node.js 20 + Express 4                              |
@@ -143,9 +143,11 @@ This trips people up, so be precise about which file a variable belongs in:
 | `/assignments/:id` | Task detail | Requires a session. One task in full — description, course, score, status control, and a link back to Google Classroom. Reached by clicking a title in the table |
 | `/stream` | Announcements | Requires a session. Classroom announcements (`GET /api/announcements`) with a course filter, beside the same task table |
 | `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, notification preferences, and connect state for Google and Microsoft |
+| `/schedule` | Auto-scheduling | Requires a session. Per-day working start times, lunch break, per-task time estimates, and the auto-schedule button — see [Auto-scheduling](#auto-scheduling) |
+| `/weekly` | Weekly view | Requires a session. The generated schedule laid out over one week (`GET /api/schedule/weekly`) |
 | `*`      | →             | Redirects to `/login`                                       |
 
-The sidebar (`Sidebar.jsx`, `position: sticky`) links four of these: หน้าแรก · งานทั้งหมด · ประกาศ · ตั้งค่า. `/assignments/:id` has no nav entry — it is reached from the table only.
+The sidebar (`Sidebar.jsx`, `position: sticky`) links five of these: หน้าแรก · งานทั้งหมด · จัดตาราง · ประกาศ · ตั้งค่า, plus ผู้ดูแลระบบ for accounts holding an admin permission. `/assignments/:id` and `/weekly` have no nav entry — the first is reached from the table, the second from a button on `/schedule`.
 
 **`/assignments/:id` has no endpoint of its own.** `AssignmentDetailPage` calls the same
 `useAssignments` hook every other page uses and `find`s the id in the already-fetched list,
@@ -316,8 +318,53 @@ There is one login for everybody. The session holds a single `userId` and nothin
 | GET    | `/api/notification-settings`  | Yes  | Reminder preferences; **defaults without writing** when never saved |
 | PUT    | `/api/notification-settings`  | Yes  | Replaces the whole preference set in one transaction |
 | POST   | `/api/notification-settings/test` | Yes | Sends one reminder to the session user's own address |
+| GET    | `/api/user/working-hours`     | Yes  | Working start time per weekday, `{ "0": "08:00:00" \| null, …, "6": … }` (0 = Sunday) |
+| PUT    | `/api/user/working-hours`     | Yes  | Replaces all seven days in one transaction; a missing or malformed day is skipped |
+| GET    | `/api/user/settings`          | Yes  | Lunch break + working-hours window from `User_Settings`; **inserts a default row** on first read |
+| PUT    | `/api/user/settings`          | Yes  | Upserts `{ lunch_start, lunch_end, working_hours_start, working_hours_end }` |
+| PATCH  | `/api/tasks/:id/duration`     | Session* | Sets `Assignment_Detail.time_estimate` (`1`–`1440` minutes) and mirrors it onto `Schedule` |
+| GET    | `/api/schedule/weekly`        | Yes  | Tasks scheduled or due in the week from `?week_start=` (defaults to this Monday) |
+| POST   | `/api/schedule/generate`      | Yes  | Wipes the student's `Schedule` rows and lays every unfinished task out again |
 
 `Yes` = requires a logged-in session (returns `401` otherwise).
+
+\* `/api/tasks/:id/duration` has no `requireAuth`; it reads `req.session.userId` directly, so
+a logged-out call finds no owned row and answers `404` rather than `401`.
+
+### Auto-scheduling
+
+`POST /api/schedule/generate` deletes the student's existing `Schedule` rows, then walks
+their unfinished tasks in due-date order and packs each into consecutive free time starting
+from now, splitting a task into several `segments` (stored as JSON) when it crosses lunch or
+the end of a day. A task's length is `Assignment_Detail.time_estimate`, defaulting to 60
+minutes. Each working day runs from its `Working_Hours.start_time` to 23:59 — the stored
+`end_time` is always `23:59:00` and is not read. A weekday with no row is skipped entirely,
+so a student who has never saved working hours gets nothing scheduled.
+
+Three tables look related and are not interchangeable:
+
+| Table | Used by |
+|---|---|
+| `Working_Hours` | the scheduler — one start time per weekday |
+| `User_Settings` | the scheduler's lunch break (`lunch_start` / `lunch_end`); `working_hours_start/end` are stored but the scheduler ignores them |
+| `Schedule_Setting` | **nothing** — created by migration `010`, never queried |
+
+### Routes that are mounted but broken
+
+`routes/tasks.js` (mounted at `/api/tasks`) and `routes/settings.js` (mounted with **no
+prefix**) are leftovers from an earlier `tasks` / `user_settings` schema. Apart from
+`PATCH /api/tasks/:id/duration`, every handler in them reads `req.user.id` — nothing sets
+`req.user` — and queries lowercase tables that do not exist. The frontend calls none of them.
+
+| Route | What happens |
+|---|---|
+| `GET /api/tasks`, `POST /api/tasks/sync-classroom`, `PUT /api/tasks/:id` | `TypeError` caught → `500` |
+| `DELETE /api/tasks/:id` | no `try`, so the rejection is unhandled |
+| `GET /` and `PUT /lunch` on the backend | no `try` either — `settings.js` was meant for `/api/settings` but is mounted at the root |
+
+The two unhandled cases are worse than a `500`: Express 4 does not catch async rejections,
+and Node 20 exits on an unhandled rejection, so a single request to them can restart the
+backend. Delete both files' dead handlers (keeping `/duration`) rather than fixing them.
 
 `POST /api/assignments` takes `{ title, task_type, course_name, description, due_date }`.
 Only `title` is required; `task_type` is one of `homework | project | quiz | exam | reading | other`;
@@ -488,7 +535,7 @@ Tasks that are `submitted` or `completed` are excluded (FR-07.4), as are suspend
 
 #### `trigger_type` is the deduplication key
 
-`Notification` had no unique constraint, so `015_notifications.sql` adds
+`Notification` had no unique constraint, so `013_notifications.sql` adds
 `UNIQUE (assignment_id, trigger_type)` and the sender claims work with `INSERT IGNORE`:
 
 ```sql
@@ -527,14 +574,7 @@ The retry sweep is two statements rather than one: an announcement row matches n
 > background sync yet. A post nobody syncs within 24 hours falls outside the window and is
 > never mailed.
 
-The key encodes **which** reminder a row is, and includes the due date:
-
-| Form | Example |
-|---|---|
-| `lead:<minutes>:<due date>` | `lead:1440:2026-09-20 23:59` |
-| `daily:<YYYY-MM-DD>` | `daily:2026-09-16` *(not sent yet — see below)* |
-
-The due date is in the key because **moving a deadline has to re-arm the reminder**. With a
+A `lead:` key looks like `lead:1440:2026-09-20 23:59`. The due date is in the key because **moving a deadline has to re-arm the reminder**. With a
 bare `lead:1440`, pushing a deadline out by a week would stay silent forever on the grounds
 that it had already been sent once (UR07 makes moving deadlines routine).
 
@@ -630,16 +670,16 @@ assignment-hub/
 │   ├── 001_identity.sql      # unique email domain + (student_id, university_id)
 │   ├── 002_task_type.sql     # Assignment.task_type
 │   ├── 003_status_updated_at.sql  # Assignment_Detail.status_updated_at
-│   ├── 005_admin_monitoring.sql       # monitoring tables and Student account status
+│   ├── 004_admin_monitoring.sql       # monitoring tables and Student account status
+│   ├── 005_announcement.sql           # Announcement table (Classroom stream)
 │   ├── 006_product_analytics.sql      # privacy-safe Product_Event stream
-│   ├── 006_announcement.sql           # Announcement table (Classroom stream)
 │   ├── 007_admin_identity.sql          # separate Admin allowlist identity
-│   ├── 007_score.sql                   # Assignment_Detail.max_points + assigned_grade
-│   ├── 008_admin_microsoft_identity.sql # immutable Microsoft identity columns
+│   ├── 008_score.sql                   # Assignment_Detail.max_points + assigned_grade
+│   ├── 009_admin_microsoft_identity.sql # immutable Microsoft identity columns
 │   ├── 010_schedule_setting.sql        # Schedule_Setting table
 │   ├── 011_assignment_time_estimate.sql # Assignment_Detail.time_estimate
 │   ├── 012_rbac.sql                    # one User_Account + roles and permissions
-│   └── 015_notifications.sql           # settings, delivery bookkeeping, announcements
+│   └── 013_notifications.sql           # settings, delivery bookkeeping, announcements
 ├── migrate.sh / migrate.bat  # loop over migrations/*.sql in filename order
 ├── Caddyfile                 # TLS reverse proxy config (used by the `tls` profile)
 ├── .env                      # deploy settings for Compose substitution (git-ignored)
@@ -660,7 +700,8 @@ assignment-hub/
 │       │   └── errorHandler.js   # terminal handler; logs to System_Error_Log
 │       ├── routes/           # health, student auth, admin auth, me, announcements,
 │       │                     # assignments, classroom, notifications, analytics,
-│       │                     # admin, adminBusiness
+│       │                     # admin, adminBusiness, schedules, workingHours,
+│       │                     # tasks + settings (mostly dead — see "Routes that are mounted but broken")
 │       ├── services/
 │       │   ├── mailer.js           # nodemailer over SMTP; logs instead when unconfigured
 │       │   ├── notificationSender.js # the 5-minute reminder pass (FR-07)
@@ -693,11 +734,14 @@ assignment-hub/
         │   ├── AssignmentDetailPage.jsx # one task in full, resolved from the same list
         │   ├── StreamPage.jsx   # Classroom announcements + course filter
         │   ├── SettingsPage.jsx # profile, รหัสนักศึกษา, notifications, provider link state
+        │   ├── Schedule.jsx     # working hours, lunch, time estimates, auto-schedule
+        │   ├── WeeklyView.jsx   # the generated schedule over one week
         │   └── admin/            # protected monitoring and business analytics pages
         ├── components/       # Sidebar, StatCard, AssignmentTable, TaskRow, BarChart,
         │                     # DonutChart, Calendar, DeadlineList, UrgentChecklist,
         │                     # AddTaskModal, EditTaskModal, NotificationSettings, Toggle,
-        │                     # ProviderButton, BrandMark, admin/
+        │                     # ProviderButton, BrandMark, AutoScheduleButton,
+        │                     # LunchTimeSetting, WeeklyCalendar, AdPopup, admin/
         └── icons/            # GoogleIcon, MicrosoftIcon + index.jsx (UI icon set, inline SVG)
 ```
 
@@ -713,10 +757,12 @@ hex in a component, so both screens keep one palette.
 
 Auto-created on first DB start. Tables:
 
-`University` · `User_Account` · `Student` · `Admin` · `Role` · `Permission` · `Role_Permission` ·
-`User_Role` · `Schedule_Setting` · `User_Settings` · `Product_Event` · `Course` · `Announcement` ·
+`University` · `User_Account` · `Role` · `Permission` · `Role_Permission` · `User_Role` ·
+`Schedule_Setting` · `User_Settings` · `Working_Hours` · `Product_Event` · `Course` · `Announcement` ·
 `Assignment` · `Assignment_Detail` · `Schedule` · `Notification` · `Notification_Setting` ·
 `Notification_Lead_Time` · `System_Error_Log` · `Admin_Audit_Log` · `System_Request_Metric_Hourly`
+
+21 tables. `Student` and `Admin` are gone — see below.
 
 ### Identity and access control
 
@@ -756,11 +802,11 @@ provisioning.
 `init.sql` creates the schema and **inserts nothing** — the database starts empty, so a
 new account sees an empty dashboard until it runs a Classroom sync. `University` rows are
 created on demand by the first login from each email domain, so that table fills itself.
-`Schedule` and `Notification` are defined but never read or written outside the sync's
-cascade delete.
+`Schedule` is written by the auto-scheduler and `Notification` by the reminder sender;
+`Schedule_Setting` is the one table nothing reads or writes.
 
 Three constraints carry requirements rather than just shape: `University.email_domain` is
-unique (so the find-or-create is safe), `Student (student_id, university_id)` is unique
+unique (so the find-or-create is safe), `User_Account (student_id, university_id)` is unique
 (UR03 — the same number may recur at a different university, and unset ids stay `NULL`),
 and `Course.platform_source IS NULL` is what marks a course as manually created.
 
@@ -771,11 +817,11 @@ is `NULL` until the student sets a status by hand, and the Classroom sync reads 
 as permission to write status — so the column is a flag about *who owns the field*, not just
 an audit timestamp. Never backfill it.
 
-`Notification_Setting` is 1:1 with `Student` and holds the reminder preferences;
+`Notification_Setting` is 1:1 with `User_Account` and holds the reminder preferences;
 `Notification_Lead_Time` holds one row per selected lead time. Two choices there are worth
 knowing: lead times are stored **in minutes** so presets and custom values share a single
 representation that compares directly against `due_date` (no unit column), and they live in
-a child table rather than a CSV column because a student picks several and the future sender
+a child table rather than a CSV column because a student picks several and the sender
 has to `JOIN` on them to find which assignments are due. `last_custom_minutes` on the parent
 is only a UI convenience — it remembers the last value typed under `+ กำหนดเอง` so the hint
 line can offer it again, and being set there does **not** mean it is currently selected.
@@ -783,10 +829,10 @@ line can offer it again, and being set there does **not** mean it is currently s
 [Email reminders](#email-reminders-fr-07) for what its `trigger_type`, `attempt_count` and
 `next_attempt_at` columns carry.
 
-`Announcement` (migration `006`) hangs off `Course` with `ON DELETE CASCADE` — the only
+`Announcement` (migration `005`) hangs off `Course` with `ON DELETE CASCADE` — the only
 cascade in the schema, and the reason the sync's announcement pruning can delete by join
 without cleaning up a child table the way assignment deletion has to. `max_points` and
-`assigned_grade` on `Assignment_Detail` (migration `007`) are the mirror image of
+`assigned_grade` on `Assignment_Detail` (migration `008`) are the mirror image of
 `status`: written by every sync, never by the app, `NULL` for manual work.
 
 Two *absent* constraints are just as deliberate: `Course.external_course_id` and
@@ -817,33 +863,44 @@ do not rerun a migration that has already been applied.
 | `001_identity.sql` | unique `University.email_domain`; unique `Student (student_id, university_id)` | UR02, UR03 |
 | `002_task_type.sql` | `Assignment.task_type` | UR06, A5.1 |
 | `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` | UC-5, A3.3, UR12 |
-| `005_admin_monitoring.sql` | monitoring tables and Student account status | admin console |
+| `004_admin_monitoring.sql` | monitoring tables and Student account status | admin console |
+| `005_announcement.sql` | `Announcement` table | `/stream`, Classroom announcements |
 | `006_product_analytics.sql` | privacy-safe `Product_Event` stream | business analytics |
-| `006_announcement.sql` | `Announcement` table | `/stream`, Classroom announcements |
 | `007_admin_identity.sql` | separate `Admin` allowlist identity | admin login |
-| `007_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` | the คะแนน column |
-| `008_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs | admin login |
+| `008_score.sql` | `Assignment_Detail.max_points` + `assigned_grade` | the คะแนน column |
+| `009_admin_microsoft_identity.sql` | immutable Microsoft tenant/object IDs | admin login |
 | `010_schedule_setting.sql` | `Schedule_Setting` table | auto-scheduling |
 | `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` | `/api/assignments`, auto-scheduling |
 | `012_rbac.sql` | folds `Student` and `Admin` into one `User_Account`; `Role` / `Permission` / `Role_Permission` / `User_Role`; the two roles `admin` and `student` | role-based access control, one login page |
-| `015_notifications.sql` | `Notification_Setting` + `Notification_Lead_Time`; `Notification` unique key and retry columns; announcement targets and their on/off column | UC-6, UC-8, FR-07, UR12 |
+| `013_notifications.sql` | `Notification_Setting` + `Notification_Lead_Time`; `Notification` unique key and retry columns; announcement targets and their on/off column | UC-6, UC-8, FR-07, UR12 |
 
-**Two of these are merges.** RBAC was `012` (build a `User_Account` supertype with `Student`
-and `Admin` under it), `013` (throw that table away and rename `Student` into its place) and
-`014` (rename a role `012` had just seeded). Notifications were `004`, `009` and `015`,
-all reshaping the same three tables. Run in sequence each group largely undid its own work,
+**Two of these are merges.** RBAC was three files (build a `User_Account` supertype with
+`Student` and `Admin` under it, throw that table away and rename `Student` into its place,
+then rename a role the first had just seeded). Notifications were three files too, all
+reshaping the same three tables. Run in sequence each group largely undid its own work,
 so each is now a single file that goes straight to the shape the code expects.
 
-The notification file sits at `015` rather than `004` because of what it now depends on:
+The notification file comes after `012` because of what it depends on:
 `Notification_Setting` references `User_Account`, which only exists after the fold in `012`,
-and the announcement half needs `Announcement` from `006`.
+and the announcement half needs `Announcement` from `005`.
 
-**Two pairs share a number** (`006_product_analytics` / `006_announcement`, and
-`007_admin_identity` / `007_score`) because the features landed on separate branches. They
-touch different tables, so either order works. Pick `016` for the next migration rather than
-adding a third to either pair.
+**The files were renumbered on 2026-10-07** to close the gaps the merges left and to split
+two pairs that shared a number. Execution order did not change, and since neither script
+records what it has applied, an existing database is unaffected. Older notes and commit
+messages use the previous numbers:
 
-> `012` and `015` guard every step with an `information_schema` lookup, so rerunning them is
+| Before | After |
+|---|---|
+| `005_admin_monitoring` | `004_admin_monitoring` |
+| `006_announcement` | `005_announcement` |
+| `007_score` | `008_score` |
+| `008_admin_microsoft_identity` | `009_admin_microsoft_identity` |
+| `015_notifications` | `013_notifications` |
+
+Pick `014` for the next migration. A branch that still adds a file under an old number
+should be renumbered before it merges.
+
+> `012` and `013` guard every step with an `information_schema` lookup, so rerunning them is
 > a no-op rather than an error. `001`–`011` are bare `ALTER TABLE`s and are not guarded.
 
 `migrate.sh` (and `migrate.bat` for cmd) runs them all in order against a running stack:
@@ -869,7 +926,7 @@ already applied prints a `Duplicate column name` / `Duplicate key name` error. T
 does not stop on error and nothing is corrupted — a duplicate `ALTER` is rejected outright.
 The noise is expected, not a failed run.
 
-> Two migrations still fail for a different reason on a fresh database: `005_admin_monitoring`
+> Two migrations still fail for a different reason on a fresh database: `004_admin_monitoring`
 > and `007_admin_identity` both reference `Student`, which `012` folded away. They have
 > nothing left to add to a current `init.sql`, so this is harmless — but it is why the output
 > is worth reading rather than skimming.
@@ -884,7 +941,7 @@ Verify:
 
 ```bash
 docker compose exec db mysql -uroot -proot123 assignment_hub \
-  -e "DESCRIBE Assignment; DESCRIBE Assignment_Detail; SHOW INDEX FROM University; SHOW INDEX FROM Student;"
+  -e "DESCRIBE Assignment; DESCRIBE Assignment_Detail; SHOW INDEX FROM University; SHOW INDEX FROM User_Account;"
 ```
 
 > `003` is the one to watch on a database that already holds synced rows: leave
@@ -975,7 +1032,7 @@ certificates per domain per week.
 - **A sync reports success but the assignments never show up — and the same account gets more of them on a single-user database** — the row exists, it just belongs to a classmate. Compare what is stored against what the API returns:
 
   ```bash
-  docker compose exec db mysql -uroot -proot123 assignment_hub -e "SELECT s.user_id, s.university_email, COUNT(a.assignment_id) AS cnt FROM Student s LEFT JOIN Course c ON c.student_id = s.user_id LEFT JOIN Assignment a ON a.course_id = c.course_id GROUP BY s.user_id, s.university_email;"
+  docker compose exec db mysql -uroot -proot123 assignment_hub -e "SELECT u.user_id, u.email, COUNT(a.assignment_id) AS cnt FROM User_Account u LEFT JOIN Course c ON c.student_id = u.user_id LEFT JOIN Assignment a ON a.course_id = c.course_id GROUP BY u.user_id, u.email;"
   ```
 
   A lopsided split (one student holding nearly everything while later ones hold almost nothing) means an upsert lookup lost its owner condition and the first student to sync claimed the shared rows — see [Both upsert keys must include the owner](#both-upsert-keys-must-include-the-owner). No migration is needed after fixing the query: the next sync stops matching other people's rows and inserts the missing ones. Far more `Course` rows than `Assignment` rows is the same symptom seen from the other side, since the course upsert is scoped and the assignment one was not.
@@ -984,11 +1041,11 @@ certificates per domain per week.
 - **`Unknown column 'status_updated_at' in 'field list'`** (or `'task_type'`) — the database predates the schema change and `init.sql` does not re-run on an existing volume. Apply the migrations: `./migrate.sh`, or the single file with `docker compose exec -T db mysql -uroot -proot123 assignment_hub < migrations/003_status_updated_at.sql`. Every `/api/assignments` read fails with this, so the dashboard shows the DB-not-ready state rather than an empty list.
 - **`Unknown column` or `Table ... doesn't exist` on a database that has been around a while** — `init.sql` only runs when the volume is created, so an older database never picked the change up. Run `./migrate.sh`. A missing column in `Assignment_Detail` takes out the whole assignments list (the dashboard falls back to "waiting for database"); a missing table usually takes out one page only.
 
-  Two things are in `init.sql` with **no migration behind them**, so a database that has only ever been migrated will not have them: the `Working_Hours` table and `Schedule.segments`. Both are used by `routes/workingHours.js` and `routes/schedules.js`. Check with:
+  Three things are in `init.sql` with **no migration behind them**, so a database that has only ever been migrated will not have them: the `Working_Hours` and `User_Settings` tables and `Schedule.segments`. All three are used by `routes/workingHours.js` and `routes/schedules.js`, i.e. the `/schedule` page. Check with:
 
   ```bash
   docker compose exec db mysql -uroot -proot123 assignment_hub -e \
-    "SHOW TABLES LIKE 'Working_Hours'; SHOW COLUMNS FROM Schedule LIKE 'segments';"
+    "SHOW TABLES LIKE 'Working_Hours'; SHOW TABLES LIKE 'User_Settings'; SHOW COLUMNS FROM Schedule LIKE 'segments';"
   ```
 
   Empty output means recreating the volume (`docker compose down -v`, then up) is currently the only fix — the data can be synced back from Classroom.

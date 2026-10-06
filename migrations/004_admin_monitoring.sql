@@ -1,4 +1,4 @@
--- 005 — admin monitoring, account status, and audit history.
+-- 004 — admin monitoring, account status, and audit history.
 ALTER TABLE Student
     ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student',
     ADD COLUMN account_status VARCHAR(20) NOT NULL DEFAULT 'active',
@@ -55,5 +55,5 @@ CREATE TABLE System_Request_Metric_Hourly (
     p95_response_ms DECIMAL(10,2) NULL
 );
 
--- 007 moved administrator identities to a separate Admin table, and 013 folded
--- everything back into User_Account. See docs/roles.md for the current model.
+-- 007 moved administrator identities to a separate Admin table, and 012 folded
+-- everything back into User_Account. See README.md "Admin access" for the current model.

@@ -11,7 +11,7 @@ CREATE TABLE Admin (
     CONSTRAINT uq_admin_microsoft_identity UNIQUE (microsoft_tenant_id, microsoft_object_id)
 );
 
--- Preserve administrators created by migration 005. Keeping the same numeric id
+-- Preserve administrators created by migration 004. Keeping the same numeric id
 -- lets existing Admin_Audit_Log rows still identify their actor.
 INSERT INTO Admin (admin_id, email, display_name, is_active, created_at, last_login_at)
 SELECT user_id, university_email, student_name,
@@ -22,7 +22,7 @@ ON DUPLICATE KEY UPDATE
     display_name = COALESCE(Admin.display_name, VALUES(display_name)),
     is_active = VALUES(is_active);
 
--- 005 linked audit rows to Student.role='admin'; sessions now use
+-- 004 linked audit rows to Student.role='admin'; sessions now use
 -- Admin.admin_id. Drop only that legacy foreign key — run after the current
 -- init.sql the FK already points at Admin and must be kept.
 SET @drop_legacy_admin_fk = (
@@ -43,4 +43,4 @@ EXECUTE drop_legacy_admin_fk_stmt;
 DEALLOCATE PREPARE drop_legacy_admin_fk_stmt;
 
 -- Provision administrators manually; never expose a public registration API.
--- Superseded by migration 013 — see docs/roles.md for the current grant.
+-- Superseded by migration 012 — see README.md "Admin access" for the current grant.

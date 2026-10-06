@@ -12,7 +12,7 @@ const REPO_ROOT = path.join(__dirname, '..', '..');
 const read = (...parts) => fs.readFileSync(path.join(REPO_ROOT, ...parts), 'utf8');
 
 const initSql = read('init.sql');
-// The fold (013) and the admin rename (014) are merged into 012, which is why
+// The user-table fold and the admin role rename are merged into 012, which is why
 // both names below read the same file.
 const rbacSql = read('migrations', '012_rbac.sql');
 const foldSql = rbacSql;

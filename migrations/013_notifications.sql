@@ -1,6 +1,7 @@
--- 015 — notification preferences and delivery (UC-6, UC-8, FR-07, UR12).
--- Merged from the old 004/009/015, and at 015 because Notification_Setting
--- needs User_Account from the fold in 012 and announcements need 006.
+-- 013 — notification preferences and delivery (UC-6, UC-8, FR-07, UR12).
+-- Merged from three earlier notification migrations, and placed after 012
+-- because Notification_Setting needs User_Account from the fold in 012 and
+-- announcements need 005.
 -- trigger_type: lead:<minutes>:<due date> | daily:<YYYY-MM-DD> | ann:new.
 -- Every step is guarded, so re-running migrate.sh is a no-op.
 
@@ -31,11 +32,11 @@ CREATE TABLE IF NOT EXISTS Notification_Lead_Time (
 
 -- 2. Everything else, guarded step by step.
 
-DROP PROCEDURE IF EXISTS migrate_015_notifications;
+DROP PROCEDURE IF EXISTS migrate_013_notifications;
 
 DELIMITER //
 
-CREATE PROCEDURE migrate_015_notifications()
+CREATE PROCEDURE migrate_013_notifications()
 BEGIN
     DECLARE has_notify_column   INT;
     DECLARE has_attempt_count   INT;
@@ -161,5 +162,5 @@ END //
 
 DELIMITER ;
 
-CALL migrate_015_notifications();
-DROP PROCEDURE migrate_015_notifications;
+CALL migrate_013_notifications();
+DROP PROCEDURE migrate_013_notifications;

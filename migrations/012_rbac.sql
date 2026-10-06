@@ -1,4 +1,5 @@
--- 012 — RBAC on one user table. Merged from the old 012/013/014.
+-- 012 — RBAC on one user table. Merged from three earlier RBAC migrations
+-- (supertype, fold, role rename).
 -- User_Account ──< User_Role >── Role ──< Role_Permission >── Permission
 -- Apply after 001–011. Mirrored in init.sql; rbacSchema.test.js keeps them in step.
 
