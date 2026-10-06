@@ -1,15 +1,24 @@
-# TLS reverse proxy for the deployed host. Caddy obtains and renews a Let's
-# Encrypt certificate on its own — the only requirements are that SITE_HOST
-# resolves to this machine and that ports 80 and 443 are reachable from the
-# internet (80 is what the ACME HTTP-01 challenge uses).
+# Reverse proxy for the deployed host. Only used by the `tls` compose profile;
+# local dev never starts this.
 #
-# Only used by the `tls` compose profile; local dev never starts this.
+# HTTPS is NOT done here. On the deployed host the public request goes
+#   browser ──https──► Cloudflare ──► init.d gateway ──http──► this VM :4173 ──► Caddy :80
+# Cloudflare holds the certificate, so Caddy cannot (and need not) obtain one:
+# Let's Encrypt's challenges land on Cloudflare and never reach this machine.
+# The gateway's target port (4173) is fixed on the init.d side — compose maps it
+# onto Caddy, see PROXY_PORT in docker-compose.yml.
 
-{$SITE_HOST} {
+:80 {
 	encode zstd gzip
 
 	# The frontend container runs `vite preview` on 4173 (see frontend/Dockerfile),
 	# which serves frontend/dist and proxies /api to backend:3000 itself, so one
 	# upstream is enough. Keep this port in step with that Dockerfile.
-	reverse_proxy frontend:4173
+	reverse_proxy frontend:4173 {
+		# The public site is always https, but the hop into this VM is plain
+		# http. Tell the backend so — express-session reads this header to
+		# decide whether the Secure session cookie may be set, and without it
+		# login lands back on /login.
+		header_up X-Forwarded-Proto https
+	}
 }

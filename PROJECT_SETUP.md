@@ -65,7 +65,7 @@ Then open **http://localhost:4173**.
 | `frontend` | `./frontend`    | `4173`        | `vite preview` — serves `frontend/dist`, proxies `/api` |
 | `backend`  | `./backend`     | `3000`        | Express REST API, connects to MySQL           |
 | `db`       | `mysql:8.0`     | `3306`        | Database `assignment_hub`, root pw `root123`  |
-| `caddy`    | `caddy:2-alpine`| `80`, `443`   | TLS reverse proxy — **profile `tls` only**, not started locally |
+| `caddy`    | `caddy:2-alpine`| `4173`, `80`  | Plain-http reverse proxy behind Cloudflare/init.d — **profile `tls` only**, not started locally |
 
 `caddy` sits behind a Compose profile, so `docker compose up` never starts it. It
 only comes up with `docker compose --profile tls up -d`, which is what a deployed
@@ -116,10 +116,10 @@ This trips people up, so be precise about which file a variable belongs in:
 | `MS_OAUTH_REDIRECT_URL` | compose          | derived — `${PUBLIC_URL}/api/auth/microsoft/callback` |
 | `FRONTEND_URL`          | compose          | derived — `${PUBLIC_URL}`                        |
 | `PUBLIC_URL`            | **.env**         | origin the browser uses. Defaults to `http://localhost:4173`. Builds the default callback URLs above, so it must match what is registered with Google/Azure exactly |
-| `SITE_HOST`             | **.env**         | hostname Caddy requests a certificate for        |
 | `BIND`                  | **.env**         | interface the app ports publish on. `127.0.0.1` on a deployed host keeps frontend/backend/db off the internet; defaults to `0.0.0.0` |
-| `FRONTEND_PORT`         | **.env**         | host port mapped to Vite's 4173; defaults to `4173`. Leave it alone when Caddy is in front — Caddy owns 80/443 |
-| `HMR_CLIENT_PORT`       | **.env**         | public port the hot-reload websocket dials (`443` behind TLS). Unset locally |
+| `FRONTEND_PORT`         | **.env**         | host port mapped to Vite's 4173; defaults to `4173`. **Set `4174` on the deployed VM** — Caddy takes 4173 there |
+| `PROXY_PORT`            | **.env**         | *(optional)* host port Caddy publishes for the init.d gateway; defaults to `4173`. Change only if the gateway's target port changes |
+| `HMR_CLIENT_PORT`       | **.env**         | not needed — `vite preview` has no hot reload. Only matters for `npm run dev` behind a proxy |
 | `GOOGLE_CLIENT_ID`      | **.env.local**   | Google OAuth client ID                           |
 | `GOOGLE_CLIENT_SECRET`  | **.env.local**   | Google OAuth client secret — must come from the *same* client as the ID |
 | `MS_CLIENT_ID`          | **.env.local**   | Azure app (application) ID                        |
@@ -850,7 +850,7 @@ docker compose exec db mysql -uroot -proot123 assignment_hub -e \
    JOIN Course c USING(course_id) JOIN Assignment_Detail d USING(assignment_id) ORDER BY d.due_date;"
 ```
 
-> `init.sql` only runs when the database is first created. After editing it, run `docker compose down -v` then `up --build` to recreate the schema — but on a host already serving HTTPS, remove just the database instead (`docker compose rm -fsv db`), since `down -v` would take `caddy_data` with it.
+> `init.sql` only runs when the database is first created. After editing it, run `docker compose down -v` then `up --build` to recreate the schema — or remove just the database (`docker compose rm -fsv db`), which leaves the other volumes alone.
 
 ### Migrations
 
@@ -962,61 +962,76 @@ No database is needed: each suite passes a fake `db` object. There are no fronte
 
 ## Deploying over HTTPS
 
-Local dev stays on plain HTTP. A deployed host adds Caddy, which obtains and
-renews a Let's Encrypt certificate by itself.
+Local dev stays on plain HTTP. On the deployed VM, HTTPS is provided **in front of** the
+machine, not by it:
+
+```
+browser ──https──► Cloudflare ──► init.d gateway ──http──► VM :4173 ──► Caddy :80 ──► frontend :4173
+                   (certificate)  (192.168.15.225)
+```
 
 **HTTPS is not optional if you want Google login to work.** Google refuses any
-`redirect_uri` that is not `https://` unless the host is `localhost` — the Cloud
-Console rejects such a URI at save time, so there is nothing to configure your way
-around.
+`redirect_uri` that is not `https://` unless the host is `localhost`.
 
-1. **DNS** — the hostname must already resolve to the machine. Caddy proves control
-   of it via an ACME challenge, so this has to be true *before* the first start.
-2. **Firewall** — open TCP **80 and 443**. Port 80 is still required with HTTPS: the
-   ACME challenge uses it and Caddy redirects `http://` → `https://` from it. On GCP
-   the instance's *Allow HTTP/HTTPS traffic* checkboxes do this.
-3. **`.env`** at the repo root:
+Three facts about that path shape the config:
+
+- **Cloudflare holds the certificate.** Caddy cannot obtain one — Let's Encrypt's HTTP-01
+  and TLS-ALPN challenges land on Cloudflare and never reach the VM — and does not need to.
+  The `Caddyfile` therefore serves plain `:80`.
+- **The gateway forwards to the VM's port 4173, and that target is fixed on the init.d
+  side.** Caddy publishes 4173 (`PROXY_PORT`), so the frontend's own host port has to move:
+  `FRONTEND_PORT=4174`. The gateway reaches the VM over the LAN, so `BIND=127.0.0.1` still
+  keeps the frontend, backend and MySQL private.
+- **Express never sees https.** Caddy sets `X-Forwarded-Proto: https` on every request, and
+  `server.js` runs express-session with `proxy: true` so it reads that header. Without it the
+  `Secure` session cookie is silently never set and every login lands back on `/login`.
+
+Steps:
+
+1. **`.env`** at the repo root:
 
    ```env
-   SITE_HOST=your-host.example.org
-   PUBLIC_URL=https://your-host.example.org
+   PUBLIC_URL=https://assignment-hub.cskmitl.com
    BIND=127.0.0.1
-   HMR_CLIENT_PORT=443
+   FRONTEND_PORT=4174
    ```
 
-4. **`server.allowedHosts`** in `frontend/vite.config.js` must list the hostname, or
-   Vite answers every request with `403 Blocked request`.
-5. **Start with the profile** — a port-mapping or `.env` change needs a recreate, not
-   a restart:
+   Without `PUBLIC_URL` the OAuth redirect URIs fall back to `http://localhost:4173` and
+   Google sends the browser there after consent.
+2. **`server.allowedHosts`** in `frontend/vite.config.js` must list the hostname, or Vite
+   answers every request with `403 Blocked request`.
+3. **Start with the profile** — a port-mapping or `.env` change needs a recreate, not a
+   restart:
 
    ```bash
    docker compose --profile tls up -d --force-recreate
-   docker compose logs -f caddy      # wait for "certificate obtained successfully"
+   curl -sI http://127.0.0.1:4173/ | head -1   # the gateway's way in; expect 200
    ```
 
-6. **Register the redirect URIs** with the providers — `https://<host>/api/auth/google/callback`
-   in Google Cloud Console, `.../microsoft/callback` in Azure. Keep the `localhost`
-   entries so local dev still works.
+   The profile is still called `tls` for continuity even though Caddy no longer does TLS.
+4. **Register the redirect URIs** with the providers — `https://<host>/api/auth/google/callback`
+   in Google Cloud Console, `.../microsoft/callback` in Azure. Keep the `localhost` entries
+   so local dev still works.
 
-Three things change on their own once `PUBLIC_URL` is `https://`, because compose derives
-`FRONTEND_URL` from it:
-
-- **`SESSION_SECRET` becomes mandatory.** `config.js` throws at startup without it, so a
-  backend that will not come up after a move to HTTPS is most likely missing it in `.env.local`.
-- **The session cookie is marked `Secure`.** TLS ends at Caddy and the hop to Express is
-  plain http, so `server.js` sets express-session's `proxy: true` to read
-  `X-Forwarded-Proto` instead of `req.secure`. Caddy sends that header and Vite's proxy is
-  expected to pass it through. If login does not stick after deploying (consent succeeds but
-  you land back on `/login`), the cookie was never set — check that header first.
-- Nothing else — local dev on `http://localhost:4173` keeps a non-secure cookie and the
-  dev fallback secret.
+Two more things change on their own once `PUBLIC_URL` is `https://`, because compose derives
+`FRONTEND_URL` from it: **`SESSION_SECRET` becomes mandatory** (`config.js` throws at startup
+without it) and **the session cookie is marked `Secure`**. Local dev on
+`http://localhost:4173` keeps a non-secure cookie and the dev fallback secret.
 
 Every service runs with `restart: unless-stopped`, so a crash or a VM reboot brings the stack
-back without anyone logging in. `docker compose stop` still stops it for good.
+back without anyone logging in — provided the Docker service itself is enabled
+(`sudo systemctl enable docker`). `docker compose stop` still stops it for good.
 
-Certificates live in the `caddy_data` named volume. Avoid `docker compose down -v`,
-which deletes it and forces a re-issue against Let's Encrypt's limit of 5
-certificates per domain per week.
+**A Cloudflare `502` page** means the gateway could not reach the VM. Find the port it is
+dialling — run this, then reload the site:
+
+```bash
+sudo tcpdump -ni eth0 'tcp[tcpflags] & tcp-syn != 0 and not port 22' -c 5
+```
+
+Expect `> 192.168.15.206.4173`. A different port means the gateway's target changed: set
+`PROXY_PORT` to it in `.env` and recreate. No output at all means the domain is routed to a
+different machine.
 
 ## Common Commands
 
@@ -1024,7 +1039,7 @@ certificates per domain per week.
 |----------------------------------|-----------------------------------------|
 | `docker compose up --build`      | Build and run all three services        |
 | `docker compose down`            | Stop all services                       |
-| `docker compose down -v`         | Stop and wipe DB data (re-run init.sql). **Also deletes `caddy_data`** — only safe before TLS is set up |
+| `docker compose down -v`         | Stop and wipe DB data (re-run init.sql). **Every account and synced task is lost** |
 | `docker compose logs -f backend` | Follow backend logs                     |
 | `docker compose logs -f frontend`| Follow frontend logs                    |
 | `docker compose --profile tls up -d` | Bring the stack up with Caddy in front (deployed hosts) |
@@ -1083,4 +1098,4 @@ certificates per domain per week.
   docker compose up -d --build backend
   ```
 
-  Do **not** reach for `docker compose down -v` — it also wipes the named volumes, including `caddy_data`, which means re-requesting a Let's Encrypt certificate against a 5-per-week limit.
+  Do **not** reach for `docker compose down -v` — it also wipes the named volumes, including the database.

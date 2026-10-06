@@ -57,26 +57,22 @@ services:
       - ./frontend:/app         # mount source for hot reload
       - /app/node_modules       # keep container's installed modules
 
-  # HTTPS entry point. Opt-in: `docker compose --profile tls up -d`.
-  # Left out of the default set so local dev doesn't try to issue a certificate.
+  # Entry point on the deployed host. Opt-in: `docker compose --profile tls up -d`.
+  # Plain http only — Cloudflare in front holds the certificate; see Caddyfile.
   caddy:
     image: caddy:2-alpine
     profiles: ["tls"]
     restart: unless-stopped
     ports:
+      # The init.d gateway forwards the domain to this VM's port 4173 and that
+      # target is not ours to change, so Caddy takes 4173. The frontend's own
+      # host port must then move out of the way: set FRONTEND_PORT=4174 in .env
+      # on the deployed host, or `up` fails with "port is already allocated".
+      - "${PROXY_PORT:-4173}:80"
       - "80:80"
-      - "443:443"
-      - "443:443/udp"           # HTTP/3
-    environment:
-      # Compose interpolates this even when the profile is off, so it needs a
-      # default rather than a required marker. Keep it in step with
-      # `allowedHosts` in frontend/vite.config.js.
-      SITE_HOST: ${SITE_HOST:-assignment-hub.cskmitl.com}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data        # issued certificates — must persist, or every
-                                # recreate re-requests one and hits Let's
-                                # Encrypt's rate limit (5 per domain per week)
+      - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - frontend

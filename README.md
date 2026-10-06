@@ -14,7 +14,7 @@
 | Auth | Google + Microsoft OAuth 2.0 (`google-auth-library`, `jose`, `express-session`) |
 | Database | MySQL 8.0 |
 | Container | Docker + Docker Compose |
-| HTTPS (เฉพาะตอน deploy) | Caddy 2 + Let's Encrypt (ออก cert อัตโนมัติ) |
+| HTTPS (เฉพาะตอน deploy) | Cloudflare + init.d gateway ข้างหน้า VM · Caddy 2 เป็น reverse proxy http ธรรมดาบน VM |
 
 ## โครงสร้าง services
 
@@ -24,10 +24,10 @@
 Browser  →  frontend (:4173, Vite)  →  backend (:3000, Express)  →  db (:3306, MySQL)
 ```
 
-**บนเซิร์ฟเวอร์ — เพิ่ม Caddy คุม TLS ข้างหน้า**
+**บนเซิร์ฟเวอร์ — HTTPS จบที่ Cloudflare แล้วผ่าน Caddy บน VM**
 
 ```
-Browser ──https:443──►  caddy  ──http──►  frontend  ──/api──►  backend  ──►  db
+Browser ──https──► Cloudflare ──► init.d ──http──► VM :4173 (caddy) ──► frontend ──/api──► backend ──► db
 ```
 
 frontend ไม่คุยกับ MySQL ตรงๆ — เรียก `/api/*` แล้ว Vite proxy ส่งต่อไป backend (ไม่ต้องตั้ง CORS)
@@ -443,68 +443,77 @@ assignment-hub/
 ## Deploy บนเซิร์ฟเวอร์ (HTTPS ผ่านโดเมน)
 
 ค่า default ทั้งหมดตั้งไว้สำหรับ `localhost:4173` — local dev ไม่ต้องแตะอะไรเลย
-ส่วนบนเซิร์ฟเวอร์จะใช้ **Caddy** เป็น TLS reverse proxy ออก cert Let's Encrypt ให้อัตโนมัติและต่ออายุเอง
 
 **ทำไมต้อง HTTPS:** Google ไม่รับ OAuth redirect URI ที่เป็น `http://` กับโดเมนจริง (อนุญาตเฉพาะ `localhost`)
-ลงทะเบียนใน Console ไม่ได้ตั้งแต่แรก ดังนั้น login จะใช้งานไม่ได้เลยถ้าไม่มี TLS
 
-### 1. DNS
+### เส้นทางของ request บน VM จริง
 
-โดเมนต้อง resolve มาที่ IP ของเซิร์ฟเวอร์ **ก่อน** ขอ cert (Let's Encrypt ตรวจผ่าน HTTP-01 challenge บนพอร์ต 80)
-
-```bash
-dig +short assignment-hubb.duckdns.org      # ต้องได้ IP ของ VM
+```
+Browser ──https──► Cloudflare ──► init.d gateway ──http──► VM :4173 ──► Caddy :80 ──► frontend :4173 ──/api──► backend
+                   (ถือ cert)      (192.168.15.225)                      (ในเครื่อง)
 ```
 
-### 2. เปิด firewall TCP 80 + 443
+- **HTTPS จบที่ Cloudflare** — Caddy ไม่ได้ขอ cert เอง (ขอไม่ได้ด้วย เพราะ Let's Encrypt ไปเจอ Cloudflare ไม่ถึง VM)
+- **init.d ส่งต่อมาที่พอร์ต 4173 ของ VM แบบตายตัว** เราแก้ฝั่งนั้นไม่ได้ จึงให้ Caddy รับพอร์ต 4173 แทน
+  แล้วย้ายพอร์ตของ frontend บน host ไป 4174 (`FRONTEND_PORT`)
+- **Caddy ใส่ `X-Forwarded-Proto: https` ให้ทุก request** — ถ้าไม่ใส่ backend จะคิดว่าเป็น http
+  แล้วไม่ตั้ง session cookie (`Secure`) → login แล้วเด้งกลับ `/login`
 
-```bash
-gcloud compute firewall-rules create allow-web --allow=tcp:80,tcp:443 --source-ranges=0.0.0.0/0
-```
-
-พอร์ต 80 จำเป็นแม้จะใช้ https เพราะ ACME challenge วิ่งผ่านมันและ Caddy ใช้ redirect ไป https
-
-### 3. สร้างไฟล์ `.env` ที่ root
+### 1. สร้างไฟล์ `.env` ที่ root
 
 (คนละไฟล์กับ `.env.local` — อันนี้ Docker Compose อ่านเอง, git-ignored เหมือนกัน)
 
 ```env
-SITE_HOST=assignment-hubb.duckdns.org
-PUBLIC_URL=https://assignment-hubb.duckdns.org
+PUBLIC_URL=https://assignment-hub.cskmitl.com
 BIND=127.0.0.1
-HMR_CLIENT_PORT=443
+FRONTEND_PORT=4174
 ```
 
-`BIND=127.0.0.1` ทำให้พอร์ต frontend/backend/db ไม่โผล่ออกอินเทอร์เน็ต เหลือแค่ Caddy ที่ 80/443
+| ค่า | ถ้าไม่ใส่ |
+|---|---|
+| `PUBLIC_URL` | login เด้งกลับไป `http://localhost:4173` เพราะ redirect URI ใช้ค่า default |
+| `BIND=127.0.0.1` | MySQL (`root123`) และ backend เปิดให้เครื่องอื่นในวง `192.168.15.x` เข้าได้ |
+| `FRONTEND_PORT=4174` | `up` ล้มด้วย `port is already allocated` เพราะชนกับ Caddy ที่ 4173 |
 
 เมื่อ `PUBLIC_URL` เป็น `https://` จะมีผลตามมาอัตโนมัติ 2 อย่าง:
 - **`.env.local` ต้องมี `SESSION_SECRET`** — ถ้าไม่มี backend จะไม่ยอมสตาร์ท (ดู `docker compose logs backend`)
-- **session cookie ถูกตั้งเป็น `Secure`** — ถ้า login ผ่านหน้า consent แล้วเด้งกลับ `/login` แปลว่า cookie ไม่ถูกเซ็ต ดูรายละเอียดที่ [PROJECT_SETUP.md](PROJECT_SETUP.md#deploying-over-https)
+- **session cookie ถูกตั้งเป็น `Secure`** — ต้องพึ่ง header `X-Forwarded-Proto` ที่ Caddy ใส่ให้
 
 ทุก service ตั้ง `restart: unless-stopped` ไว้ ถ้า backend ล้มหรือ VM reboot ระบบจะกลับขึ้นมาเอง
+(ต้อง `sudo systemctl enable docker` ครั้งเดียว และอย่า `docker compose stop` ก่อนปิดเครื่อง)
 
-### 4. เพิ่มโดเมนใน `allowedHosts`
+### 2. เพิ่มโดเมนใน `allowedHosts`
 
 ที่ [`frontend/vite.config.js`](frontend/vite.config.js) ไม่งั้น Vite ตอบ `403 Blocked request`
+(ตอนนี้มี `assignment-hub.cskmitl.com` อยู่แล้ว)
 
-### 5. รันด้วย TLS profile
+### 3. รันด้วย profile `tls`
 
 ```bash
-docker compose --profile tls up -d --force-recreate
-docker compose logs -f caddy          # ดูว่าออก cert สำเร็จ
+docker compose --profile tls up -d --build
+docker compose ps                         # ต้อง Up ครบ 4 ตัว
+curl -sI http://127.0.0.1:4173/ | head -1 # ต้องได้ 200 — นี่คือทางที่ init.d เข้ามา
 ```
 
-Caddy ออก cert ภายในไม่กี่วินาที ถ้าเห็น `certificate obtained successfully` แปลว่าเรียบร้อย
+ชื่อ profile ยังเป็น `tls` จากของเดิม ถึง Caddy จะไม่ได้ทำ TLS แล้ว
 
-### 6. ลงทะเบียน redirect URI
+### 4. ลงทะเบียน redirect URI
 
 - **Google Cloud Console** → Credentials → OAuth client → `https://<โดเมน>/api/auth/google/callback`
 - **Azure Portal** → App registrations → Authentication → `https://<โดเมน>/api/auth/microsoft/callback`
 
 ต้องตรงเป๊ะทุกตัวอักษร ไม่งั้นได้ `redirect_uri_mismatch`
 
-> **cert เก็บใน named volume `caddy_data`** อย่าลบด้วย `docker compose down -v` โดยไม่จำเป็น
-> เพราะ Let's Encrypt จำกัด 5 cert ต่อโดเมนต่อสัปดาห์ ถ้าขอใหม่ทุกครั้งที่ recreate จะโดน rate limit
+### ถ้าเว็บขึ้น `502` ของ Cloudflare
+
+แปลว่า init.d ต่อเข้า VM ไม่ติด ดักดูว่ามันยิงเข้าพอร์ตไหน (แล้ว refresh เว็บ):
+
+```bash
+sudo tcpdump -ni eth0 'tcp[tcpflags] & tcp-syn != 0 and not port 22' -c 5
+```
+
+ต้องเห็น `> 192.168.15.206.4173` — ถ้าเป็นพอร์ตอื่น ให้ตั้ง `PROXY_PORT=<พอร์ตนั้น>` ใน `.env` แล้ว `up -d --force-recreate`
+ถ้าไม่มีอะไรขึ้นเลย init.d ไม่ได้ส่งมาที่ VM ตัวนี้
 
 ### อัปเดตโค้ดหลัง deploy แล้ว
 
@@ -534,13 +543,13 @@ backend ใช้ `node --watch` ส่วน frontend รัน **`vite preview
 | `docker compose up --build` | build + รันทั้งหมด (local dev) |
 | `docker compose --profile tls up -d` | รันพร้อม Caddy (บนเซิร์ฟเวอร์) |
 | `docker compose down` | หยุดทั้งหมด |
-| `docker compose down -v` | หยุด + ลบข้อมูล DB (ใช้เมื่อแก้ `init.sql`) — **ลบ `caddy_data` ด้วย** ระวังบนเซิร์ฟเวอร์ |
+| `docker compose down -v` | หยุด + ลบข้อมูล DB (ใช้เมื่อแก้ `init.sql`) — **บนเซิร์ฟเวอร์ข้อมูลผู้ใช้หายหมด** |
 | `docker compose rm -fsv <service>` | ลบ service + anonymous volume (ใช้ตอนเพิ่ม npm package) |
 | `docker compose logs -f backend` | ดู log backend |
 | `./migrate.sh` · `migrate.bat` | รัน migration ทั้งหมดกับ database ที่มีอยู่แล้ว |
 
 > `init.sql` รันเฉพาะตอนสร้าง database ครั้งแรก ถ้าแก้ไฟล์แล้ว table ไม่เปลี่ยน ให้ `docker compose down -v` ก่อนแล้ว `up` ใหม่
-> — แต่บนเซิร์ฟเวอร์ที่มี HTTPS แล้ว ให้ลบเฉพาะ db ด้วย `docker compose rm -fsv db` แทน ไม่งั้น cert หายไปด้วย
+> — **บนเซิร์ฟเวอร์อย่าทำ** ข้อมูลผู้ใช้ทั้งหมดจะหาย ให้เขียน migration แทน
 
 ## เจอปัญหาบ่อย
 
