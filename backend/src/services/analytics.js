@@ -27,7 +27,7 @@ const TASK_TYPES = new Set(['homework', 'project', 'quiz', 'exam', 'reading', 'o
 const TASK_STATUSES = new Set(['not_started', 'in_progress', 'submitted', 'completed']);
 const FILTER_TYPES = new Set(['platform', 'status']);
 const FILTER_VALUES = {
-  platform: new Set(['all', 'classroom', 'teams', 'manual']),
+  platform: new Set(['all', 'classroom', 'mstream', 'other', 'teams', 'manual']),
   status: new Set(['all', ...TASK_STATUSES]),
 };
 const PROVIDERS = new Set(['google', 'microsoft']);

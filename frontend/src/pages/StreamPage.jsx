@@ -4,7 +4,7 @@ import AssignmentTable from '../components/AssignmentTable';
 import AddTaskModal from '../components/AddTaskModal';
 import EditTaskModal from '../components/EditTaskModal';
 import useAssignments from '../useAssignments';
-import { withDerived } from '../tasks';
+import { matchesPlatform, PLATFORM_FILTERS, withDerived } from '../tasks';
 import { C, FONT, R, SHADOW } from '../theme';
 
 function StreamPage() {
@@ -30,22 +30,43 @@ function StreamPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState(null);
 
+  const [announcementPlatformFilter, setAnnouncementPlatformFilter] = useState('all');
   const [announcementCourseFilter, setAnnouncementCourseFilter] = useState('all');
+  const [assignmentPlatformFilter, setAssignmentPlatformFilter] = useState('all');
+  const [assignmentCourseFilter, setAssignmentCourseFilter] = useState('all');
 
   const rows = useMemo(() => withDerived(assignments), [assignments]);
   const now = new Date();
 
   const announcementCourses = useMemo(
-    () => [...new Set(announcements.map(a => a.course_name))],
-    [announcements]
+    () => [...new Set(announcements
+      .filter((a) => matchesPlatform(a, announcementPlatformFilter))
+      .map((a) => a.course_name)
+      .filter(Boolean))],
+    [announcements, announcementPlatformFilter]
   );
 
   const filteredAnnouncements = useMemo(
     () =>
       announcements.filter(
-        (a) => announcementCourseFilter === 'all' || a.course_name === announcementCourseFilter
+        (a) => matchesPlatform(a, announcementPlatformFilter)
+          && (announcementCourseFilter === 'all' || a.course_name === announcementCourseFilter)
       ),
-    [announcements, announcementCourseFilter]
+    [announcements, announcementCourseFilter, announcementPlatformFilter]
+  );
+
+  const assignmentCourses = useMemo(
+    () => [...new Set(rows
+      .filter((a) => matchesPlatform(a, assignmentPlatformFilter))
+      .map((a) => a.course_name)
+      .filter(Boolean))],
+    [rows, assignmentPlatformFilter]
+  );
+
+  const filteredAssignments = useMemo(
+    () => rows.filter((a) => matchesPlatform(a, assignmentPlatformFilter)
+      && (assignmentCourseFilter === 'all' || a.course_name === assignmentCourseFilter)),
+    [rows, assignmentCourseFilter, assignmentPlatformFilter]
   );
 
   // Fetch announcements from DB
@@ -107,18 +128,32 @@ function StreamPage() {
           <h2 style={styles.sectionTitle}>📢 ประกาศล่าสุด</h2>
 
           {!announcementsLoading && !announcementsError && announcements.length > 0 && (
-            <select
-              value={announcementCourseFilter}
-              style={styles.filterSelect}
-              onChange={(e) => setAnnouncementCourseFilter(e.target.value)}
-            >
-              <option value="all">ทุกรายวิชา</option>
-              {announcementCourses.map((course) => (
-                <option key={course} value={course}>
-                  {course}
-                </option>
-              ))}
-            </select>
+            <div style={styles.filterRow}>
+              <select
+                aria-label="กรองประกาศตามแพลตฟอร์ม"
+                value={announcementPlatformFilter}
+                style={styles.filterSelect}
+                onChange={(e) => {
+                  setAnnouncementPlatformFilter(e.target.value);
+                  setAnnouncementCourseFilter('all');
+                }}
+              >
+                {PLATFORM_FILTERS.map(({ key, label }) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+              <select
+                aria-label="กรองประกาศตามรายวิชา"
+                value={announcementCourseFilter}
+                style={styles.filterSelect}
+                onChange={(e) => setAnnouncementCourseFilter(e.target.value)}
+              >
+                <option value="all">ทุกรายวิชา</option>
+                {announcementCourses.map((course) => (
+                  <option key={course} value={course}>{course}</option>
+                ))}
+              </select>
+            </div>
           )}
 
           {announcementsLoading && <p style={styles.muted}>กำลังโหลดประกาศ…</p>}
@@ -173,15 +208,43 @@ function StreamPage() {
           )}
 
           {!assignmentsLoading && !assignmentsError && (
-            <AssignmentTable
-              assignments={rows}
-              now={now}
-              statusPending={statusPending}
-              statusErrors={statusErrors}
-              onStatusChange={changeStatus}
-              onEdit={handleEdit}
-              onDelete={deleteTask}
-            />
+            <>
+              <div style={styles.filterRow}>
+                <select
+                  aria-label="กรองงานตามแพลตฟอร์ม"
+                  value={assignmentPlatformFilter}
+                  style={styles.filterSelect}
+                  onChange={(e) => {
+                    setAssignmentPlatformFilter(e.target.value);
+                    setAssignmentCourseFilter('all');
+                  }}
+                >
+                  {PLATFORM_FILTERS.map(({ key, label }) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+                <select
+                  aria-label="กรองงานตามรายวิชา"
+                  value={assignmentCourseFilter}
+                  style={styles.filterSelect}
+                  onChange={(e) => setAssignmentCourseFilter(e.target.value)}
+                >
+                  <option value="all">ทุกรายวิชา</option>
+                  {assignmentCourses.map((course) => (
+                    <option key={course} value={course}>{course}</option>
+                  ))}
+                </select>
+              </div>
+              <AssignmentTable
+                assignments={filteredAssignments}
+                now={now}
+                statusPending={statusPending}
+                statusErrors={statusErrors}
+                onStatusChange={changeStatus}
+                onEdit={handleEdit}
+                onDelete={deleteTask}
+              />
+            </>
           )}
         </div>
 
@@ -291,6 +354,7 @@ const styles = {
   error: { color: C.pinkDark || '#d9381e', fontSize: 14 },
 
   filterSelect: {
+    flex: '1 1 200px',
     minWidth: 200,
     height: 40,
     padding: '0 14px',
@@ -304,6 +368,13 @@ const styles = {
     fontWeight: 500,
     cursor: 'pointer',
     outline: 'none',
+  },
+  filterRow: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 12,
   },
 };
 
