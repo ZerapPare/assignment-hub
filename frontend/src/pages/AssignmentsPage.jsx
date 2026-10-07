@@ -5,7 +5,7 @@ import AddTaskModal from '../components/AddTaskModal';
 import EditTaskModal from '../components/EditTaskModal';
 import useAssignments from '../useAssignments';
 import { trackClientEvent } from '../analytics';
-import { withDerived } from '../tasks';
+import { matchesPlatform, PLATFORM_FILTERS, withDerived } from '../tasks';
 import { C, FONT, R, SHADOW } from '../theme';
 
 function AssignmentsPage() {
@@ -30,6 +30,7 @@ function AssignmentsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState("all");
   const [courseFilter, setCourseFilter] = useState("all");
+  const [platformFilter, setPlatformFilter] = useState("all");
 
   useEffect(() => {
     if (!search.trim()) return undefined;
@@ -40,6 +41,11 @@ function AssignmentsPage() {
   }, [search]);
 
   const rows = useMemo(() => withDerived(assignments), [assignments]);
+  const courseOptions = useMemo(
+    () => [...new Set(assignments.filter((a) => matchesPlatform(a, platformFilter))
+      .map((a) => a.course_name).filter(Boolean))],
+    [assignments, platformFilter]
+  );
   // One `now` per render, so every row's urgency is measured against the same
   // instant. Nothing memoises on it, so a fresh value each time costs nothing.
   const now = new Date();
@@ -52,6 +58,8 @@ function AssignmentsPage() {
   const filteredTasks = rows
     .filter(a => statusFilter === "all" || a.status === statusFilter)
     .filter(a => courseFilter === "all" || a.course_name === courseFilter)
+    .filter((a) => matchesPlatform(a, platformFilter))
+
     .filter((a) => {
       if (!search) return true;
       const keyword = search.toLowerCase();
@@ -110,13 +118,31 @@ function AssignmentsPage() {
           </select>
 
           <select
+            value={platformFilter}
+            style={styles.filterSelect}
+            onChange={(e) => {
+              const value = e.target.value;
+              setPlatformFilter(value);
+              setCourseFilter('all');
+              void trackClientEvent('assignment.filter_used', {
+                filter_type: 'platform',
+                filter_value: value,
+              });
+            }}
+          >
+            {PLATFORM_FILTERS.map(({ key, label }) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+
+          <select
             value={courseFilter}
             style={styles.filterSelect}
             onChange={(e) => setCourseFilter(e.target.value)}
           >
             <option value="all">ทุกรายวิชา</option>
 
-            {[...new Set(assignments.map(a => a.course_name))].map(course => (
+            {courseOptions.map(course => (
               <option key={course} value={course}>
                 {course}
               </option>
@@ -207,11 +233,13 @@ const styles = {
   filterBar: {
     display: "flex",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 16,
     marginBottom: 18,
   },
 
   filterSelect: {
+    flex: "1 1 0",
     minWidth: 200,
     height: 40,
 
