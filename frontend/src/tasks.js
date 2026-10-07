@@ -35,7 +35,7 @@ export const isDone = (a) => DONE.includes(a.status);
 export const PLATFORM_FILTERS = [
   { key: 'all', label: 'ทุกแพลตฟอร์ม' },
   { key: 'classroom', label: 'Google Classroom' },
-  { key: 'mstream', label: 'MStream' },
+  { key: 'msteam', label: 'Microsoft Team' },
   { key: 'other', label: 'อื่นๆ' },
 ];
 
@@ -43,11 +43,11 @@ export const matchesPlatform = (item, platform) => {
   if (platform === 'all') return true;
   const source = String(item.platform_source || '').trim().toLowerCase();
   if (platform === 'classroom') return source.includes('google') || source.includes('classroom');
-  if (platform === 'mstream') return source.includes('mstream');
+  if (platform === 'msteam') return source.includes('msteam');
   return platform === 'other'
     && !source.includes('google')
     && !source.includes('classroom')
-    && !source.includes('mstream');
+    && !source.includes('msteam');
 };
 
 // API rows carry due_date as a string and may carry a status this build does
