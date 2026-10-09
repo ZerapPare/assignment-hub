@@ -76,7 +76,7 @@ router.get('/api/auth/microsoft', (req, res) => {
   url.searchParams.set('state', beginOAuth(req));
   // offline_access is what makes Microsoft return a refresh_token, like
   // Google's access_type: 'offline'.
-  url.searchParams.set('scope', 'openid email profile offline_access User.Read');
+  url.searchParams.set('scope', 'openid email profile offline_access User.Read EduAssignments.ReadBasic EduRoster.ReadBasic');
   res.redirect(url.toString());
 });
 
@@ -95,7 +95,7 @@ router.get('/api/auth/microsoft/callback', async (req, res) => {
         code,
         redirect_uri: MS_REDIRECT_URL,
         grant_type: 'authorization_code',
-        scope: 'openid email profile offline_access User.Read',
+        scope: 'openid email profile offline_access User.Read EduAssignments.ReadBasic EduRoster.ReadBasic',
       }),
     });
     const tokens = await tokenRes.json();
