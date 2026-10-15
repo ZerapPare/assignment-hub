@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  clearCurrentStudent,
+  getCurrentStudent,
+  setCurrentStudent,
+} from './studentProfile';
 
 // Debug switch: 'load' | 'status' | 'delete' forces that failure; anything
 // else is off. Remove this and its uses when the testing is done.
@@ -9,7 +14,7 @@ const TEST_ERROR = 'null';
 export default function useAssignments() {
   const navigate = useNavigate();
   const [assignments, setAssignments] = useState([]);
-  const [student, setStudent] = useState(null);
+  const [student, setStudent] = useState(getCurrentStudent);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -28,6 +33,7 @@ export default function useAssignments() {
     fetch('/api/me')
       .then((r) => {
         if (r.status === 401) {
+          clearCurrentStudent();
           navigate('/login');
           return null;
         }
@@ -36,6 +42,7 @@ export default function useAssignments() {
       })
       .then((me) => {
         if (!me) return null;
+        setCurrentStudent(me);
         setStudent(me);
         return fetch('/api/assignments').then((r) => {
           if (!r.ok) throw new Error('Backend not ready');
@@ -51,6 +58,7 @@ export default function useAssignments() {
 
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
+    clearCurrentStudent();
     navigate('/login');
   };
 
