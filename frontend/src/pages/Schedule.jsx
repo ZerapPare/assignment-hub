@@ -6,6 +6,7 @@ import Sidebar from '../components/Sidebar';
 import TaskList from '../components/TaskList';
 import LunchTimeSetting from '../components/LunchTimeSetting';
 import AutoScheduleButton from '../components/AutoScheduleButton';
+import AdPopup from '../components/AdPopup';
 import { GridIcon } from '../icons';
 
 import './Schedule.css';
@@ -17,6 +18,7 @@ export default function Schedule({ student, onLogout }) {
 	const [scheduleSettings, setScheduleSettings] = useState(null);
 	const [taskDurations, setTaskDurations] = useState({});
 	const [toast, setToast] = useState(null);
+	const [showAd, setShowAd] = useState(false);
 
 	const load = async () => {
 		try {
@@ -121,6 +123,7 @@ export default function Schedule({ student, onLogout }) {
 					{/* ✅ 2 ปุ่มบน header */}
 					<div className="schedule-header-actions">
 						<AutoScheduleButton
+							onClick={() => setShowAd(true)}
 							onBeforeGenerate={saveAll}
 							onGenerated={handleGenerated}
 						/>
@@ -147,6 +150,8 @@ export default function Schedule({ student, onLogout }) {
 					/>
 				</section>
 			</main>
+
+			<AdPopup open={showAd} onClose={() => setShowAd(false)} />
 
 			{toast && (
 				<div

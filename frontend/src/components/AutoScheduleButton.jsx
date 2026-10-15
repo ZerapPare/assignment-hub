@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import axios from 'axios';
 
-export default function AutoScheduleButton({ onBeforeGenerate, onGenerated }) {
+export default function AutoScheduleButton({ onClick, onBeforeGenerate, onGenerated }) {
 	const [loading, setLoading] = useState(false);
 
 	const handleClick = async () => {
+		onClick?.();
 		setLoading(true);
 		try {
 			if (onBeforeGenerate) {
