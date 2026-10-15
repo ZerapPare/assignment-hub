@@ -12,6 +12,7 @@ export default function useAssignments() {
   const [student, setStudent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
 
   // Per-row, not the page-level `error`, which blanks the screen. UC-5 ext 4a
   // wants the failure shown while the old status stays put.
@@ -89,14 +90,22 @@ export default function useAssignments() {
 
   const deleteTask = async (id) => {
     if (!window.confirm('คุณแน่ใจว่าต้องการลบงานนี้?')) return;
+    setDeleteError(null);
     try {
       if (TEST_ERROR === 'delete') throw new Error('ทดสอบ: ลบงานไม่สำเร็จ');
 
       const res = await fetch(`/api/assignments/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Delete failed');
+      if (res.status === 401) {
+        navigate('/login');
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || data?.message || 'ลบงานไม่สำเร็จ กรุณาลองอีกครั้ง');
+      }
       setAssignments((prev) => prev.filter((a) => a.assignment_id !== id));
     } catch (err) {
-      setError(err.message);
+      setDeleteError(err.message);
     }
   };
 
@@ -117,6 +126,7 @@ export default function useAssignments() {
     statusPending,
     statusErrors,
     changeStatus,
+    deleteError,
     deleteTask,
     saveEdit,
   };

@@ -19,6 +19,7 @@ function AssignmentsPage() {
     statusPending,
     statusErrors,
     changeStatus,
+    deleteError,
     deleteTask,
     saveEdit,
   } = useAssignments();
@@ -85,6 +86,7 @@ function AssignmentsPage() {
 
         {loading && <p style={styles.muted}>กำลังโหลด…</p>}
         {error && <p style={styles.error}>⚠️ {error} — รอ database พร้อม (10–20 วิ) แล้ว refresh</p>}
+        {deleteError && <p role="alert" style={styles.error}>⚠️ {deleteError}</p>}
 
         <div style={styles.searchBar}>
           <input
