@@ -116,10 +116,14 @@ function HomePage() {
     const progressPct = total ? Math.round(((submitted + completed) / total) * 100) : 0;
 
     const notDone = withDate.filter((a) => !isDone(a) && a.due);
-    const urgentCount = notDone.filter(
+    const urgentTasks = notDone.filter(
       (a) => a.due - now <= URGENT_H * HOUR && a.due - now >= 0
-    ).length;
-    const urgentList = [...notDone].sort((a, b) => a.due - b.due).slice(0, 3);
+    );
+    const urgentCount = urgentTasks.length;
+    const urgentList = notDone
+      .filter((a) => a.due - now >= 0)
+      .sort((a, b) => a.due - b.due)
+      .slice(0, 3);
 
     // Deliberately unfiltered by status: this one is a checklist, so finished
     // work stays visible with a tick and feeds the "เหลือ X จาก Y" counter.

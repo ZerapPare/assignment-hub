@@ -5,7 +5,7 @@ const BARS = [C.pink, C.blueMid, C.navy];
 
 function DeadlineList({ items = [] }) {
   if (items.length === 0) {
-    return <p style={styles.empty}>ไม่มีงานค้าง</p>;
+    return <p style={styles.empty}>ไม่มีงานที่ใกล้ถึงกำหนดส่ง</p>;
   }
 
   return (
