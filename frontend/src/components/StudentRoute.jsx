@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
+import { clearCurrentStudent, setCurrentStudent } from '../studentProfile';
 
 const ADMIN_PERMISSIONS = [
   'dashboard.view', 'user.read', 'user.suspend', 'error_log.read',
@@ -13,12 +14,20 @@ function StudentRoute() {
     let active = true;
     fetch('/api/me')
       .then((response) => {
-        if (response.status === 401) return { redirect: '/login' };
+        if (response.status === 401) {
+          clearCurrentStudent();
+          return { redirect: '/login' };
+        }
         if (!response.ok) throw new Error('Unable to verify account');
         return response.json();
       })
       .then((me) => {
         if (!active) return;
+        if (me.redirect) {
+          setState({ loading: false, redirect: me.redirect });
+          return;
+        }
+        setCurrentStudent(me);
         const isAdmin = (me.permissions || []).some((permission) =>
           ADMIN_PERMISSIONS.includes(permission)
         );
