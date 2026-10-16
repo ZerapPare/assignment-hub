@@ -1,7 +1,12 @@
 import React from 'react';
 import { C } from '../theme';
 
-const BARS = [C.pink, C.blueMid, C.navy];
+const STATUS_COLORS = {
+  completed: C.navy,
+  submitted: C.amber,
+  in_progress: C.pink,
+  not_started: C.blueMid,
+};
 
 function DeadlineList({ items = [] }) {
   if (items.length === 0) {
@@ -10,9 +15,9 @@ function DeadlineList({ items = [] }) {
 
   return (
     <div style={styles.list}>
-      {items.map((it, i) => (
+      {items.map((it) => (
         <div key={it.id} style={styles.item}>
-          <div style={{ ...styles.bar, background: BARS[i % BARS.length] }} />
+          <div style={{ ...styles.bar, background: STATUS_COLORS[it.status] || STATUS_COLORS.not_started }} />
           <div style={{ minWidth: 0 }}>
             <div style={styles.when}>
               {it.dateText}
