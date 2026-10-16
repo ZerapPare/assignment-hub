@@ -53,9 +53,9 @@ services:
       # not Vite's own 4173 — otherwise the browser console fills with failed
       # wss:// attempts. Empty in local dev, where the default is correct.
       VITE_HMR_CLIENT_PORT: ${HMR_CLIENT_PORT:-}
-    volumes:
-      - ./frontend:/app         # mount source for hot reload
-      - /app/node_modules       # keep container's installed modules
+    # volumes:
+    #   - ./frontend:/app         # mount source for hot reload
+    #   - /app/node_modules       # keep container's installed modules
 
   # Entry point on the deployed host. Opt-in: `docker compose --profile tls up -d`.
   # Plain http only — Cloudflare in front holds the certificate; see Caddyfile.
