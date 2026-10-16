@@ -44,17 +44,28 @@ function AssignmentTable({
               const hasError = !!statusErrors[a.assignment_id];
 
               return (
-                <tr key={a.assignment_id} style={styles.tr}>
+                <tr key={a.assignment_id} style={{ ...styles.tr, ...(hidden ? styles.hiddenRow : {}) }}>
                   <td style={styles.td}>
-                    <button
-                      type="button"
-                      style={styles.titleLink}
-                      onClick={() => navigate(`/assignments/${a.assignment_id}`)}
-                      title="ดูรายละเอียดงาน"
-                    >
-                      {a.title}
-                    </button>
-                    {hidden && <div style={styles.hiddenLabel}>ซ่อนแล้ว</div>}
+                    <div style={styles.taskHeading}>
+                      <button
+                        type="button"
+                        style={styles.titleLink}
+                        onClick={() => navigate(`/assignments/${a.assignment_id}`)}
+                        title="ดูรายละเอียดงาน"
+                      >
+                        {a.title}
+                      </button>
+                      {hidden && (
+                        <span style={styles.hiddenBadge} title="ซ่อนจาก Dashboard เท่านั้น ยังดูและจัดการงานได้ตามปกติ">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"
+                            strokeLinejoin="round" aria-hidden="true">
+                            <path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A11 11 0 0 1 12 5c7 0 10 7 10 7a16 16 0 0 1-3 4.1M6.5 6.5A17 17 0 0 0 2 12s3 7 10 7a11 11 0 0 0 5.5-1.5" />
+                          </svg>
+                          ซ่อนแล้ว
+                        </span>
+                      )}
+                    </div>
                   </td>
 
                   <td style={styles.td}>{a.course_name}</td>
@@ -157,6 +168,14 @@ const styles = {
     fontSize: 14,
     padding: 0,
     textAlign: 'left',
+  },
+  hiddenRow: { background: C.pageBg },
+  taskHeading: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  hiddenBadge: {
+    display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
+    padding: '4px 9px', borderRadius: R.pill,
+    border: `1px solid ${C.lineInput}`, background: C.card, color: C.navy,
+    fontSize: 11, fontWeight: 500, lineHeight: 1.4, whiteSpace: 'nowrap',
   },
   hiddenLabel: { fontSize: 12, color: C.muted, marginTop: 6 },
   statusCell: { display: 'flex', alignItems: 'center', gap: 6 },
