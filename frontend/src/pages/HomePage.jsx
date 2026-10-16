@@ -8,6 +8,7 @@ import DonutChart from '../components/DonutChart';
 import Sidebar from '../components/Sidebar';
 import StatCard from '../components/StatCard';
 import UrgentChecklist from '../components/UrgentChecklist';
+import { isDashboardVisible } from '../dashboardVisibility.mjs';
 import useAssignments from '../useAssignments';
 import { trackClientEvent } from '../analytics';
 import { HOUR, URGENT_H, fmtDate, fmtTime, isDone, withDerived } from '../tasks';
@@ -17,8 +18,15 @@ import AdPopup from '../components/AdPopup';
 import ToastNotification from '../components/ToastNotification';
 
 function HomePage() {
-  const { student, assignments, setAssignments, loading, error, setError, logout } =
-    useAssignments();
+  const {
+    student, assignments, setAssignments, loading, error, setError, logout,
+  } = useAssignments();
+  const [clock, setClock] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setClock(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const navigate = useNavigate();
 
@@ -115,7 +123,8 @@ function HomePage() {
     // groups submitted with completed).
     const progressPct = total ? Math.round(((submitted + completed) / total) * 100) : 0;
 
-    const notDone = withDate.filter((a) => !isDone(a) && a.due);
+    const visible = withDate.filter((a) => isDashboardVisible(a, now));
+    const notDone = visible.filter((a) => !isDone(a) && a.due);
     const urgentTasks = notDone.filter(
       (a) => a.due - now <= URGENT_H * HOUR && a.due - now >= 0
     );
@@ -128,7 +137,7 @@ function HomePage() {
     // Deliberately unfiltered by status: this one is a checklist, so finished
     // work stays visible with a tick and feeds the "เหลือ X จาก Y" counter.
     // UR26 is about not *notifying* — that's what notDone/urgentCount cover.
-    const checklist = withDate
+    const checklist = visible
       .filter((a) => a.due && a.due - now >= 0 && a.due - now <= URGENT_H * HOUR)
       .sort((a, b) => a.due - b.due)
       .slice(0, 5);
@@ -149,7 +158,7 @@ function HomePage() {
 
     return {
       now,
-      withDate,
+      visible,
       total,
       inProgress,
       submitted,
@@ -161,11 +170,11 @@ function HomePage() {
       checklist,
       week7,
     };
-  }, [assignments]);
+  }, [assignments, clock]);
 
   const eventsByDate = useMemo(() => {
     const map = new Map();
-    view.withDate
+    view.visible
       .filter((a) => a.due && a.due.getFullYear() === cal.year && a.due.getMonth() === cal.month)
       .forEach((a) => {
         const d = a.due.getDate();
@@ -173,12 +182,12 @@ function HomePage() {
         map.get(d).push(a);
       });
     return map;
-  }, [view.withDate, cal.year, cal.month]);
+  }, [view.visible, cal.year, cal.month]);
 
   const eventsByDayKey = useMemo(() => {
     const map = new Map();
 
-    view.withDate
+    view.visible
       .filter((assignment) => assignment.due)
       .forEach((assignment) => {
         const due = assignment.due;
@@ -189,7 +198,7 @@ function HomePage() {
       });
 
     return map;
-  }, [view.withDate]);
+  }, [view.visible]);
 
   const weekDays = useMemo(
     () =>

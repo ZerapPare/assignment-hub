@@ -23,6 +23,8 @@ export default function useAssignments() {
   // wants the failure shown while the old status stays put.
   const [statusPending, setStatusPending] = useState({});
   const [statusErrors, setStatusErrors] = useState({});
+  const [visibilityPending, setVisibilityPending] = useState({});
+  const [visibilityErrors, setVisibilityErrors] = useState({});
 
   useEffect(() => {
     if (TEST_ERROR === 'load') {
@@ -64,6 +66,7 @@ export default function useAssignments() {
   };
 
   const changeStatus = async (id, next) => {
+    if (statusPending[id] || visibilityPending[id]) return;
     setStatusErrors((prev) => {
       const { [id]: _dropped, ...rest } = prev;
       return rest;
@@ -93,6 +96,33 @@ export default function useAssignments() {
         const { [id]: _dropped, ...rest } = prev;
         return rest;
       });
+    }
+  };
+
+  const setDashboardHidden = async (id, hidden) => {
+    if (statusPending[id] || visibilityPending[id]) return;
+    setVisibilityErrors((prev) => ({ ...prev, [id]: null }));
+    setVisibilityPending((prev) => ({ ...prev, [id]: true }));
+    try {
+      const res = await fetch(`/api/assignments/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dashboard_hidden: hidden }),
+      });
+      if (res.status === 401) {
+        clearCurrentStudent();
+        navigate('/login');
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'บันทึกการซ่อนไม่สำเร็จ');
+      setAssignments((prev) => prev.map((a) => (
+        a.assignment_id === id ? { ...a, dashboard_hidden: data.dashboard_hidden } : a
+      )));
+    } catch (err) {
+      setVisibilityErrors((prev) => ({ ...prev, [id]: err.message }));
+    } finally {
+      setVisibilityPending((prev) => ({ ...prev, [id]: false }));
     }
   };
 
@@ -134,6 +164,9 @@ export default function useAssignments() {
     statusPending,
     statusErrors,
     changeStatus,
+    visibilityPending,
+    visibilityErrors,
+    setDashboardHidden,
     deleteError,
     deleteTask,
     saveEdit,

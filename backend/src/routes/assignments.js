@@ -25,6 +25,7 @@ const ASSIGNMENT_SELECT = `
          d.due_date,
          d.status,
          d.status_updated_at,
+         COALESCE(d.dashboard_hidden, 0) AS dashboard_hidden,
          d.priority_score,
 		 d.time_estimate,
          d.max_points,
@@ -128,6 +129,32 @@ router.post('/api/assignments', requireAuth, async (req, res) => {
 router.patch('/api/assignments/:id', requireAuth, async (req, res) => {
 	const id = Number(req.params.id);
 	if (!Number.isInteger(id)) return res.status(404).json({ error: 'not found' });
+
+	if (Object.prototype.hasOwnProperty.call(req.body || {}, 'dashboard_hidden')) {
+		if (typeof req.body.dashboard_hidden !== 'boolean' || Object.keys(req.body).length !== 1) {
+			return res.status(400).json({ error: 'ต้องระบุเฉพาะ dashboard_hidden เป็น true หรือ false' });
+		}
+		try {
+			const [owned] = await pool.query(
+				`SELECT a.assignment_id FROM Assignment a
+         JOIN Course c ON a.course_id = c.course_id
+         WHERE a.assignment_id = ? AND c.student_id = ? LIMIT 1`,
+				[id, req.session.userId]
+			);
+			if (!owned.length) return res.status(404).json({ error: 'not found' });
+
+			await pool.query(
+				`INSERT INTO Assignment_Detail (assignment_id, dashboard_hidden) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE dashboard_hidden = VALUES(dashboard_hidden)`,
+				[id, req.body.dashboard_hidden]
+			);
+			const [rows] = await pool.query(`${ASSIGNMENT_SELECT} WHERE a.assignment_id = ?`, [id]);
+			return res.json(rows[0]);
+		} catch (err) {
+			void logError(err, req, { source: 'assignments', statusCode: 503 });
+			return res.status(503).json({ error: 'บันทึกการซ่อนไม่สำเร็จ', request_id: req.requestId });
+		}
+	}
 
 	const assignmentSet = [];
 	const assignmentVals = [];

@@ -19,6 +19,9 @@ function AssignmentsPage() {
     statusPending,
     statusErrors,
     changeStatus,
+    visibilityPending,
+    visibilityErrors,
+    setDashboardHidden,
     deleteError,
     deleteTask,
     saveEdit,
@@ -162,6 +165,9 @@ function AssignmentsPage() {
             statusPending={statusPending}
             statusErrors={statusErrors}
             onStatusChange={changeStatus}
+            visibilityPending={visibilityPending}
+            visibilityErrors={visibilityErrors}
+            onDashboardHiddenChange={setDashboardHidden}
             onEdit={handleEdit}
             onDelete={deleteTask}
           />

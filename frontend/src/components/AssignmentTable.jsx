@@ -1,5 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { isDashboardHidden } from '../dashboardVisibility.mjs';
+import AssignmentActionsMenu from './AssignmentActionsMenu';
 import { C, FONT, R, SHADOW } from '../theme';
 
 function AssignmentTable({
@@ -7,6 +9,9 @@ function AssignmentTable({
   statusPending = {},
   statusErrors = {},
   onStatusChange,
+  visibilityPending = {},
+  visibilityErrors = {},
+  onDashboardHiddenChange,
   onEdit,
   onDelete,
 }) {
@@ -34,7 +39,8 @@ function AssignmentTable({
             </tr>
           ) : (
             assignments.map((a) => {
-              const isPending = !!statusPending[a.assignment_id];
+              const isPending = !!statusPending[a.assignment_id] || !!visibilityPending[a.assignment_id];
+              const hidden = isDashboardHidden(a);
               const hasError = !!statusErrors[a.assignment_id];
 
               return (
@@ -48,6 +54,7 @@ function AssignmentTable({
                     >
                       {a.title}
                     </button>
+                    {hidden && <div style={styles.hiddenLabel}>ซ่อนแล้ว</div>}
                   </td>
 
                   <td style={styles.td}>{a.course_name}</td>
@@ -101,21 +108,20 @@ function AssignmentTable({
                         </a>
                       )}
 
-                      {!a.platform_source && (
-                        <>
-                          <button type="button" style={styles.iconBtn} onClick={() => onEdit(a)}>
-                            แก้ไข
-                          </button>
-                          <button
-                            type="button"
-                            style={{ ...styles.iconBtn, color: C.pinkDark }}
-                            onClick={() => onDelete(a.assignment_id)}
-                          >
-                            ลบ
-                          </button>
-                        </>
-                      )}
+                      <AssignmentActionsMenu
+                        assignment={a}
+                        hidden={hidden}
+                        disabled={isPending}
+                        onHiddenChange={onDashboardHiddenChange}
+                        onEdit={onEdit}
+                        onDelete={onDelete}
+                      />
                     </div>
+                    {visibilityErrors[a.assignment_id] && (
+                      <p role="alert" style={{ ...styles.hiddenLabel, color: C.pinkDark }}>
+                        {visibilityErrors[a.assignment_id]}
+                      </p>
+                    )}
                   </td>
                 </tr>
               );
@@ -152,6 +158,7 @@ const styles = {
     padding: 0,
     textAlign: 'left',
   },
+  hiddenLabel: { fontSize: 12, color: C.muted, marginTop: 6 },
   statusCell: { display: 'flex', alignItems: 'center', gap: 6 },
   selectStatus: {
     padding: '6px 10px',
@@ -180,16 +187,6 @@ const styles = {
     textDecoration: 'none',
     whiteSpace: 'nowrap',
     boxShadow: SHADOW.primaryBtn,
-  },
-  iconBtn: {
-    border: 'none',
-    background: 'transparent',
-    cursor: 'pointer',
-    fontFamily: FONT,
-    fontSize: 13,
-    fontWeight: 500,
-    color: C.navy,
-    padding: 0,
   },
 };
 

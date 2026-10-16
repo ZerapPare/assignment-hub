@@ -239,6 +239,7 @@ CREATE TABLE Assignment_Detail (
     due_date          DATETIME,
     status            VARCHAR(50),
     status_updated_at DATETIME,
+    dashboard_hidden  BOOLEAN NOT NULL DEFAULT FALSE,
     priority_score    DECIMAL(5,2),
     time_estimate     INT,
     max_points        FLOAT DEFAULT NULL,

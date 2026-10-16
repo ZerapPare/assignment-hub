@@ -1,0 +1,57 @@
+.assignment-actions-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #1e3a5f;
+  cursor: pointer;
+}
+
+.assignment-actions-trigger:hover,
+.assignment-actions-trigger[aria-expanded='true'] {
+  background: #f5f6fa;
+}
+
+.assignment-actions-trigger:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.assignment-actions-trigger:focus-visible,
+.assignment-actions-item:focus-visible {
+  outline: 2px solid #1e3a5f;
+  outline-offset: 2px;
+}
+
+.assignment-actions-menu {
+  position: fixed;
+  z-index: 1000;
+  padding: 6px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(26, 31, 54, 0.12);
+}
+
+.assignment-actions-item {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assignment-actions-item:hover,
+.assignment-actions-item:focus {
+  background: #f5f6fa;
+}
