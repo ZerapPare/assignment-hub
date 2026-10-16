@@ -27,6 +27,14 @@ export default function Schedule() {
     invalidTasks: [],
   });
 
+  // State สำหรับควบคุม Problem Tasks Modal
+  const [problemModal, setProblemModal] = useState({
+    open: false,
+    title: "",
+    type: "late", // 'late' หรือ 'invalid'
+    tasks: [],
+  });
+
   const load = async () => {
     try {
       const { data } = await axios.get("/api/assignments?filter=active");
@@ -40,22 +48,49 @@ export default function Schedule() {
     load();
   }, []);
 
-  const showToast = (message, type = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+  // ฟังก์ชันเปิด Modal งานส่งไม่ทัน
+  const showLateTasksModal = (lateTasks) => {
+    setProblemModal({
+      open: true,
+      title: "ตรวจพบงานที่จะส่งไม่ทัน",
+      type: "late",
+      tasks: lateTasks,
+    });
   };
 
+  // ฟังก์ชันเปิด Modal งานที่ไม่ถูกต้อง (0 นาที)
+  const showInvalidTasksModal = (invalidTaskNames) => {
+    setProblemModal({
+      open: true,
+      title: "ไม่สามารถจัดตารางได้",
+      type: "invalid",
+      tasks: invalidTaskNames,
+    });
+  };
+
+  const showToast = (message, type = "success", detail = null) => {
+    setToast({ message, type, detail });
+    setTimeout(() => setToast(null), 4500);
+  };
+
+  // 1. ปรับฟังก์ชัน handleGenerated ให้แสดง Toast แจ้งสำเร็จแม้จะมี lateTasks
   const handleGenerated = (result) => {
     load();
     if (result?.error) {
       showToast(result.message, "error");
       return;
     }
-    const msg =
-      result?.failed > 0
-        ? `บันทึกและจัดตารางได้ ${result.scheduled}/${result.total} งาน`
-        : `บันทึกและจัดตารางสำเร็จ (${result?.scheduled || 0} งาน)`;
-    showToast(msg, result?.failed > 0 ? "error" : "success");
+
+    // แสดง Toast แจ้งจำนวนงานที่จัดสำเร็จเสมอ
+    showToast(
+      `บันทึกและจัดตารางสำเร็จ (${result?.scheduled || 0}/${result?.total || 0} งาน)`,
+      "success",
+    );
+
+    // หากมี lateTasks ให้เปิด Modal แสดงรายการเพิ่มเติม
+    if (result?.lateTasks?.length > 0) {
+      showLateTasksModal(result.lateTasks);
+    }
   };
 
   const handleSettingsChange = useCallback((settings) => {
@@ -71,14 +106,9 @@ export default function Schedule() {
   }, []);
 
   const saveAll = async () => {
+    // ตรวจสอบงานที่ระยะเวลาเป็น 0 นาที
     if (taskValidity.hasInvalid) {
-      const names = taskValidity.invalidTasks.slice(0, 3).join(", ");
-      showToast(
-        `ระยะเวลาต้องมากกว่า 0 นาที (${taskValidity.invalidTasks.length} งาน: ${names}${
-          taskValidity.invalidTasks.length > 3 ? "..." : ""
-        })`,
-        "error",
-      );
+      showInvalidTasksModal(taskValidity.invalidTasks);
       return false;
     }
 
@@ -176,6 +206,109 @@ export default function Schedule() {
 
       <AdPopup open={showAd} onClose={() => setShowAd(false)} />
 
+      {/* ============ PROBLEM TASKS MODAL ============ */}
+      {problemModal.open && (
+        <div className="modal-overlay">
+          <div className="modal-container">
+            <div className="modal-header">
+              <div className="modal-header-title">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#dc2626"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <h3>{problemModal.title}</h3>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() =>
+                  setProblemModal({ ...problemModal, open: false })
+                }
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {problemModal.type === "late" ? (
+                <>
+                  <p className="modal-description">
+                    มีทั้งหมด <strong>{problemModal.tasks.length} งาน</strong>{" "}
+                    ที่ไม่สามารถจัดลงตารางได้ทันกำหนดส่ง:
+                  </p>
+                  <ul className="problem-task-list">
+                    {problemModal.tasks.map((task, index) => (
+                      <li
+                        key={task.assignment_id || index}
+                        className="problem-task-item late-item"
+                      >
+                        <div className="task-main-info">
+                          <span className="task-title" title={task.title}>
+                            {task.title}
+                          </span>
+                        </div>
+                        {task.due_date && (
+                          <div className="task-due-badge">
+                            <span className="due-label">กำหนดส่ง</span>
+                            <span className="due-date">
+                              {new Date(task.due_date).toLocaleDateString(
+                                "th-TH",
+                                {
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  year: "numeric",
+                                },
+                              )}
+                            </span>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <>
+                  <p className="modal-description">
+                    กรุณาระบุระยะเวลาทำงานให้มากกว่า 0 นาที สำหรับงานต่อไปนี้:
+                  </p>
+                  <ul className="problem-task-list">
+                    {problemModal.tasks.map((name, index) => (
+                      <li
+                        key={index}
+                        className="problem-task-item invalid-item"
+                      >
+                        <span className="task-title">{name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                className="btn-primary"
+                onClick={() =>
+                  setProblemModal({ ...problemModal, open: false })
+                }
+              >
+                เข้าใจแล้ว
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ TOAST ============ */}
       {toast && (
         <div
           className={`schedule-toast ${
@@ -183,7 +316,14 @@ export default function Schedule() {
           }`}
         >
           <span>{toast.type === "error" ? "✕" : "✓"}</span>
-          <div>{toast.message}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div>{toast.message}</div>
+            {toast.detail && (
+              <div style={{ fontSize: 12, opacity: 0.9, fontWeight: 500 }}>
+                {toast.detail}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
