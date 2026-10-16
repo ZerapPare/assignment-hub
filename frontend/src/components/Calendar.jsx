@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { C, FONT, WEEKDAYS, TH_MONTHS } from '../theme';
 
+const STATUS_COLORS = {
+  completed: C.navy,
+  submitted: C.amber,
+  in_progress: C.pink,
+  not_started: C.blueMid,
+};
+
 function CalendarEvent({ event, onClick }) {
   const [isHovered, setIsHovered] = useState(false);
 
@@ -13,7 +20,11 @@ function CalendarEvent({ event, onClick }) {
       <button
         type="button"
         onClick={() => onClick?.(event)}
-        style={styles.eventBadge}
+        style={{
+          ...styles.eventBadge,
+          background: STATUS_COLORS[event.status] || STATUS_COLORS.not_started,
+          color: event.status === 'completed' ? 'white' : C.ink,
+        }}
       >
         {event.title}
       </button>
@@ -313,8 +324,6 @@ const styles = {
   },
   eventBadge: {
     fontSize: 10,
-    background: C.pinkBg,
-    color: C.pinkDark,
     cursor: 'pointer',
     padding: '3px 6px',
     border: 'none',

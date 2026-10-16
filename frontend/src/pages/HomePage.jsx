@@ -316,6 +316,7 @@ function HomePage() {
                     <DeadlineList
                       items={view.urgentList.map((a) => ({
                         id: a.assignment_id,
+                        status: a.status,
                         dateText: a.due ? fmtDate(a.due) : '—',
                         timeText: a.due ? fmtTime(a.due) : '',
                         title: a.title,
