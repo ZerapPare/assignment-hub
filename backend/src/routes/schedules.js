@@ -79,8 +79,10 @@ router.get('/api/schedule/weekly', requireAuth, async (req, res) => {
 });
 
 router.post('/api/schedule/generate', requireAuth, async (req, res) => {
-	const connection = await pool.getConnection();
+	let connection;
 	try {
+		connection = await pool.getConnection();
+
 		// 1. ลบ schedule เก่า
 		await connection.query(
 			`DELETE s FROM Schedule s
@@ -92,14 +94,14 @@ router.post('/api/schedule/generate', requireAuth, async (req, res) => {
 
 		// 2. ดึงงาน
 		const [assignments] = await connection.query(
-		`SELECT a.assignment_id, a.title, ad.due_date, ad.priority_score,
+			`SELECT a.assignment_id, a.title, ad.due_date, ad.priority_score,
 				COALESCE(ad.time_estimate, 60) AS duration
 		FROM Assignment a JOIN Course c ON a.course_id = c.course_id
 		LEFT JOIN Assignment_Detail ad ON a.assignment_id = ad.assignment_id
 		WHERE c.student_id = ?
 			AND (ad.status IS NULL OR ad.status NOT IN ('submitted', 'completed'))
 		ORDER BY ad.due_date IS NULL, ad.due_date ASC, duration DESC`,
-		[req.session.userId]
+			[req.session.userId]
 		);
 
 		if (assignments.length === 0) return res.json({ message: 'ไม่มีงานที่ต้องจัดตาราง', updated: [] });
@@ -240,9 +242,22 @@ router.post('/api/schedule/generate', requireAuth, async (req, res) => {
 						scheduledIntervals.push({ id: assign.assignment_id, start: new Date(seg.start), end: new Date(seg.end) });
 					}
 
+					const dueMs = assign.due_date ? new Date(assign.due_date).getTime() : null;
+					const isLate = dueMs !== null && lastEnd.getTime() > dueMs;
+					const lateByMinutes = isLate
+						? Math.round((lastEnd.getTime() - dueMs) / 60000)
+						: 0;
+
 					updated.push({
-						assignment_id: assign.assignment_id, title: assign.title,
-						start_time: firstStart, end_time: lastEnd, duration: totalDuration, segments,
+						assignment_id: assign.assignment_id,
+						title: assign.title,
+						start_time: firstStart,
+						end_time: lastEnd,
+						duration: totalDuration,
+						segments,
+						due_date: assign.due_date,
+						late: isLate,
+						lateByMinutes,
 					});
 				}
 			}
@@ -252,15 +267,28 @@ router.post('/api/schedule/generate', requireAuth, async (req, res) => {
 		const totalScheduled = updated.length;
 		const failed = totalWanted - totalScheduled;
 
-		let message = 'จัดตารางเสร็จสิ้น';
-		if (failed > 0) message = `จัดตารางแล้ว ${totalScheduled}/${totalWanted} งาน (มี ${failed} งานที่จัดไม่ได้)`;
+		const lateTasks = updated.filter((t) => t.late);
 
-		res.json({ message, updated, total: totalWanted, scheduled: totalScheduled, failed });
+		let message = 'จัดตารางเสร็จสิ้น';
+		if (failed > 0) {
+			message = `จัดตารางแล้ว ${totalScheduled}/${totalWanted} งาน (มี ${failed} งานที่จัดไม่ได้)`;
+		} else if (lateTasks.length > 0) {
+			message = `จัดตารางสำเร็จ แต่มี ${lateTasks.length} งานที่จะส่งไม่ทัน`;
+		}
+
+		res.json({
+			message,
+			updated,
+			lateTasks,
+			total: totalWanted,
+			scheduled: totalScheduled,
+			failed,
+		});
 	} catch (err) {
 		console.error('[schedule] generate failed:', err.code || err.message);
 		res.status(500).json({ error: 'ไม่สามารถสร้างตารางอัตโนมัติได้' });
 	} finally {
-		connection.release();
+		if (connection) connection.release();
 	}
 });
 

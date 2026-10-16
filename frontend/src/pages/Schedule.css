@@ -497,10 +497,24 @@
    ============================================================ */
 .duration-control {
 	display: flex;
-	align-items: center;
-	gap: 7px;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 4px;
 	flex-shrink: 0;
 	color: #667085;
+}
+
+.duration-inputs {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.duration-warning {
+	color: #ef4444;
+	font-size: 11px;
+	font-weight: 600;
+	text-align: right;
 }
 
 .duration-icon {
@@ -594,7 +608,7 @@
 	position: fixed;
 	top: var(--space-2xl);
 	right: var(--space-2xl);
-	z-index: 9999;
+	z-index: 55555;
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -671,6 +685,11 @@
 
 	.duration-control {
 		width: 100%;
+		align-items: flex-start;
+	}
+
+	.duration-warning {
+		text-align: left;
 	}
 
 	.save-button,
@@ -732,4 +751,191 @@
 		flex-direction: column;
 		gap: var(--space-xs);
 	}
+}
+
+/* ============ MODAL STYLING ============ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal-container {
+  background: #ffffff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 520px;
+  padding: 18px 20px 16px 20px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 10px;
+}
+
+.modal-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-header-icon {
+  font-size: 1.25rem;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #dc2626;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.modal-close-btn:hover {
+  background-color: #f1f5f9;
+  color: #334155;
+}
+
+.modal-body {
+  padding: 12x 0 4px 0;
+}
+
+.modal-description {
+  margin: 0 0 14px 0;
+  font-size: 0.95rem;
+  color: #475569;
+}
+
+/* Task List Container */
+.problem-task-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+/* Scrollbar Styling */
+.problem-task-list::-webkit-scrollbar {
+  width: 6px;
+}
+.problem-task-list::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+.problem-task-list::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+/* Task Card Item */
+.problem-task-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.925rem;
+}
+
+.problem-task-item.late-item {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.problem-task-item.invalid-item {
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+/* Task Info & Text Truncation */
+.task-main-info {
+  flex: 1;
+  min-width: 0; /* รองรับ text-overflow: ellipsis ใน Flexbox */
+}
+
+.task-title {
+  font-weight: 600;
+  color: #1e293b;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Due Date Badge */
+.task-due-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #fca5a5;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.due-label {
+  font-size: 0.75rem;
+  color: #7f1d1d;
+  font-weight: 500;
+}
+
+.due-date {
+  font-size: 0.825rem;
+  color: #991b1b;
+  font-weight: 600;
+}
+
+/* Modal Footer */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 12px;
+  margin-top: 6px;
+}
+
+.btn-primary {
+  background-color: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 6px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: background-color 0.2s;
+}
+
+.btn-primary:hover {
+  background-color: #1d4ed8;
 }

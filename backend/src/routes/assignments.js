@@ -267,6 +267,8 @@ router.delete('/api/assignments/:id', requireAuth, async (req, res) => {
 		const conn = await pool.getConnection();
 		try {
 			await conn.beginTransaction();
+			await conn.query('DELETE FROM Notification WHERE assignment_id = ?', [id]);
+			await conn.query('DELETE FROM Schedule WHERE assignment_id = ?', [id]);
 			await conn.query('DELETE FROM Assignment_Detail WHERE assignment_id = ?', [id]);
 			await conn.query('DELETE FROM Assignment WHERE assignment_id = ?', [id]);
 			await conn.commit();
@@ -283,9 +285,9 @@ router.delete('/api/assignments/:id', requireAuth, async (req, res) => {
 			conn.release();
 		}
 	} catch (err) {
-		void logError(err, req, { source: 'assignments', statusCode: 503 });
+		void logError(err, req, { source: 'assignments', statusCode: 500 });
 		console.error('[assignments] delete failed:', req.requestId, err.code || 'unknown');
-		res.status(503).json({ error: 'Database not ready', request_id: req.requestId });
+		res.status(500).json({ error: 'ลบงานไม่สำเร็จ กรุณาลองอีกครั้ง', request_id: req.requestId });
 	}
 });
 

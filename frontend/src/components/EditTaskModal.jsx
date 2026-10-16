@@ -8,28 +8,32 @@ function EditTaskModal({ open, onClose, assignment, onSave }) {
   const [courseName, setCourseName] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('');
+  const [deadlineChanged, setDeadlineChanged] = useState(false);
   const [taskType, setTaskType] = useState('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (assignment) {
+    if (open && assignment) {
       setTitle(assignment.title || '');
       setCourseName(assignment.course_name || '');
       const due = assignment.due_date ? new Date(assignment.due_date) : null;
       if (due) {
-        const local = new Date(due.getTime() - due.getTimezoneOffset() * 60000);
-        setDueDate(local.toISOString().split('T')[0]);
-        setDueTime(local.toTimeString().slice(0, 5));
+        const pad = (value) => String(value).padStart(2, '0');
+        setDueDate(
+          `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`
+        );
+        setDueTime(`${pad(due.getHours())}:${pad(due.getMinutes())}`);
       } else {
         setDueDate('');
         setDueTime('');
       }
+      setDeadlineChanged(false);
       setTaskType(assignment.task_type || '');
       setDescription(assignment.description || '');
     }
-  }, [assignment]);
+  }, [open, assignment]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -44,10 +48,10 @@ function EditTaskModal({ open, onClose, assignment, onSave }) {
     if (taskType) payload.task_type = taskType;
     if (description.trim()) payload.description = description.trim();
 
-    // Build due date string
-    if (dueDate) {
-      const combined = dueTime ? `${dueDate}T${dueTime}` : `${dueDate}T23:59`;
-      payload.due_date = combined;
+    if (deadlineChanged) {
+      payload.due_date = dueDate
+        ? `${dueDate}T${dueTime || '23:59'}`
+        : null;
     }
 
     setSubmitting(true);
@@ -100,7 +104,10 @@ function EditTaskModal({ open, onClose, assignment, onSave }) {
               <input
                 type="date"
                 value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
+                onChange={(e) => {
+                  setDueDate(e.target.value);
+                  setDeadlineChanged(true);
+                }}
                 style={styles.input}
               />
             </label>
@@ -109,7 +116,10 @@ function EditTaskModal({ open, onClose, assignment, onSave }) {
               <input
                 type="time"
                 value={dueTime}
-                onChange={(e) => setDueTime(e.target.value)}
+                onChange={(e) => {
+                  setDueTime(e.target.value);
+                  setDeadlineChanged(true);
+                }}
                 style={styles.input}
               />
             </label>

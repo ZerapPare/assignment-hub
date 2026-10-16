@@ -1,6 +1,9 @@
 import React from 'react';
 import { C, FONT, R, SHADOW } from '../theme';
 
+const AD_URL = 'https://assignmenthub1ad.my.canva.site/follow-your-gut';
+const AD_IMAGE = '/images/ad_images.png';
+
 function AdPopup({ open, onClose }) {
   if (!open) return null;
 
@@ -8,10 +11,10 @@ function AdPopup({ open, onClose }) {
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.banner} onClick={(e) => e.stopPropagation()}>
         <button style={styles.close} onClick={onClose}>✕</button>
-        <div style={styles.adSlot}>
+        <a href={AD_URL} target="_blank" rel="noopener noreferrer" style={styles.adSlot}>
           <span style={styles.adLabel}>Sponsored</span>
-          <p style={styles.adText}>ตัวอย่างพื้นที่โฆษณา 320×100</p>
-        </div>
+          <img src={AD_IMAGE} alt="โฆษณา Assignment Hub — คลิกเพื่อดูรายละเอียด" style={styles.adImage} />
+        </a>
       </div>
     </div>
   );
@@ -24,8 +27,9 @@ const styles = {
     zIndex: 1000,
   },
   banner: {
-    background: C.card, borderRadius: R.card, padding: 16,
-    width: 340, boxShadow: SHADOW.primaryBtn, position: 'relative',
+    background: C.card, borderRadius: R.card, padding: 20,
+    width: 'min(720px, calc(100vw - 32px))', boxSizing: 'border-box',
+    boxShadow: SHADOW.primaryBtn, position: 'relative',
     fontFamily: FONT,
   },
   close: {
@@ -33,11 +37,12 @@ const styles = {
     background: 'transparent', cursor: 'pointer', fontSize: 14, color: C.muted,
   },
   adSlot: {
-    background: C.pageBg, borderRadius: 8, padding: '20px 12px',
-    textAlign: 'center',
+    display: 'block',
+    background: C.pageBg, borderRadius: 8, overflow: 'hidden', marginTop: 12,
+    textAlign: 'center', textDecoration: 'none', cursor: 'pointer',
   },
   adLabel: { fontSize: 10, color: C.muted, letterSpacing: 0.5 },
-  adText: { fontSize: 13, color: C.ink, margin: '6px 0 0' },
+  adImage: { display: 'block', width: '100%', height: 'auto' },
 };
 
 export default AdPopup;

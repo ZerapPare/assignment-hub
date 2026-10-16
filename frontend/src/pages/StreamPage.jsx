@@ -18,6 +18,7 @@ function StreamPage() {
     statusPending,
     statusErrors,
     changeStatus,
+    deleteError,
     deleteTask,
     saveEdit,
   } = useAssignments();
@@ -206,6 +207,7 @@ function StreamPage() {
               ⚠️ {assignmentsError} — รอ database พร้อม (10–20 วิ) แล้ว refresh
             </p>
           )}
+          {deleteError && <p role="alert" style={styles.error}>⚠️ {deleteError}</p>}
 
           {!assignmentsLoading && !assignmentsError && (
             <>

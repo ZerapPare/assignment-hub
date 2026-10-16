@@ -5,6 +5,11 @@ import NotificationSettings from '../components/NotificationSettings';
 import GoogleIcon from '../icons/GoogleIcon';
 import MicrosoftIcon from '../icons/MicrosoftIcon';
 import { C, FONT, R } from '../theme';
+import {
+  clearCurrentStudent,
+  getCurrentStudent,
+  setCurrentStudent,
+} from '../studentProfile';
 
 const PLATFORMS = [
   {
@@ -24,7 +29,7 @@ const PLATFORMS = [
 function SettingsPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [me, setMe] = useState(null);
+  const [me, setMe] = useState(getCurrentStudent);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -39,6 +44,7 @@ function SettingsPage() {
     fetch('/api/me')
       .then((r) => {
         if (r.status === 401) {
+          clearCurrentStudent();
           navigate('/login');
           return null;
         }
@@ -47,6 +53,7 @@ function SettingsPage() {
       })
       .then((data) => {
         if (!data) return;
+        setCurrentStudent(data);
         setMe(data);
         setStudentId(data.student_id || '');
       })
@@ -56,6 +63,7 @@ function SettingsPage() {
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
+    clearCurrentStudent();
     navigate('/login');
   };
 
