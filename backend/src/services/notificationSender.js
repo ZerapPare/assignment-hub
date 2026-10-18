@@ -16,8 +16,7 @@ const MAX_ATTEMPTS = RETRY_MINUTES.length + 1; // the first send, plus one per r
 // unfinished tasks are not thirty mails. Overdue work stays in range.
 const DAILY_WINDOW_DAYS = 7;
 
-// Handed in, for FR-07.4. Deliberately narrower than DONE in frontend/src/tasks.js:
-// a task marked 'completed' (done, not yet handed in) still gets reminders.
+// 'completed' is done but not handed in, so it still needs reminders.
 const SENT_STATUSES = ['submitted'];
 const SENT_IN = SENT_STATUSES.map(() => '?').join(', ');
 

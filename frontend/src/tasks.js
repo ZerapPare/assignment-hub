@@ -32,8 +32,7 @@ export const STATUS_OPTIONS = Object.entries(STATUS).map(([value, s]) => ({
 export const DONE = ['submitted', 'completed'];
 export const isDone = (a) => DONE.includes(a.status);
 
-// Reminders stop only once a task is handed in: 'completed' means done but not
-// yet submitted, so it still gets mail. Matches SENT_STATUSES in the sender.
+// 'completed' is done but not handed in, so it still needs reminders.
 export const isSubmitted = (a) => a.status === 'submitted';
 
 export const PLATFORM_FILTERS = [
