@@ -16,6 +16,7 @@ import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } 
 import { C, FONT, R, SHADOW, WEEKDAYS } from '../theme';
 import AdPopup from '../components/AdPopup';
 import ToastNotification from '../components/ToastNotification';
+import { fetchRandomAdvertisement } from '../ads';
 
 function HomePage() {
   const {
@@ -60,14 +61,23 @@ function HomePage() {
     localStorage.setItem('classroomSyncCutoff', val);
   };
 
-  //ad
+  const [ad, setAd] = useState(null);
   const [showAd, setShowAd] = useState(false);
+
+  const showRandomAd = async () => {
+    try {
+      const selectedAd = await fetchRandomAdvertisement();
+      setAd(selectedAd);
+      setShowAd(Boolean(selectedAd));
+    } catch (err) {
+      console.error('Advertisement request failed:', err);
+    }
+  };
 
   const handleSync = async () => {
     setSyncing(true);
     setError(null);
-    //ad
-    setShowAd(true);
+    void showRandomAd();
     //Toast popup
     setSyncToast(null);
 
@@ -410,7 +420,7 @@ function HomePage() {
           onCreated={(a) => setAssignments((prev) => [...prev, a])}
         />
 
-        <AdPopup open={showAd} onClose={() => setShowAd(false)} />
+        <AdPopup ad={ad} open={showAd} onClose={() => setShowAd(false)} />
 
       </div>
     </div>

@@ -39,6 +39,7 @@ services:
       FRONTEND_URL: ${PUBLIC_URL:-http://localhost:4173}
     volumes:
       - ./backend:/app          # mount source for hot reload
+      - ./backend/uploads:/app/uploads # keep uploaded advertisement images across restarts
       - /app/node_modules       # keep container's installed modules
 
   frontend:
