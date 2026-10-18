@@ -23,6 +23,8 @@ function AdminAdsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
 
   const loadAds = useCallback(async () => {
@@ -92,15 +94,20 @@ function AdminAdsPage() {
     }
   };
 
-  const removeAd = async (ad) => {
-    if (!window.confirm(`ลบโฆษณา "${ad.title}" หรือไม่?`)) return;
+  const removeAd = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     setError(null);
     try {
-      await adminRequest(`/api/admin/ads/${ad.id}`, { method: 'DELETE' });
-      setAds((current) => current.filter((item) => item.id !== ad.id));
-      if (editing?.id === ad.id) startCreate();
+      await adminRequest(`/api/admin/ads/${deleteTarget.id}`, { method: 'DELETE' });
+      setAds((current) => current.filter((item) => item.id !== deleteTarget.id));
+      if (editing?.id === deleteTarget.id) startCreate();
+      setDeleteTarget(null);
     } catch (err) {
       setError(describeAdError(err));
+    }
+    finally {
+      setDeleting(false);
     }
   };
 
@@ -193,13 +200,39 @@ function AdminAdsPage() {
                     {ad.isActive ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}
                   </button>
                   <button type="button" onClick={() => startEdit(ad)} style={styles.secondaryButton}>แก้ไข</button>
-                  <button type="button" onClick={() => removeAd(ad)} style={styles.deleteButton}>ลบ</button>
+                  <button type="button" onClick={() => setDeleteTarget(ad)} style={styles.deleteButton}>ลบ</button>
                 </div>
               </article>
             ))}
           </div>
         )}
       </section>
+
+      {deleteTarget && (
+        <div
+          role="presentation"
+          style={styles.modalBackdrop}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !deleting) setDeleteTarget(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && !deleting) setDeleteTarget(null);
+          }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="delete-ad-title" style={styles.deleteModal}>
+            <div style={styles.deleteIcon} aria-hidden="true">!</div>
+            <div style={styles.modalKicker}>ยืนยันการลบโฆษณา</div>
+            <h2 id="delete-ad-title" style={styles.modalTitle}>ต้องการลบโฆษณานี้หรือไม่?</h2>
+            <p style={styles.modalText}>โฆษณา <strong style={styles.deleteName}>“{deleteTarget.title}”</strong> จะถูกลบและไม่สามารถกู้คืนได้</p>
+            <div style={styles.modalActions}>
+              <button type="button" autoFocus onClick={() => setDeleteTarget(null)} disabled={deleting} style={styles.cancelButton}>ยกเลิก</button>
+              <button type="button" onClick={removeAd} disabled={deleting} style={styles.confirmDeleteButton}>
+                {deleting ? 'กำลังลบ…' : 'ลบโฆษณา'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -234,6 +267,16 @@ const styles = {
   link: { color: C.navy, fontFamily: FONT, fontSize: 11, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   status: { borderRadius: 99, fontFamily: FONT, fontSize: 10.5, fontWeight: 700, marginTop: 3, padding: '3px 8px' },
   rowActions: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' },
+  modalBackdrop: { position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: 20, background: 'rgba(20,40,63,.48)', backdropFilter: 'blur(3px)' },
+  deleteModal: { width: 'min(420px, 100%)', boxSizing: 'border-box', border: `1px solid ${C.line}`, borderRadius: 18, background: C.card, boxShadow: '0 24px 70px rgba(20,40,63,.28)', fontFamily: FONT, padding: '30px 28px 24px', textAlign: 'center' },
+  deleteIcon: { display: 'grid', placeItems: 'center', width: 48, height: 48, margin: '0 auto 15px', borderRadius: '50%', background: C.pinkBg, color: C.pinkDark, fontFamily: 'sans-serif', fontSize: 26, fontWeight: 700 },
+  modalKicker: { color: C.pinkDark, fontSize: 11, fontWeight: 700, letterSpacing: '.06em' },
+  modalTitle: { color: C.ink, fontSize: 19, lineHeight: 1.4, margin: '7px 0 9px' },
+  modalText: { color: C.body, fontSize: 13, lineHeight: 1.7, margin: 0, overflowWrap: 'anywhere' },
+  deleteName: { color: C.ink, fontWeight: 700 },
+  modalActions: { display: 'flex', justifyContent: 'center', gap: 10, marginTop: 24 },
+  cancelButton: { border: `1px solid ${C.lineInput}`, borderRadius: R.pill, background: C.card, color: C.navy, cursor: 'pointer', fontFamily: FONT, fontSize: 12.5, fontWeight: 700, padding: '9px 18px' },
+  confirmDeleteButton: { border: 0, borderRadius: R.pill, background: C.pinkDark, color: '#fff', cursor: 'pointer', fontFamily: FONT, fontSize: 12.5, fontWeight: 700, padding: '9px 18px' },
 };
 
 export default AdminAdsPage;
