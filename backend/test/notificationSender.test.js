@@ -87,6 +87,7 @@ function createFakeDb({
     state,
     async query(sql, params) {
       if (sql.includes('DELETE n FROM Notification')) {
+        assert.deepEqual(params, ['submitted']);
         state.cancelCalls++;
         return [{ affectedRows: cancelled }, []];
       }
@@ -95,9 +96,11 @@ function createFakeDb({
         return [announcementRetries, []];
       }
       if (sql.includes('FROM Notification n')) {
+        assert.deepEqual(params, [MAX_ATTEMPTS, 'submitted']);
         return [retries, []];
       }
       if (sql.includes('ns.daily_repeat = TRUE')) {
+        assert.deepEqual(params, ['submitted', DAILY_WINDOW_DAYS, DAILY_WINDOW_DAYS]);
         return [daily, []];
       }
       if (sql.includes('announcement_notify')) {
@@ -105,6 +108,7 @@ function createFakeDb({
       }
       // Notification_Lead_Time is the one table only the lead query names.
       if (sql.includes('Notification_Lead_Time')) {
+        assert.deepEqual(params, [DEFAULT_LEAD_MINUTES, 'submitted']);
         return [candidates, []];
       }
       if (sql.includes('INSERT IGNORE INTO Notification')) {

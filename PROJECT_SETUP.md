@@ -240,9 +240,10 @@ Two details of that control matter:
   a rejected change shows its message inside that one row and leaves the old status visible.
   The page-level `error` state is deliberately not used here — the body renders only when
   `!error`, so reusing it would blank the whole page over one failed dropdown (UC-5 ext 4a).
-- **`submitted` and `completed` both count as done on screen.** `DONE`/`isDone` in `tasks.js`
-  drop them from the dashboard's urgent card and 48h checklist (UR26), and the auto-scheduler
-  skips them too.
+- **Work completion and submission are separate.** Both `submitted` and `completed` count
+  toward work completion and are skipped by the auto-scheduler. Deadline lists, urgency,
+  weekly deadline markers and checklist ticks use submission instead: `completed` still
+  needs to be handed in, and only `submitted` is checked off.
 - **Reminder emails stop only at `submitted`.** A `completed` task is finished but not handed
   in, so it keeps getting mail. That is `SENT_STATUSES` in `notificationSender.js` and
   `isSubmitted` in `tasks.js` — deliberately narrower than `DONE`.
@@ -457,19 +458,14 @@ else is `400`. The write is an upsert (`INSERT … ON DUPLICATE KEY UPDATE`) rat
 `UPDATE`, because the list query `LEFT JOIN`s `Assignment_Detail` — a row without one is
 possible, and a plain `UPDATE` would match nothing and still report `status: null` back.
 
-It also stamps `Assignment_Detail.status_updated_at = NOW()`, and **that column is what
-divides ownership of the field**:
+It also stamps `Assignment_Detail.status_updated_at = NOW()`. Manual assignments allow all
+four statuses. For imported assignments, the API rejects manual transitions into or out of
+`submitted`; Classroom owns submission, while the student owns unfinished-work progress.
 
-- While `status_updated_at IS NULL`, Classroom may seed the status — a sync writes
-  `submitted` for coursework it reports as `TURNED_IN` or `RETURNED`.
-- Once the student picks a status by hand the column goes non-`NULL`, and the sync's
-  `UPDATE … WHERE status_updated_at IS NULL` stops matching that row forever. Without that
-  predicate every sync would silently undo the student's choice.
-
-`TURNED_IN`/`RETURNED` seed `submitted`, never `completed`. The two are distinct on purpose:
-handed in is something Google can observe, finished is a judgement only the student makes.
-`routes/assignments.js` and `routes/classroom.js` both hold the status list — change one and
-you must change the other.
+A successful sync reporting `TURNED_IN`/`RETURNED` sets `submitted` regardless of earlier
+manual edits. A known unsent state (`NEW`, `CREATED`, `RECLAIMED_BY_STUDENT`) changes an old
+`submitted` to `completed`, preserving that the work was finished but now needs handing in.
+Other local progress stays unchanged. An unavailable submission state never resets status.
 
 `POST /api/classroom/sync` takes `{ "cutoffDate": "YYYY-MM-DD" | null }` and returns
 `{ ok, coursesSynced, assignmentsSynced, announcementsSynced, deletedCount, skippedCourses }`.
@@ -881,9 +877,9 @@ and `Course.platform_source IS NULL` is what marks a course as manually created.
 Two columns are load-bearing in the same way. `Assignment.task_type` holds one of
 `homework | project | quiz | exam | reading | other` (validated in the API, not the schema)
 and is `NULL` for synced coursework, which carries no equivalent. `Assignment_Detail.status_updated_at`
-is `NULL` until the student sets a status by hand, and the Classroom sync reads that `NULL`
-as permission to write status — so the column is a flag about *who owns the field*, not just
-an audit timestamp. Never backfill it. `Assignment_Detail.dashboard_hidden` (`NOT NULL DEFAULT FALSE`)
+is `NULL` until the student sets a status by hand, then records that edit's time. Classroom
+submission updates are authoritative regardless of that timestamp.
+`Assignment_Detail.dashboard_hidden` (`NOT NULL DEFAULT FALSE`)
 is the student's other private flag — written only by the hide menu, never by the sync.
 
 `Notification_Setting` is 1:1 with `User_Account` and holds the reminder preferences;
@@ -1014,10 +1010,8 @@ docker compose exec db mysql -uroot -proot123 assignment_hub \
   -e "DESCRIBE Assignment; DESCRIBE Assignment_Detail; SHOW INDEX FROM University; SHOW INDEX FROM User_Account;"
 ```
 
-> `003` is the one to watch on a database that already holds synced rows: leave
-> `status_updated_at` `NULL` everywhere. Filling it in — for instance to "record" when rows
-> were imported — permanently stops the Classroom sync from updating any status, because
-> non-`NULL` is exactly the signal that the student has taken the field over.
+> `003` adds `status_updated_at`; it records manual edits, not import time. The timestamp
+> no longer blocks Classroom submission updates.
 
 ## Tests
 
@@ -1165,14 +1159,14 @@ different machine.
 
   Empty output means recreating the volume (`docker compose down -v`, then up) is currently the only fix — the data can be synced back from Classroom.
 - **`./migrate.sh` prints a wall of `Duplicate column name` errors** — expected on a database that already has those columns. The migrations are unguarded `ALTER`s and the script doesn't stop on error, so the files that *are* missing still apply. Check the schema rather than the output: `docker compose exec db mysql -uroot -proot123 assignment_hub -e "DESCRIBE Assignment_Detail; SHOW TABLES LIKE 'Announcement';"`.
-- **A status set by hand reverts after the next Classroom sync** — the sync only skips rows whose `status_updated_at` is non-`NULL`, so a status that keeps getting overwritten means the column never got stamped. Check the row directly:
+- **A finished task becomes submitted after Classroom sync** — expected when Classroom reports it as handed in. Check the stored progress and last manual edit directly:
 
   ```bash
   docker compose exec db mysql -uroot -proot123 assignment_hub -e \
     "SELECT assignment_id, status, status_updated_at FROM Assignment_Detail WHERE assignment_id = <id>;"
   ```
 
-  `status_updated_at` still `NULL` after a successful-looking dropdown change means the `PATCH /api/assignments/:id/status` write did not land — check `docker compose logs backend` for `[assignments] status update failed`. The mirror image of this bug is a status that *never* updates from Classroom, which is what backfilling the column causes.
+  `status_updated_at` still `NULL` after a successful-looking dropdown change means the `PATCH /api/assignments/:id/status` write did not land — check `docker compose logs backend` for `[assignments] status update failed`. A non-`NULL` timestamp does not prevent a later submission update.
 - **`getaddrinfo ENOTFOUND db`** — the stack started in a bad state. `docker compose down` then `docker compose up -d --force-recreate`.
 - **Frontend loads but shows "waiting for database"** — MySQL is still initializing on first run; wait ~15s and refresh.
 - **`Error: Cannot find module '<pkg>'` after a new dependency was added** — the `/app/node_modules` anonymous volume survives container recreation and shadows the `node_modules` baked into the freshly built image, so `--force-recreate` and even `docker compose down` + `up --build` do **not** fix it. Drop the volume for that one service:

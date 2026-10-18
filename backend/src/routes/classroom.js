@@ -148,8 +148,14 @@ router.post('/api/classroom/sync', requireAuth, async (req, res) => {
           );
           if (isFinished) {
             await pool.query(
-              'UPDATE Assignment_Detail SET status = ? WHERE assignment_id = ? AND status_updated_at IS NULL',
+              'UPDATE Assignment_Detail SET status = ? WHERE assignment_id = ?',
               ['submitted', assignmentId]
+            );
+          } else if (['NEW', 'CREATED', 'RECLAIMED_BY_STUDENT'].includes(submissionState)) {
+            // Work is still finished when a submission is withdrawn, but is no longer handed in.
+            await pool.query(
+              "UPDATE Assignment_Detail SET status = ? WHERE assignment_id = ? AND status = 'submitted'",
+              ['completed', assignmentId]
             );
           }
           assignmentsUpdated++;

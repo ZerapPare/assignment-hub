@@ -72,7 +72,7 @@ function AdminUserDetailPage() {
         </section>
         <section style={styles.card}>
           <h2 style={styles.cardTitle}>สรุปการใช้งาน</h2>
-          <div style={styles.usageGrid}><Metric label="รายวิชา" value={usage.course_count ?? user?.course_count} /><Metric label="งานทั้งหมด" value={usage.assignment_count ?? user?.assignment_count} /><Metric label="ยังไม่เริ่ม" value={usage.not_started ?? usage.not_started_count} /><Metric label="กำลังทำ" value={usage.in_progress ?? usage.in_progress_count} /><Metric label="ส่งแล้ว" value={usage.submitted ?? usage.submitted_count} /><Metric label="เสร็จแล้ว" value={usage.completed ?? usage.completed_count} /></div>
+          <div style={styles.usageGrid}><Metric label="รายวิชา" value={usage.course_count ?? user?.course_count} /><Metric label="งานทั้งหมด" value={usage.assignment_count ?? user?.assignment_count} /><Metric label="ยังไม่เริ่ม" value={usage.not_started ?? usage.not_started_count} /><Metric label="กำลังทำ" value={usage.in_progress ?? usage.in_progress_count} /><Metric label="เสร็จ" value={usage.completed ?? usage.completed_count} /><Metric label="ส่งแล้ว" value={usage.submitted ?? usage.submitted_count} /></div>
         </section>
       </div>
 

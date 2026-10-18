@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { isDashboardHidden } from '../dashboardVisibility.mjs';
 import AssignmentActionsMenu from './AssignmentActionsMenu';
 import { C, FONT, R, SHADOW } from '../theme';
-import { STATUS_OPTIONS } from '../tasks';
+import { STATUS_OPTIONS, isSubmissionManaged, isSubmitted } from '../tasks';
 
 function AssignmentTable({
   assignments = [],
@@ -90,7 +90,8 @@ function AssignmentTable({
                     <div style={styles.statusCell}>
                       <select
                         value={a.status || 'not_started'}
-                        disabled={isPending}
+                        disabled={isPending || (isSubmissionManaged(a) && isSubmitted(a))}
+                        title={isSubmissionManaged(a) ? 'สถานะส่งแล้วอัปเดตจากแพลตฟอร์มเมื่อซิงก์' : undefined}
                         onChange={(e) => onStatusChange(a.assignment_id, e.target.value)}
                         style={{
                           ...styles.selectStatus,
@@ -98,7 +99,7 @@ function AssignmentTable({
                         }}
                       >
                         {STATUS_OPTIONS.map(({ value, label }) => (
-                          <option key={value} value={value}>{label}</option>
+                          <option key={value} value={value} disabled={value === 'submitted' && isSubmissionManaged(a)}>{label}</option>
                         ))}
                       </select>
                       {hasError && <span style={styles.errorText}>⚠️</span>}
