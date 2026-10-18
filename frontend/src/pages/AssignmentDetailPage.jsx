@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import useAssignments from '../useAssignments';
 import { C, FONT, R, SHADOW } from '../theme';
-import { STATUS_OPTIONS } from '../tasks';
+import { STATUS_OPTIONS, isSubmissionManaged, isSubmitted } from '../tasks';
 
 function AssignmentDetailPage() {
   const { id } = useParams();
@@ -82,11 +82,13 @@ function AssignmentDetailPage() {
                 <span style={styles.metaLabel}>📌 สถานะ</span>
                 <select
                   value={assignment.status || 'not_started'}
+                  disabled={isSubmissionManaged(assignment) && isSubmitted(assignment)}
+                  title={isSubmissionManaged(assignment) ? 'สถานะส่งแล้วอัปเดตจากแพลตฟอร์มเมื่อซิงก์' : undefined}
                   onChange={(e) => changeStatus(assignment.assignment_id, e.target.value)}
                   style={styles.selectStatus}
                 >
                   {STATUS_OPTIONS.map(({ value, label }) => (
-                    <option key={value} value={value}>{label}</option>
+                    <option key={value} value={value} disabled={value === 'submitted' && isSubmissionManaged(assignment)}>{label}</option>
                   ))}
                 </select>
               </div>

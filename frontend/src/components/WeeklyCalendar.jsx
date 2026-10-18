@@ -19,7 +19,7 @@ const TOOLTIP_HEIGHT = 180;
 const TOOLTIP_GAP = 10;
 const VIEWPORT_MARGIN = 10;
 
-const DONE_STATUSES = new Set(['submitted', 'completed']);
+const SENT_STATUSES = new Set(['submitted']);
 const DEFAULT_DURATION_MINUTES = 60;
 
 // Date / Time utilities
@@ -161,7 +161,7 @@ function splitTaskByDay(task) {
 }
 
 function createDeadlineSegment(task) {
-  if (!task?.due_date || DONE_STATUSES.has(task.status)) return null;
+  if (!task?.due_date || SENT_STATUSES.has(task.status)) return null;
 
   const due = new Date(task.due_date);
   const parts = getThailandParts(due);

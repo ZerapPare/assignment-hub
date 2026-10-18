@@ -11,7 +11,7 @@ import UrgentChecklist from '../components/UrgentChecklist';
 import { isDashboardVisible } from '../dashboardVisibility.mjs';
 import useAssignments from '../useAssignments';
 import { trackClientEvent } from '../analytics';
-import { HOUR, URGENT_H, fmtDate, fmtTime, isDone, withDerived } from '../tasks';
+import { HOUR, URGENT_H, fmtDate, fmtTime, isSubmitted, withDerived } from '../tasks';
 import { PencilIcon, SpinnerIcon, CheckCircleIcon, HourglassIcon, RefreshIcon } from '../icons';
 import { C, FONT, R, SHADOW, WEEKDAYS } from '../theme';
 import AdPopup from '../components/AdPopup';
@@ -119,12 +119,11 @@ function HomePage() {
     const completed = withDate.filter((a) => a.status === 'completed').length;
     const notStarted = withDate.filter((a) => a.status === 'not_started').length;
 
-    // UR15: overall completion, where handed-in work already counts (UR26
-    // groups submitted with completed).
+    // Work completion includes handed-in work; submission is tracked separately.
     const progressPct = total ? Math.round(((submitted + completed) / total) * 100) : 0;
 
     const visible = withDate.filter((a) => isDashboardVisible(a, now));
-    const notDone = visible.filter((a) => !isDone(a) && a.due);
+    const notDone = visible.filter((a) => !isSubmitted(a) && a.due);
     const urgentTasks = notDone.filter(
       (a) => a.due - now <= URGENT_H * HOUR && a.due - now >= 0
     );
@@ -134,9 +133,7 @@ function HomePage() {
       .sort((a, b) => a.due - b.due)
       .slice(0, 3);
 
-    // Deliberately unfiltered by status: this one is a checklist, so finished
-    // work stays visible with a tick and feeds the "เหลือ X จาก Y" counter.
-    // UR26 is about not *notifying* — that's what notDone/urgentCount cover.
+    // Submitted work stays checked; finished work still needs to be handed in.
     const checklist = visible
       .filter((a) => a.due && a.due - now >= 0 && a.due - now <= URGENT_H * HOUR)
       .sort((a, b) => a.due - b.due)
@@ -268,7 +265,7 @@ function HomePage() {
                 <div style={styles.statGrid}>
                   <StatCard label="งานทั้งหมด" value={view.total} iconBg={C.indigoBg} icon={<PencilIcon size={16} color={C.navy} />} />
                   <StatCard label="กำลังทำ" value={view.inProgress} iconBg={C.pinkBg} icon={<SpinnerIcon size={16} color={C.pink} />} />
-                  <StatCard label="ส่ง/เสร็จ" value={view.submitted + view.completed} iconBg={C.blueBg} icon={<CheckCircleIcon size={16} color="#3b82f6" />} />
+                  <StatCard label="ทำเสร็จแล้ว" value={view.submitted + view.completed} iconBg={C.blueBg} icon={<CheckCircleIcon size={16} color="#3b82f6" />} />
                   <StatCard label={`ด่วน ${URGENT_H} ชม.`} value={view.urgentCount} iconBg={C.navy} icon={<HourglassIcon size={16} color={C.pink} />} />
                 </div>
 
@@ -297,7 +294,7 @@ function HomePage() {
                       <div style={styles.progressTrack}>
                         <div style={{ ...styles.progressFill, width: `${view.progressPct}%` }} />
                       </div>
-                      <span style={styles.progressLabel}>{view.progressPct}% สำเร็จ</span>
+                      <span style={styles.progressLabel}>{view.progressPct}% ทำเสร็จแล้ว</span>
                     </div>
                   </div>
                   <div style={styles.card}>
@@ -305,7 +302,7 @@ function HomePage() {
                       <span style={styles.cardTitle}>งานด่วน</span>
                       {view.checklist.length > 0 && (
                         <span style={styles.badgeFaint}>
-                          เหลือ {view.checklist.filter((a) => !isDone(a)).length} จาก{' '}
+                          เหลือ {view.checklist.filter((a) => !isSubmitted(a)).length} จาก{' '}
                           {view.checklist.length}
                         </span>
                       )}
@@ -314,7 +311,7 @@ function HomePage() {
                       items={view.checklist.map((a) => ({
                         id: a.assignment_id,
                         title: a.title,
-                        done: isDone(a),
+                        done: isSubmitted(a),
                       }))}
                     />
                   </div>

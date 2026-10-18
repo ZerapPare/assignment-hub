@@ -14,7 +14,7 @@ export const fmtTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 export const STATUS = {
   not_started: { label: 'ยังไม่เริ่ม', color: C.muted, bg: C.lineSoft },
   in_progress: { label: 'กำลังทำ', color: C.blueText, bg: C.blueBg },
-  completed: { label: 'เสร็จ', color: C.green, bg: C.greenBg },
+  completed: { label: 'เสร็จแล้ว', color: C.green, bg: C.greenBg },
   submitted: { label: 'ส่งแล้ว', color: C.amber, bg: C.amberBg },
 };
 
@@ -27,13 +27,14 @@ export const STATUS_OPTIONS = Object.entries(STATUS).map(([value, s]) => ({
   label: s.label,
 }));
 
-// UR26: neither a submitted nor a completed task should still be nagging the
-// student, so both drop out of the urgent surfaces.
+// Both statuses are finished work; only submitted is handed in.
 export const DONE = ['submitted', 'completed'];
 export const isDone = (a) => DONE.includes(a.status);
 
 // 'completed' is done but not handed in, so it still needs reminders.
 export const isSubmitted = (a) => a.status === 'submitted';
+
+export const isSubmissionManaged = (a) => Boolean(a.platform_source);
 
 export const PLATFORM_FILTERS = [
   { key: 'all', label: 'ทุกแพลตฟอร์ม' },
@@ -63,4 +64,4 @@ export const withDerived = (assignments) =>
   }));
 
 export const isUrgent = (a, now) =>
-  !isDone(a) && a.due && a.due - now >= 0 && a.due - now <= URGENT_H * HOUR;
+  !isSubmitted(a) && a.due && a.due - now >= 0 && a.due - now <= URGENT_H * HOUR;

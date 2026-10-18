@@ -239,7 +239,7 @@ router.patch('/api/assignments/:id/status', requireAuth, async (req, res) => {
 
 	try {
 		const [owned] = await pool.query(
-			`SELECT a.assignment_id, d.status
+			`SELECT a.assignment_id, d.status, c.platform_source
        FROM Assignment a
        JOIN Course c ON a.course_id = c.course_id
        LEFT JOIN Assignment_Detail d ON d.assignment_id = a.assignment_id
@@ -249,6 +249,10 @@ router.patch('/api/assignments/:id/status', requireAuth, async (req, res) => {
 		);
 		if (!owned.length) return res.status(404).json({ error: 'not found' });
 		const previousStatus = owned[0].status || 'not_started';
+		if (owned[0].platform_source && status !== previousStatus
+			&& (status === 'submitted' || previousStatus === 'submitted')) {
+			return res.status(400).json({ error: 'สถานะส่งแล้วของงานจากแพลตฟอร์มต้องอัปเดตผ่านการซิงก์' });
+		}
 
 		await pool.query(
 			`INSERT INTO Assignment_Detail (assignment_id, status, status_updated_at)

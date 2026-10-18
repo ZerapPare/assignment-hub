@@ -42,6 +42,6 @@ for (const state of ['CREATED', 'TURNED_IN', 'RETURNED']) {
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.assignmentsSynced, 1);
     assert.ok(updates.some((sql) => sql.startsWith('UPDATE Assignment_Detail SET description')));
-    assert.equal(updates.some((sql) => sql.startsWith('UPDATE Assignment_Detail SET status')), state !== 'CREATED');
+    assert.ok(updates.some((sql) => sql.startsWith('UPDATE Assignment_Detail SET status')));
   });
 }

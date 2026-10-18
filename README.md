@@ -142,18 +142,19 @@ db-1        | ... ready for connections
 
 ### สถานะงาน (UC-5)
 
-ช่องสถานะในตารางเป็น dropdown เลือกได้ 4 ค่า เรียงตามลำดับการทำงาน — `ยังไม่เริ่ม` · `กำลังทำ` · `เสร็จ` (ทำเสร็จแล้ว ยังไม่ส่ง) · `ส่งแล้ว`
-เลือกแล้วยิง `PATCH /api/assignments/:id/status` ทันที **ใช้ได้กับงานที่ซิงก์มาด้วย** เพราะสถานะถือเป็น
-ความคืบหน้าส่วนตัวของนักศึกษา ไม่ใช่ข้อมูลของงานที่แพลตฟอร์มเป็นเจ้าของ
+ช่องสถานะในตารางเป็น dropdown เรียงตามลำดับการทำงาน — `ยังไม่เริ่ม` · `กำลังทำ` · `เสร็จแล้ว` (ยังไม่ส่ง) · `ส่งแล้ว`
+คำอธิบายใต้กราฟวงกลมเรียงจากซ้ายไปขวา: `ยังไม่เริ่ม` · `กำลังทำ` · `เสร็จแล้ว` · `ส่งแล้ว`
+เลือกแล้วยิง `PATCH /api/assignments/:id/status` ทันที งานที่สร้างเองเลือกได้ครบทั้งสี่สถานะ
+ส่วนงานจากแพลตฟอร์มเลือกความคืบหน้าได้ แต่สถานะ `ส่งแล้ว` ต้องมาจากการซิงก์เท่านั้น
 
-ครั้งแรกที่ตั้งสถานะเอง คอลัมน์ `Assignment_Detail.status_updated_at` จะเปลี่ยนจาก `NULL` เป็นเวลาที่กด
-และตั้งแต่นั้น **ซิงก์จะไม่ทับสถานะนั้นอีก** (ก่อนหน้านั้น Google เป็นคนตั้งให้ — งานที่ `TURNED_IN`/`RETURNED`
-มาเป็น `ส่งแล้ว`) งานที่ `เสร็จ` หรือ `ส่งแล้ว` จะหลุดออกจากการ์ด "งานด่วน" และ checklist 48 ชม. และไม่ถูกจัดตารางอัตโนมัติ
+การเลือกเองบันทึกเวลาใน `status_updated_at` แต่ไม่ขวางการซิงก์สถานะส่งจาก Classroom:
+`TURNED_IN`/`RETURNED` จะเป็น `ส่งแล้ว` แม้เคยเลือก `เสร็จแล้ว` มาก่อน หากถอนการส่งจะกลับเป็น `เสร็จแล้ว`
+งานที่ยังไม่ส่งยังอยู่ในกำหนดส่งใกล้ถึง งานด่วน และอีเมลเตือน ส่วนการจัดตารางทำงานข้ามทั้งงานที่เสร็จและส่งแล้ว
 
 | สถานะ | ค่าใน DB | อีเมลเตือน | งานด่วน | จัดตาราง |
 |---|---|---|---|---|
 | ยังไม่เริ่ม / กำลังทำ | `not_started` / `in_progress` | ส่ง | ขึ้น | จัด |
-| เสร็จ | `completed` | **ยังส่ง** (ยังไม่ได้ส่งงาน) | ไม่ขึ้น | ไม่จัด |
+| เสร็จแล้ว | `completed` | **ยังส่ง** (ยังไม่ได้ส่งงาน) | ขึ้นภายใน 48 ชม. | ไม่จัด |
 | ส่งแล้ว | `submitted` | ไม่ส่ง | ไม่ขึ้น | ไม่จัด |
 
 > ถ้ายิงไม่สำเร็จ error จะขึ้นในแถวนั้นแถวเดียว สถานะเดิมค้างไว้ ส่วนที่เหลือของหน้าไม่หาย
@@ -276,7 +277,7 @@ migrate.bat         # Windows cmd
 |---|---|
 | `001_identity.sql` | unique `University.email_domain` + unique `Student (student_id, university_id)` |
 | `002_task_type.sql` | `Assignment.task_type` |
-| `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` — **อย่า backfill** ค่านี้ `NULL` แปลว่า "นักศึกษายังไม่เคยตั้งสถานะเอง" ถ้าใส่ค่าให้ทุกแถว ซิงก์จะหยุดอัปเดตสถานะจาก Classroom ทั้งหมด |
+| `003_status_updated_at.sql` | `Assignment_Detail.status_updated_at` — เวลาที่ผู้ใช้เปลี่ยนสถานะเอง ไม่ใช้ขวางการซิงก์สถานะส่งจาก Classroom |
 | `004_admin_monitoring.sql` | role/status ของ Student + system error/audit/request metric tables |
 | `005_announcement.sql` | ตาราง `Announcement` (ประกาศจาก Classroom) |
 | `006_product_analytics.sql` | ตาราง `Product_Event` สำหรับ business analytics |
@@ -395,11 +396,11 @@ An account holding any administrative permission gets an extra "ผู้ดู�
 `task_type` เป็นหนึ่งใน `homework | project | quiz | exam | reading | other` ไม่ใส่ `course_name` จะไปอยู่ใต้วิชา `งานที่เพิ่มเอง`
 `PATCH /api/assignments/:id` รับชุดย่อยของ `title` · `task_type` · `description` · `due_date` (ยังไม่รับ `course_name`)
 
-**ทำไม status แยกเป็นอีก route:** `PATCH /:id` จำกัดไว้เฉพาะงานที่เพิ่มเอง เพราะข้อมูลของงานที่ซิงก์มา
-ต้องไม่ต่างจากต้นทาง (UR05) แต่ *สถานะ* เป็นของนักศึกษาเอง (A3.3) จึงแก้ได้ทุกงาน
+**ทำไม status แยกเป็นอีก route:** ข้อมูลของงานที่ซิงก์มาต้องตรงกับต้นทาง (UR05)
+ส่วนความคืบหน้าเลือกเองได้ทุกงาน แต่การเปลี่ยนเข้า/ออกจาก `submitted` ของงานจากแพลตฟอร์มต้องผ่านการซิงก์
 `PATCH /:id/status` รับ `{ "status": "not_started" | "in_progress" | "submitted" | "completed" }`
 แล้วเขียนแบบ upsert (แถวที่ยังไม่มี `Assignment_Detail` ก็ตั้งสถานะได้) พร้อมประทับ `status_updated_at`
-ซึ่งเป็นตัวบอกให้ซิงก์รอบต่อไป **ไม่ต้องไปยุ่งกับสถานะแถวนั้นอีก**
+เพื่อบันทึกเวลาที่เลือกเอง โดยไม่ขวางการซิงก์สถานะส่ง
 
 `PUT /api/notification-settings` รับ `{ enabled, lead_times, daily_repeat, daily_repeat_time, announcement_notify, last_custom_minutes }`
 โดย `lead_times` เป็น array ของนาที (1–40320 คือ 28 วัน, ไม่เกิน 10 ค่า) และ `daily_repeat_time` เป็น `"HH:MM"`
@@ -613,7 +614,7 @@ sudo tcpdump -ni eth0 'tcp[tcpflags] & tcp-syn != 0 and not port 22' -c 5
 | `/api/*` เป็น `500` ทุกเส้น | request ไปไม่ถึง Express — `/api/health` คืนได้แค่ `200`/`503` ถ้าได้ `500` แปลว่า Vite proxy ต่อ `backend:3000` ไม่ติด ดู `docker compose logs backend` |
 | `Cannot find module '<pkg>'` | anonymous volume บัง `node_modules` ใหม่ → `docker compose rm -fsv backend` แล้ว `up -d --build` |
 | `Unknown column 'status_updated_at'` / `'task_type'` | database เก่าที่สร้างก่อนแก้ `init.sql` — `init.sql` ไม่รันซ้ำ ต้องรัน `./migrate.sh` (หรือ `migrate.bat`) เอง |
-| เปลี่ยนสถานะแล้วซิงก์รอบถัดไปทับกลับ | `status_updated_at` ของแถวนั้นยังเป็น `NULL` แปลว่า `PATCH /:id/status` ไม่ได้เขียนลงไปจริง เช็ค log backend |
+| เปลี่ยนเป็นเสร็จแล้ว จากนั้นซิงก์ขึ้นส่งแล้ว | เป็นพฤติกรรมปกติเมื่อ Classroom แจ้งว่าส่งแล้ว สถานะส่งต้องตรงกับต้นทาง |
 | แก้โค้ดแล้ว backend ยังรันของเก่า | `node --watch` มักไม่เห็นไฟล์ที่เปลี่ยนผ่าน bind mount ของ Docker → `docker compose restart backend` หลัง `git pull` |
 | ซิงก์สำเร็จแต่งานไม่ขึ้น (และ localhost ได้เยอะกว่า) | upsert key ขาดเงื่อนไขเจ้าของ → คนที่ซิงก์ทีหลังไปเจอแถวของเพื่อน ดู [หมายเหตุใต้ตาราง API](#api-backend) |
 | `Error 400: redirect_uri_mismatch` | URI ไม่ตรงกับที่ลงทะเบียนใน OAuth client **ตัวนั้น** — เช็คว่าเซิร์ฟเวอร์ส่ง client ไหนก่อน (ดูด้านล่าง) |

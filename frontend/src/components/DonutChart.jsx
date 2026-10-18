@@ -7,7 +7,7 @@ const TRACK = '#eef2ff';
 function DonutChart({ completed = 0, submitted = 0, inProgress = 0, notStarted = 0, total = 0 }) {
   const segments = [
     { key: 'submitted', label: 'ส่งแล้ว', value: submitted, color: C.amber },
-    { key: 'completed', label: 'เสร็จ', value: completed, color: C.navy },
+    { key: 'completed', label: 'เสร็จแล้ว', value: completed, color: C.navy },
     { key: 'in_progress', label: 'กำลังทำ', value: inProgress, color: C.pink },
     { key: 'not_started', label: 'ยังไม่เริ่ม', value: notStarted, color: C.blueMid },
   ];
@@ -45,10 +45,12 @@ function DonutChart({ completed = 0, submitted = 0, inProgress = 0, notStarted =
       </div>
 
       <div style={styles.legend}>
-        {segments.map((s) => (
+        {[...segments].reverse().map((s) => (
           <span key={s.key} style={styles.legendItem}>
-            <span style={{ ...styles.swatch, background: s.color }} />
-            {s.label} · {s.value}
+            <span style={styles.legendLabel}>
+              <span style={{ ...styles.swatch, background: s.color }} />
+              {s.label} {s.value}
+            </span>
           </span>
         ))}
       </div>
@@ -69,15 +71,15 @@ const styles = {
     color: C.mutedLight,
   },
   legend: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
     gap: 6,
     marginTop: 10,
     fontSize: 10,
     color: C.muted,
   },
-  legendItem: { display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' },
+  legendItem: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 },
+  legendLabel: { display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' },
   swatch: { width: 8, height: 8, borderRadius: '50%', flexShrink: 0 },
 };
 
