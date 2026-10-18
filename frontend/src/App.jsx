@@ -15,6 +15,7 @@ import AdminUserDetailPage from './pages/admin/AdminUserDetailPage';
 import AdminErrorsPage from './pages/admin/AdminErrorsPage';
 import AdminSystemPage from './pages/admin/AdminSystemPage';
 import AdminBusinessPage from './pages/admin/AdminBusinessPage';
+import AdminAdsPage from './pages/admin/AdminAdsPage';
 import Schedule from './pages/Schedule';
 import WeeklyView from './pages/WeeklyView';
 import StudentRoute from './components/StudentRoute';
@@ -47,6 +48,7 @@ function App() {
             <Route path="errors" element={<AdminErrorsPage />} />
             <Route path="system" element={<AdminSystemPage />} />
             <Route path="business" element={<AdminBusinessPage />} />
+            <Route path="ads" element={<AdminAdsPage />} />
           </Route>
         </Route>
 

@@ -3,6 +3,7 @@ import axios from "axios";
 
 export default function AutoScheduleButton({
   disabled = false,
+  onActionStart,
   onBeforeGenerate,
   onGenerated,
 }) {
@@ -12,6 +13,7 @@ export default function AutoScheduleButton({
     if (disabled || loading) return;
 
     setLoading(true);
+    onActionStart?.();
     try {
       if (onBeforeGenerate) {
         const saved = await onBeforeGenerate();

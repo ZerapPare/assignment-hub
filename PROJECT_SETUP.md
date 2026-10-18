@@ -286,8 +286,11 @@ Still inert:
   does not accept — the value is silently dropped. Either add it to the handler or remove
   the input; right now it looks editable and isn't.
 
-`AdPopup` on the dashboard shows `public/images/ad_images.png` and links to an external Canva
-page (`AD_URL`) in a new tab.
+Administrators manage advertisement titles, images, destination links, and active status at
+`/admin/ads`. Active ads are selected at random and shown when a user starts a Classroom sync
+or automatic schedule generation. Images are uploaded to `backend/uploads` (persisted by the
+Compose bind mount) and served through the backend. A missing ad or ad API failure does not
+prevent either user action. Apply `migrations/015_advertisements.sql` to existing databases.
 
 Fonts and base CSS are injected by `src/GlobalStyles.jsx` (mounted once in `App.jsx`)
 rather than declared in `index.html`.

@@ -1,5 +1,6 @@
 const express = require('express');
 const session = require('express-session');
+const path = require('node:path');
 const { PORT, SESSION_SECRET, IS_HTTPS } = require('./src/config');
 const { requestContext } = require('./src/middleware/requestContext');
 const { requestMetrics, startMetricFlush } = require('./src/middleware/requestMetrics');
@@ -11,6 +12,16 @@ const app = express();
 app.use(requestContext);
 app.use(requestMetrics);
 app.use(express.json());
+app.use('/api/ads/images', express.static(path.join(__dirname, 'uploads'), {
+  immutable: true,
+  maxAge: '1y',
+  fallthrough: false,
+  dotfiles: 'deny',
+  index: false,
+  setHeaders(res) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+  },
+}));
 
 // Session cookie (dev: in-memory store; resets when the server restarts).
 app.use(
@@ -46,6 +57,7 @@ app.use(require('./src/routes/notifications'));
 app.use(require('./src/routes/analytics'));
 app.use(require('./src/routes/admin'));
 app.use(require('./src/routes/adminBusiness'));
+app.use(require('./src/routes/ads'));
 app.use((req, res, next) => {
   const error = new Error('not found');
   error.statusCode = 404;

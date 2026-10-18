@@ -1,19 +1,24 @@
 import React from 'react';
 import { C, FONT, R, SHADOW } from '../theme';
 
-const AD_URL = 'https://assignmenthub1ad.my.canva.site/follow-your-gut';
-const AD_IMAGE = '/images/ad_images.png';
-
-function AdPopup({ open, onClose }) {
-  if (!open) return null;
+function AdPopup({ ad, open, onClose }) {
+  if (!open || !ad) return null;
 
   return (
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.banner} onClick={(e) => e.stopPropagation()}>
-        <button style={styles.close} onClick={onClose}>✕</button>
-        <a href={AD_URL} target="_blank" rel="noopener noreferrer" style={styles.adSlot}>
-          <span style={styles.adLabel}>Sponsored</span>
-          <img src={AD_IMAGE} alt="โฆษณา Assignment Hub — คลิกเพื่อดูรายละเอียด" style={styles.adImage} />
+        <button
+          type="button"
+          aria-label="ปิดโฆษณา"
+          title="ปิดโฆษณา"
+          style={styles.close}
+          onClick={onClose}
+        >
+          ✕
+        </button>
+        <a href={ad.linkUrl} target="_blank" rel="noopener noreferrer" style={styles.adSlot}>
+          <span style={styles.adTitle}>{ad.title}</span>
+          <img src={ad.imageUrl} alt={ad.title} style={styles.adImage} />
         </a>
       </div>
     </div>
@@ -24,7 +29,7 @@ const styles = {
   overlay: {
     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    zIndex: 1000,
+    zIndex: 60000,
   },
   banner: {
     background: C.card, borderRadius: R.card, padding: 20,
@@ -41,7 +46,7 @@ const styles = {
     background: C.pageBg, borderRadius: 8, overflow: 'hidden', marginTop: 12,
     textAlign: 'center', textDecoration: 'none', cursor: 'pointer',
   },
-  adLabel: { fontSize: 10, color: C.muted, letterSpacing: 0.5 },
+  adTitle: { display: 'block', fontSize: 14, fontWeight: 700, color: C.ink, padding: '5px 10px 10px' },
   adImage: { display: 'block', width: '100%', height: 'auto' },
 };
 

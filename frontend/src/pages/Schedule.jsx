@@ -7,6 +7,7 @@ import TaskList from "../components/TaskList";
 import LunchTimeSetting from "../components/LunchTimeSetting";
 import AutoScheduleButton from "../components/AutoScheduleButton";
 import AdPopup from "../components/AdPopup";
+import { fetchRandomAdvertisement } from "../ads";
 import { GridIcon } from "../icons";
 import useAssignments from "../useAssignments";
 
@@ -20,7 +21,18 @@ export default function Schedule() {
   const [scheduleSettings, setScheduleSettings] = useState(null);
   const [taskDurations, setTaskDurations] = useState({});
   const [toast, setToast] = useState(null);
+  const [ad, setAd] = useState(null);
   const [showAd, setShowAd] = useState(false);
+
+  const showRandomAd = async () => {
+    try {
+      const selectedAd = await fetchRandomAdvertisement();
+      setAd(selectedAd);
+      setShowAd(Boolean(selectedAd));
+    } catch (err) {
+      console.error("Advertisement request failed:", err);
+    }
+  };
 
   const [taskValidity, setTaskValidity] = useState({
     hasInvalid: false,
@@ -176,6 +188,7 @@ export default function Schedule() {
           <div className="schedule-header-actions">
             <AutoScheduleButton
               disabled={taskValidity.hasInvalid}
+              onActionStart={showRandomAd}
               onBeforeGenerate={saveAll}
               onGenerated={handleGenerated}
             />
@@ -204,7 +217,7 @@ export default function Schedule() {
         </section>
       </main>
 
-      <AdPopup open={showAd} onClose={() => setShowAd(false)} />
+      <AdPopup ad={ad} open={showAd} onClose={() => setShowAd(false)} />
 
       {/* ============ PROBLEM TASKS MODAL ============ */}
       {problemModal.open && (

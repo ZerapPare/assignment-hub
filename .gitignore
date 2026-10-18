@@ -1,4 +1,5 @@
 node_modules/
+backend/uploads/
 .env*
 !.env.example
 # Private & Public Keys

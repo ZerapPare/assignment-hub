@@ -6,6 +6,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const adminRouter = require('../src/routes/admin');
 const adminBusinessRouter = require('../src/routes/adminBusiness');
+const adsRouter = require('../src/routes/ads');
+const { requireAdmin } = require('../src/middleware/adminAuth');
 const { PERMISSIONS: P } = require('../src/rbac/permissions');
 
 const EXPECTED = {
@@ -58,4 +60,15 @@ test('business analytics is guarded at the router', () => {
     .filter(Boolean);
 
   assert.deepEqual(prefixGuards, [P.BUSINESS_ANALYTICS_READ]);
+});
+
+test('all admin ad management routes are available to admins without an extra permission grant', () => {
+  assert.ok(
+    adsRouter.stack.some((layer) => !layer.route && layer.handle === requireAdmin),
+    'advertisement management must require admin authentication'
+  );
+  assert.ok(
+    !adsRouter.stack.some((layer) => !layer.route && layer.handle?.permissionCode),
+    'advertisement management must not require a separately assigned permission'
+  );
 });

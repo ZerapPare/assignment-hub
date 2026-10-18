@@ -7,6 +7,7 @@ import { C, FONT, R } from '../../theme';
 const NAV_ITEMS = [
   { to: '/admin/dashboard', label: 'ภาพรวมระบบ', Icon: HomeIcon },
   { to: '/admin/business', label: 'Business Analytics', Icon: SortIcon },
+  { to: '/admin/ads', label: 'จัดการโฆษณา', Icon: PencilIcon },
   { to: '/admin/users', label: 'ผู้ใช้งาน', Icon: PencilIcon },
   { to: '/admin/errors', label: 'บันทึกข้อผิดพลาด', Icon: BellIcon },
   { to: '/admin/system', label: 'สถานะระบบ', Icon: GearIcon },
