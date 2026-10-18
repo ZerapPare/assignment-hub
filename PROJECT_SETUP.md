@@ -8,7 +8,7 @@ A student assignment manager, split into **three independent services** run with
 Browser
   │  http://localhost:4173
   ▼
-frontend  (vite preview serving the committed frontend/dist, React)
+frontend  (vite preview serving the dist built inside the image, React)
   │  proxies /api/*  →  backend:3000
   ▼
 backend   (Express + mysql2 REST API)
@@ -32,7 +32,7 @@ The frontend never talks to MySQL directly — it calls `/api/*`, which Vite pro
 | Database  | MySQL 8.0                                           |
 | Sync      | `googleapis` — Google Classroom coursework, grades, and announcements |
 | Email     | `nodemailer` over SMTP — deadline reminders (FR-07)  |
-| Tests     | `node:test` (backend only, no runner dependency)    |
+| Tests     | `node:test` (backend + `frontend/test`, no runner dependency) |
 | Container | Docker + Docker Compose                             |
 
 ## Prerequisites
@@ -62,7 +62,7 @@ Then open **http://localhost:4173**.
 
 | Service    | Build / Image   | Port          | Role                                          |
 |------------|-----------------|---------------|-----------------------------------------------|
-| `frontend` | `./frontend`    | `4173`        | `vite preview` — serves `frontend/dist`, proxies `/api` |
+| `frontend` | `./frontend`    | `4173`        | `vite preview` — serves the `dist` built in the image, proxies `/api` |
 | `backend`  | `./backend`     | `3000`        | Express REST API, connects to MySQL           |
 | `db`       | `mysql:8.0`     | `3306`        | Database `assignment_hub`, root pw `root123`  |
 | `caddy`    | `caddy:2-alpine`| `4173`, `80`  | Plain-http reverse proxy behind Cloudflare/init.d — **profile `tls` only**, not started locally |
@@ -73,19 +73,21 @@ host uses. See [Deploying over HTTPS](#deploying-over-https).
 
 ### Hot reload
 
-Both app services mount their source folder as a volume (`./frontend:/app`, `./backend:/app`) with an anonymous volume for `node_modules`.
+Only the backend mounts its source (`./backend:/app`, plus an anonymous volume for
+`node_modules`). The frontend volume is commented out in `docker-compose.yml`.
 
 - **backend** — `node --watch` restarts the server on change. Edit a file, it is live.
-- **frontend** — **no hot reload.** The container runs `vite preview`, which serves the
-  already-built `frontend/dist` rather than compiling from `src`. Editing a component changes
-  nothing in the browser until you rebuild:
+- **frontend** — **no hot reload.** `frontend/Dockerfile` runs `npm run build` while building
+  the image, then `vite preview --host 0.0.0.0 --port 4173` serves that `dist`. `.dockerignore`
+  excludes the local `dist/`, so what you build on the host never reaches the container.
+  Editing a component changes nothing in the browser until you rebuild the image:
 
   ```bash
-  cd frontend && npm run build      # writes frontend/dist, which the container serves
+  docker compose up -d --build frontend
   ```
 
-  `dist/` is committed for this reason — the container never builds it. Rebuild and commit it
-  alongside any frontend change, or a teammate pulls source they cannot see the effect of.
+  `frontend/dist/` is still tracked in git, but Docker no longer uses it, so it does not have to
+  be rebuilt and committed with each frontend change — and may lag behind `src`.
 
   For an edit-refresh loop, run the dev server outside Docker instead. It proxies `/api` to
   the same backend container, so nothing else has to change:
@@ -139,7 +141,7 @@ This trips people up, so be precise about which file a variable belongs in:
 | `/admin/login` | — | Redirects to `/login`. Administrators sign in through the one login page; a `User_Role` grant is what opens the console |
 | `/admin/*` | Admin console | Protected admin dashboard, users, errors, system health, and business analytics |
 | `/home`  | Dashboard     | Requires a session — redirects to `/login` if not logged in. Four stat cards, a 7-day workload bar chart, a status donut, a month calendar with per-day hover details, upcoming deadlines, and a 48h checklist. **Summary only — no task table** |
-| `/assignments` | All tasks | Requires a session. The task table: search, platform/status/course filters, score column, per-row status control, edit + delete on manual tasks |
+| `/assignments` | All tasks | Requires a session. The task table: search, platform/status/course filters, score column, per-row status control, and a `⋮` actions menu (hide from dashboard on every task; edit + delete on manual tasks) |
 | `/assignments/:id` | Task detail | Requires a session. One task in full — description, course, score, status control, and a link back to Google Classroom. Reached by clicking a title in the table |
 | `/stream` | Announcements | Requires a session. Classroom announcements (`GET /api/announcements`) with a course filter, beside the same task table |
 | `/settings` | Settings   | Requires a session. Student profile + editable รหัสนักศึกษา, notification preferences, and connect state for Google and Microsoft |
@@ -162,8 +164,11 @@ logged-in account (before its first sync) renders zeros and empty states.
 **`+ เพิ่มงานใหม่`** (on both the dashboard and the assignments page) opens `AddTaskModal`
 and `POST`s to `/api/assignments`. The created row is appended to the same `assignments`
 state the `useMemo` reads, so every stat card, chart, calendar dot and list updates without a
-refetch. Manual work is stored under a `Course` with `platform_source IS NULL`, which is what
-the `เพิ่มเอง` filter tab matches.
+refetch. Manual work is stored under a `Course` with `platform_source IS NULL`, which falls
+under the `อื่นๆ` filter tab.
+
+The dashboard also leaves out tasks the student hid and tasks whose deadline has passed —
+see [Hiding tasks from the dashboard](#hiding-tasks-from-the-dashboard).
 
 ### Shared task code
 
@@ -172,21 +177,59 @@ need live in two modules rather than being duplicated:
 
 | Module | Holds |
 |---|---|
-| [`src/tasks.js`](frontend/src/tasks.js) | The `STATUS` map and `STATUS_OPTIONS`, `normalizeStatus`, `DONE`/`isDone`, `PLATFORM_FILTERS`, `withDerived` (parses `due_date`, normalises status), `isUrgent`, `fmtDate`/`fmtTime`, `HOUR`/`URGENT_H` |
-| [`src/useAssignments.js`](frontend/src/useAssignments.js) | The `/api/me` + `/api/assignments` fetch, the `401` → `/login` bounce, `logout`, and the `changeStatus` / `deleteTask` / `saveEdit` handlers with their per-row `statusPending` / `statusErrors` |
+| [`src/tasks.js`](frontend/src/tasks.js) | The `STATUS` map and `STATUS_OPTIONS`, `normalizeStatus`, `DONE`/`isDone`, `PLATFORM_FILTERS` + `matchesPlatform`, `withDerived` (parses `due_date`, normalises status), `isUrgent`, `fmtDate`/`fmtTime`, `HOUR`/`URGENT_H` |
+| [`src/useAssignments.js`](frontend/src/useAssignments.js) | The `/api/me` + `/api/assignments` fetch, the `401` → `/login` bounce, `logout`, and the `changeStatus` / `setDashboardHidden` / `deleteTask` / `saveEdit` handlers with their per-row `statusPending` / `statusErrors` / `visibilityPending` / `visibilityErrors`, plus `deleteError` |
+| [`src/dashboardVisibility.mjs`](frontend/src/dashboardVisibility.mjs) | `isDashboardHidden` / `isDashboardVisible` — plain `.mjs` so `node --test` can import it without a bundler |
+| [`src/studentProfile.js`](frontend/src/studentProfile.js) | A module-level cache of the `/api/me` result, so pages render the profile immediately on navigation. Set by `StudentRoute` and `useAssignments`, cleared on `401` and logout |
+
+**Platform filters** are `ทุกแพลตฟอร์ม` · `Google Classroom` · `Microsoft Team` · `อื่นๆ`, shared by
+`/assignments` and `/stream` through `matchesPlatform(item, key)`, which matches substrings of
+`platform_source` case-insensitively. Two things to know:
+
+- `msteam` matches sources containing `msteam`. Nothing writes that value yet (there is no Teams
+  sync), so once one exists, check that its `platform_source` actually contains `msteam` —
+  `'Microsoft Teams'` does not, and would land under `อื่นๆ`.
+- The analytics allow-list in `services/analytics.js` accepts `mstream`, not `msteam`, so an
+  `assignment.filter_used` event for the Teams tab is rejected (and silently swallowed).
 
 Adding a status, changing what counts as done, or changing how a task is edited is a one-file
 change that both screens pick up. `AssignmentTable.jsx` owns the table itself and keeps its
 own search and filter state — no page cares which tab is open, so it never leaves the component.
 
-Each table row carries an **edit** and a **delete** button, shown only for manual work
-(`platform_source IS NULL`). Edit opens `EditTaskModal` → `PATCH /api/assignments/:id` and
-splices the returned row back into state; delete confirms, calls `DELETE /api/assignments/:id`,
-and filters the row out. Synced coursework has neither: the platform stays the source of
-truth (UR05), and the backend answers `404` for it rather than trusting the UI to hide them.
+Each table row ends in a **`⋮` actions menu** (`AssignmentActionsMenu.jsx`, rendered in a
+portal so the table's overflow does not clip it; arrow keys / Home / End / Esc work). It holds:
+
+- **ซ่อน / แสดงบน Dashboard อีกครั้ง** — on every task, synced included.
+- **แก้ไข / ลบ** — only for manual work (`platform_source IS NULL`). Edit opens `EditTaskModal`
+  → `PATCH /api/assignments/:id` and splices the returned row back into state; delete confirms,
+  calls `DELETE /api/assignments/:id`, and filters the row out. A failed delete sets
+  `deleteError`, shown above the table, instead of the page-level `error` that blanks the page.
+  Synced coursework has neither: the platform stays the source of truth (UR05), and the backend
+  answers `404` for it rather than trusting the UI to hide them.
+
+`EditTaskModal` sends `due_date` only when the date or time field was actually touched
+(`deadlineChanged`), and clearing the date sends `null`. It used to resend the deadline on every
+save, which could shift it through a timezone round-trip.
+
+### Hiding tasks from the dashboard
+
+`Assignment_Detail.dashboard_hidden` (migration `014`) lets a student take a task off `/home`
+without deleting it or changing its status. Hidden tasks stay on `/assignments`, with a muted
+row and a `ซ่อนแล้ว` badge.
+
+- The write is `PATCH /api/assignments/:id` with a body of **exactly** `{ "dashboard_hidden": boolean }`.
+  Any other key alongside it is `400`. This branch checks ownership only — not
+  `platform_source IS NULL` — so it works on synced coursework, for the same reason status does.
+  It upserts `Assignment_Detail`, so a row without a detail row can still be hidden.
+- The Classroom sync never touches the column, so hiding survives re-syncs.
+- `HomePage` filters with `isDashboardVisible(a, now)`: not hidden **and** not past due. Every
+  card, chart, the calendar, the deadline list and the 48h checklist read that filtered list.
+  `now` ticks once a minute, so a task drops off the dashboard as its deadline passes.
 
 **Task status (UC-5)** is a `<select>` in the status cell, over the four values in
-`tasks.js`'s `STATUS` map — `not_started` · `in_progress` · `submitted` · `completed`.
+`tasks.js`'s `STATUS` map, in workflow order — `not_started` (ยังไม่เริ่ม) · `in_progress` (กำลังทำ) ·
+`completed` (เสร็จ — done, not yet handed in) · `submitted` (ส่งแล้ว — done and handed in).
+Every status dropdown renders `STATUS_OPTIONS`, so that order and those labels live in one place.
 Choosing one `PATCH`es `/api/assignments/:id/status` immediately. Unlike edit and delete this
 is offered on **every** task including synced ones, because status is the student's own
 progress marker rather than the platform's data (A3.3).
@@ -197,8 +240,12 @@ Two details of that control matter:
   a rejected change shows its message inside that one row and leaves the old status visible.
   The page-level `error` state is deliberately not used here — the body renders only when
   `!error`, so reusing it would blank the whole page over one failed dropdown (UC-5 ext 4a).
-- **`submitted` and `completed` both count as done.** `DONE`/`isDone` in `tasks.js` drop
-  them from the dashboard's urgent card and 48h checklist, so a finished task stops nagging (UR26).
+- **`submitted` and `completed` both count as done on screen.** `DONE`/`isDone` in `tasks.js`
+  drop them from the dashboard's urgent card and 48h checklist (UR26), and the auto-scheduler
+  skips them too.
+- **Reminder emails stop only at `submitted`.** A `completed` task is finished but not handed
+  in, so it keeps getting mail. That is `SENT_STATUSES` in `notificationSender.js` and
+  `isSubmitted` in `tasks.js` — deliberately narrower than `DONE`.
 
 ### Notification preferences
 
@@ -238,6 +285,9 @@ Still inert:
   does not accept — the value is silently dropped. Either add it to the handler or remove
   the input; right now it looks editable and isn't.
 
+`AdPopup` on the dashboard shows `public/images/ad_images.png` and links to an external Canva
+page (`AD_URL`) in a new tab.
+
 Fonts and base CSS are injected by `src/GlobalStyles.jsx` (mounted once in `App.jsx`)
 rather than declared in `index.html`.
 
@@ -254,7 +304,7 @@ There is one login for everybody. The session holds a single `userId` and nothin
 **Prerequisites — create OAuth apps and a `.env.local`:**
 
 1. **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External, add yourself as a Test user) → Credentials → OAuth client ID (Web application). Register `http://localhost:4173/api/auth/google/callback`. Enable the **Google Classroom API** and add the three `classroom.*.readonly` scopes below, or `/api/classroom/sync` will fail.
-2. **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration (accounts: *organizations* / work-school). Register `http://localhost:4173/api/auth/microsoft/callback` and create a client secret.
+2. **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration (accounts: *organizations* / work-school). Register `http://localhost:4173/api/auth/microsoft/callback` and create a client secret. Under **API permissions → Microsoft Graph → Delegated**, add `EduAssignments.ReadBasic` and `EduRoster.ReadBasic`.
 3. Create **`.env.local`** at the repo root (git-ignored via `.env*`):
 
    ```env
@@ -287,8 +337,11 @@ There is one login for everybody. The session holds a single `userId` and nothin
 > the session. If a user granted access before the Classroom scopes were added, they
 > must log out and back in to re-consent.
 >
-> **Microsoft** only requests `openid email profile offline_access User.Read`. Its tokens
-> are stored, but there is no Teams sync yet — nothing writes `platform_source = 'Microsoft Teams'`.
+> **Microsoft** requests `openid email profile offline_access User.Read EduAssignments.ReadBasic EduRoster.ReadBasic`
+> (in both the authorize redirect and the token exchange in `routes/auth.js`). The two `Edu*`
+> scopes prepare for a Teams sync, but none exists yet — the tokens are stored and nothing calls
+> Graph with them. Tenants that require admin consent for these scopes show "Need admin approval"
+> at sign-in until a tenant admin grants it.
 >
 > Dev sessions use an in-memory store, so a backend restart (including `node --watch` reloads on save) logs you out. Fine for development.
 
@@ -309,9 +362,9 @@ There is one login for everybody. The session holds a single `userId` and nothin
 | POST   | `/api/auth/logout`            | —    | Destroys the session                                 |
 | GET    | `/api/assignments`            | Yes  | The **session user's** assignments + course/detail info |
 | POST   | `/api/assignments`            | Yes  | Creates a manual task; `201` with the created row    |
-| PATCH  | `/api/assignments/:id`        | Yes  | Edits a **manual** task; `404` for synced or other users' rows |
+| PATCH  | `/api/assignments/:id`        | Yes  | Edits a **manual** task; `404` for synced or other users' rows. A body of only `{ dashboard_hidden }` hides/shows **any** owned task instead |
 | PATCH  | `/api/assignments/:id/status` | Yes  | Sets the task's status — allowed on **synced** rows too |
-| DELETE | `/api/assignments/:id`        | Yes  | Deletes a **manual** task; `204` on success, `404` for synced or other users' rows |
+| DELETE | `/api/assignments/:id`        | Yes  | Deletes a **manual** task with its `Schedule` and `Notification` rows; `204` on success, `404` for synced or other users' rows, `500` on failure |
 | GET    | `/api/announcements`          | Yes  | The session user's Classroom announcements, newest first |
 | POST   | `/api/analytics/events`       | Yes  | Records one allow-listed client event; best effort   |
 | POST   | `/api/classroom/sync`         | Yes  | Imports Google Classroom coursework **and announcements** into the DB |
@@ -324,7 +377,7 @@ There is one login for everybody. The session holds a single `userId` and nothin
 | PUT    | `/api/user/settings`          | Yes  | Upserts `{ lunch_start, lunch_end, working_hours_start, working_hours_end }` |
 | PATCH  | `/api/tasks/:id/duration`     | Session* | Sets `Assignment_Detail.time_estimate` (`1`–`1440` minutes) and mirrors it onto `Schedule` |
 | GET    | `/api/schedule/weekly`        | Yes  | Tasks scheduled or due in the week from `?week_start=` (defaults to this Monday) |
-| POST   | `/api/schedule/generate`      | Yes  | Wipes the student's `Schedule` rows and lays every unfinished task out again |
+| POST   | `/api/schedule/generate`      | Yes  | Wipes the student's `Schedule` rows and lays every unfinished task out again; reports tasks that will finish late |
 
 `Yes` = requires a logged-in session (returns `401` otherwise).
 
@@ -340,6 +393,12 @@ the end of a day. A task's length is `Assignment_Detail.time_estimate`, defaulti
 minutes. Each working day runs from its `Working_Hours.start_time` to 23:59 — the stored
 `end_time` is always `23:59:00` and is not read. A weekday with no row is skipped entirely,
 so a student who has never saved working hours gets nothing scheduled.
+
+The response is `{ message, updated, lateTasks, total, scheduled, failed }`. Each entry in
+`updated` carries `due_date`, `late` (its last segment ends after the deadline) and
+`lateByMinutes`; `lateTasks` is the late subset. When everything fit but some tasks are late,
+`message` reads "จัดตารางสำเร็จ แต่มี N งานที่จะส่งไม่ทัน" and `/schedule` opens a modal listing
+them. A pool connection failure is now caught and answered `500` instead of crashing the handler.
 
 Three tables look related and are not interchangeable:
 
@@ -376,9 +435,11 @@ Synced coursework is deliberately not editable: the platforms stay the source of
 different course through this route even though `EditTaskModal` sends the key.
 
 `DELETE /api/assignments/:id` (UR08) checks the same ownership-and-manual condition, then
-removes `Assignment_Detail` and `Assignment` in one transaction. The schema declares no
-`ON DELETE CASCADE`, so dropping the detail row by hand is what keeps orphans out; the same
-reason `POST` writes both rows inside a transaction.
+removes `Notification`, `Schedule`, `Assignment_Detail` and `Assignment` in one transaction,
+in that order. The schema declares no `ON DELETE CASCADE`, so dropping the child rows by hand
+is what keeps orphans out — and before `Notification` and `Schedule` were added, deleting a
+task that had been scheduled or reminded failed on their foreign keys. The same reason `POST`
+writes both rows inside a transaction.
 
 ### Status is the student's, not the platform's
 
@@ -531,7 +592,9 @@ default UTC, reminders fire 7 hours out and `daily_repeat_time` of `08:00` means
 
 A reminder is due when `NOW()` has passed `due_date - lead_minutes` and the deadline itself
 has **not** passed — a "1 day left" mail arriving after the deadline is worse than none.
-Tasks that are `submitted` or `completed` are excluded (FR-07.4), as are suspended accounts.
+Tasks that are `submitted` are excluded (FR-07.4), as are suspended accounts. `completed` is
+not: it means done but not handed in, so reminders keep coming until the student marks it
+`submitted` (`SENT_STATUSES`). Marking it `submitted` also cancels its unsent reminders.
 
 #### `trigger_type` is the deduplication key
 
@@ -648,7 +711,7 @@ reporting a success that never left the building.
 
 The settings panel also lists the unfinished tasks these preferences apply to (UC-8 step 2).
 It is read-only and reads `GET /api/assignments`, the same endpoint the rest of the app
-uses — no route was added for it — and filters with `withDerived` / `isDone` from
+uses — no route was added for it — and filters with `withDerived` / `isSubmitted` from
 [`tasks.js`](frontend/src/tasks.js), so it previews exactly what the sender will pick up.
 
 Quick check:
@@ -679,7 +742,8 @@ assignment-hub/
 │   ├── 010_schedule_setting.sql        # Schedule_Setting table
 │   ├── 011_assignment_time_estimate.sql # Assignment_Detail.time_estimate
 │   ├── 012_rbac.sql                    # one User_Account + roles and permissions
-│   └── 013_notifications.sql           # settings, delivery bookkeeping, announcements
+│   ├── 013_notifications.sql           # settings, delivery bookkeeping, announcements
+│   └── 014_dashboard_hidden.sql        # Assignment_Detail.dashboard_hidden
 ├── migrate.sh / migrate.bat  # loop over migrations/*.sql in filename order
 ├── Caddyfile                 # TLS reverse proxy config (used by the `tls` profile)
 ├── .env                      # deploy settings for Compose substitution (git-ignored)
@@ -715,16 +779,20 @@ assignment-hub/
 │       │   └── oauthSession.js   # `state` handling and the link-mode flow
 │       └── utils/dueDate.js  # datetime-local → DATETIME, kept in wall-clock time
 └── frontend/
-    ├── Dockerfile
+    ├── Dockerfile            # npm install → npm run build → vite preview :4173
     ├── package.json          # react, react-router-dom, vite
-    ├── vite.config.js        # dev server + /api proxy to backend
+    ├── vite.config.js        # `server` (npm run dev) and `preview` (Docker) blocks, both proxy /api
+    ├── test/                 # node:test suites (`node --test "frontend/test/*.test.mjs"`)
+    ├── public/images/        # AdPopup image
     ├── index.html            # bare Vite entry (fonts are injected from GlobalStyles.jsx)
     └── src/
         ├── main.jsx          # React entry
         ├── App.jsx           # router: student routes + protected /admin/*
         ├── theme.js          # design tokens: colours, font, radii, shadows, Thai day/month names
         ├── tasks.js          # shared task model: STATUS, filters, isDone, withDerived, date fmt
-        ├── useAssignments.js # shared hook: fetch + status/delete/edit handlers
+        ├── useAssignments.js # shared hook: fetch + status/hide/delete/edit handlers
+        ├── dashboardVisibility.mjs # which tasks the dashboard shows
+        ├── studentProfile.js # cached /api/me result shared across pages
         ├── analytics.js      # trackClientEvent — allow-listed, failure-swallowing
         ├── GlobalStyles.jsx  # injects the Maitree webfont + base CSS, sets lang="th"
         ├── pages/
@@ -737,7 +805,7 @@ assignment-hub/
         │   ├── Schedule.jsx     # working hours, lunch, time estimates, auto-schedule
         │   ├── WeeklyView.jsx   # the generated schedule over one week
         │   └── admin/            # protected monitoring and business analytics pages
-        ├── components/       # Sidebar, StatCard, AssignmentTable, TaskRow, BarChart,
+        ├── components/       # Sidebar, StatCard, AssignmentTable, AssignmentActionsMenu, TaskRow, BarChart,
         │                     # DonutChart, Calendar, DeadlineList, UrgentChecklist,
         │                     # AddTaskModal, EditTaskModal, NotificationSettings, Toggle,
         │                     # ProviderButton, BrandMark, AutoScheduleButton,
@@ -815,7 +883,8 @@ Two columns are load-bearing in the same way. `Assignment.task_type` holds one o
 and is `NULL` for synced coursework, which carries no equivalent. `Assignment_Detail.status_updated_at`
 is `NULL` until the student sets a status by hand, and the Classroom sync reads that `NULL`
 as permission to write status — so the column is a flag about *who owns the field*, not just
-an audit timestamp. Never backfill it.
+an audit timestamp. Never backfill it. `Assignment_Detail.dashboard_hidden` (`NOT NULL DEFAULT FALSE`)
+is the student's other private flag — written only by the hide menu, never by the sync.
 
 `Notification_Setting` is 1:1 with `User_Account` and holds the reminder preferences;
 `Notification_Lead_Time` holds one row per selected lead time. Two choices there are worth
@@ -873,6 +942,7 @@ do not rerun a migration that has already been applied.
 | `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` | `/api/assignments`, auto-scheduling |
 | `012_rbac.sql` | folds `Student` and `Admin` into one `User_Account`; `Role` / `Permission` / `Role_Permission` / `User_Role`; the two roles `admin` and `student` | role-based access control, one login page |
 | `013_notifications.sql` | `Notification_Setting` + `Notification_Lead_Time`; `Notification` unique key and retry columns; announcement targets and their on/off column | UC-6, UC-8, FR-07, UR12 |
+| `014_dashboard_hidden.sql` | `Assignment_Detail.dashboard_hidden` | hiding tasks from the dashboard |
 
 **Two of these are merges.** RBAC was three files (build a `User_Account` supertype with
 `Student` and `Admin` under it, throw that table away and rename `Student` into its place,
@@ -897,11 +967,11 @@ messages use the previous numbers:
 | `008_admin_microsoft_identity` | `009_admin_microsoft_identity` |
 | `015_notifications` | `013_notifications` |
 
-Pick `014` for the next migration. A branch that still adds a file under an old number
+Pick `015` for the next migration. A branch that still adds a file under an old number
 should be renumbered before it merges.
 
 > `012` and `013` guard every step with an `information_schema` lookup, so rerunning them is
-> a no-op rather than an error. `001`–`011` are bare `ALTER TABLE`s and are not guarded.
+> a no-op rather than an error. `001`–`011` and `014` are bare `ALTER TABLE`s and are not guarded.
 
 `migrate.sh` (and `migrate.bat` for cmd) runs them all in order against a running stack:
 
@@ -958,7 +1028,14 @@ away from HTTP — including `adminIdentity` and `analytics` validation:
 docker compose exec backend npm test
 ```
 
-No database is needed: each suite passes a fake `db` object. There are no frontend tests.
+No database is needed: each suite passes a fake `db` object.
+
+The frontend has one suite, `frontend/test/dashboardVisibility.test.mjs`. The frontend image
+does not ship tests, so run it on the host with Node 22+ (the glob form needs it):
+
+```bash
+node --test "frontend/test/*.test.mjs"
+```
 
 ## Deploying over HTTPS
 
@@ -998,8 +1075,11 @@ Steps:
 
    Without `PUBLIC_URL` the OAuth redirect URIs fall back to `http://localhost:4173` and
    Google sends the browser there after consent.
-2. **`server.allowedHosts`** in `frontend/vite.config.js` must list the hostname, or Vite
-   answers every request with `403 Blocked request`.
+2. **`preview.allowedHosts`** in `frontend/vite.config.js` must list the hostname, or Vite
+   answers every request with `403 Blocked request`. The container runs `vite preview`, so the
+   `preview` block is the one that counts; `server.allowedHosts` only affects `npm run dev`.
+   The `'161.246.xx.xx'` entry there is a placeholder for the VM's IP. The config is baked
+   into the image, so a change needs `docker compose up -d --build frontend`.
 3. **Start with the profile** — a port-mapping or `.env` change needs a recreate, not a
    restart:
 
@@ -1040,17 +1120,21 @@ different machine.
 | `docker compose up --build`      | Build and run all three services        |
 | `docker compose down`            | Stop all services                       |
 | `docker compose down -v`         | Stop and wipe DB data (re-run init.sql). **Every account and synced task is lost** |
+| `docker compose up -d --build frontend` | Rebuild the frontend image after a frontend change |
 | `docker compose logs -f backend` | Follow backend logs                     |
 | `docker compose logs -f frontend`| Follow frontend logs                    |
 | `docker compose --profile tls up -d` | Bring the stack up with Caddy in front (deployed hosts) |
 | `docker compose rm -fsv <service>`   | Drop a service **and its anonymous `node_modules` volume** — the fix after adding a dependency |
 | `./migrate.sh` / `migrate.bat`   | Apply every one-time migration to an older database |
 | `docker compose exec backend npm test` | Run the backend `node:test` suites (no DB needed) |
+| `node --test "frontend/test/*.test.mjs"`      | Run the frontend `node:test` suite (on the host) |
 
 ## Troubleshooting
 
 - **`port is already allocated`** — an old container is holding 3306/3000/4173. `docker ps -a`, then `docker rm -f <name>`.
-- **`403 Blocked request. This host is not allowed`** — Vite rejects Host headers it doesn't recognise. Add the hostname to `server.allowedHosts` in `frontend/vite.config.js`, then recreate the frontend container (the setting is read once at startup, so a reload won't pick it up).
+- **`403 Blocked request. This host is not allowed`** — Vite rejects Host headers it doesn't recognise. Add the hostname to `preview.allowedHosts` in `frontend/vite.config.js`, then `docker compose up -d --build frontend` (the config is copied into the image, so a restart won't pick it up).
+- **A frontend change doesn't show up in the browser** — the container serves the `dist` built into its image. `docker compose up -d --build frontend`, or use `npm run dev` while developing.
+- **`Unknown column 'dashboard_hidden'`** — the database predates migration `014`. Run `./migrate.sh`.
 - **`ERR_CONNECTION_REFUSED` on the bare domain** — nothing is listening on port 80. Either `FRONTEND_PORT` is still 4173, or the `tls` profile wasn't used so Caddy never started. `docker compose ps` shows what is actually published. A *refused* connection means the firewall let the packet through and no process answered; a firewall block shows up as a **timeout** instead — a useful way to tell the two apart.
 - **Every `/api/*` route returns `500`, including `/api/health`** — the request never reached Express. `/api/health` can only answer `200` or `503`, so a `500` there is Vite's proxy failing to connect to `backend:3000`. Check `docker compose logs backend` for a crash; `docker compose logs frontend | grep proxy` confirms it (`[vite] http proxy error`).
 - **`Error 400: redirect_uri_mismatch`** — Google compares the `redirect_uri` byte-for-byte against what is registered on **that specific OAuth client**. Before editing anything in the Console, confirm which client the server is actually sending:

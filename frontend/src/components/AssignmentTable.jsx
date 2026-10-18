@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { isDashboardHidden } from '../dashboardVisibility.mjs';
 import AssignmentActionsMenu from './AssignmentActionsMenu';
 import { C, FONT, R, SHADOW } from '../theme';
+import { STATUS_OPTIONS } from '../tasks';
 
 function AssignmentTable({
   assignments = [],
@@ -96,10 +97,9 @@ function AssignmentTable({
                           borderColor: hasError ? C.pinkDark : C.pageBg,
                         }}
                       >
-                        <option value="not_started">ยังไม่เริ่ม</option>
-                        <option value="in_progress">กำลังทำ</option>
-                        <option value="submitted">ส่งแล้ว</option>
-                        <option value="completed">เสร็จสิ้น</option>
+                        {STATUS_OPTIONS.map(({ value, label }) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
                       </select>
                       {hasError && <span style={styles.errorText}>⚠️</span>}
                     </div>

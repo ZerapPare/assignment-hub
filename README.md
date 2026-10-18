@@ -65,6 +65,8 @@ SESSION_SECRET=<สุ่มข้อความยาวๆ>
 - **Google** — [Google Cloud Console](https://console.cloud.google.com/) → OAuth consent screen (External + ใส่อีเมลตัวเองเป็น Test user) → Credentials → OAuth client ID (Web) → redirect URI: `http://localhost:4173/api/auth/google/callback`
   - ต้องเปิด **Google Classroom API** และเพิ่ม scope `classroom.courses.readonly`, `classroom.coursework.me.readonly`, `classroom.student-submissions.me.readonly` ด้วย ไม่งั้นปุ่มซิงก์จะไม่ทำงาน
 - **Microsoft** — [Azure Portal](https://portal.azure.com/) → App registrations → New registration → เพิ่ม Web redirect URI: `http://localhost:4173/api/auth/microsoft/callback` แล้วสร้าง client secret
+  - login ขอ scope `EduAssignments.ReadBasic` และ `EduRoster.ReadBasic` ด้วย — เพิ่มใน **API permissions → Microsoft Graph → Delegated**
+    ถ้า tenant ของมหาวิทยาลัยบังคับ admin consent ผู้ใช้จะติดหน้า "Need admin approval" จนกว่า admin ของ tenant จะกดอนุญาต
 
 > ยังไม่ใส่ก็รันได้ แต่กดปุ่ม login แล้วจะ error จนกว่าจะมี `.env.local`
 
@@ -74,6 +76,7 @@ SESSION_SECRET=<สุ่มข้อความยาวๆ>
 docker compose up --build
 ```
 
+ครั้งแรกจะช้าหน่อย เพราะ image ของ frontend รัน `npm run build` ข้างในตอน build
 รอจนเห็น log ประมาณนี้:
 
 ```
@@ -100,8 +103,8 @@ db-1        | ... ready for connections
 | Path | หน้า |
 |---|---|
 | `/login` | หน้าเข้าสู่ระบบ (Google / Microsoft) |
-| `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน |
-| `/assignments` | งานทั้งหมด — ตารางงาน: ค้นหา + กรองตามแพลตฟอร์ม/สถานะ/รายวิชา, เปลี่ยนสถานะ, แก้ไข/ลบงานที่เพิ่มเอง |
+| `/home` | Dashboard — การ์ดสถิติ 4 ใบ, กราฟแท่ง 7 วันข้างหน้า, โดนัทสถานะงาน, ปฏิทิน, กำหนดส่งใกล้ถึง, checklist งานด่วน (ไม่นับงานที่ซ่อนไว้หรือเลยกำหนดแล้ว) |
+| `/assignments` | งานทั้งหมด — ตารางงาน: ค้นหา + กรองตามแพลตฟอร์ม/สถานะ/รายวิชา, เปลี่ยนสถานะ, เมนู `⋮` (ซ่อนจาก Dashboard · แก้ไข/ลบงานที่เพิ่มเอง) |
 | `/assignments/:id` | รายละเอียดงานชิ้นเดียว — เข้าจากการกดชื่องานในตาราง |
 | `/stream` | ประกาศจาก Classroom + กรองตามรายวิชา |
 | `/schedule` | จัดตาราง — เวลาเริ่มทำงานแต่ละวัน, พักเที่ยง, เวลาที่คาดว่าใช้ต่องาน, ปุ่มจัดตารางอัตโนมัติ |
@@ -123,10 +126,14 @@ db-1        | ... ready for connections
 (การ์ดสถิติ, กราฟ, ปฏิทิน, กำหนดส่งใกล้ถึง, งานด่วน) เข้าถึงได้จากเมนู `งานทั้งหมด` ใน sidebar
 
 - **ค้นหา** จากชื่องาน · รายวิชา · คำอธิบาย
-- **กรอง** ได้ 3 ชั้นพร้อมกัน — แท็บแพลตฟอร์ม (`ทั้งหมด` / `Classroom` / `Teams` / `เพิ่มเอง`),
-  dropdown สถานะ, dropdown รายวิชา
-- **ปุ่มแก้ไข / ลบ** ในแถว ขึ้นเฉพาะงานที่เพิ่มเอง — เปิด `EditTaskModal` (`PATCH /api/assignments/:id`)
-  หรือลบทิ้ง (`DELETE /api/assignments/:id`) งานที่ซิงก์มาจาก Classroom แก้/ลบไม่ได้ ให้แพลตฟอร์มเป็นเจ้าของข้อมูล
+- **กรอง** ได้ 3 ชั้นพร้อมกัน — แท็บแพลตฟอร์ม (`ทุกแพลตฟอร์ม` / `Google Classroom` / `Microsoft Team` / `อื่นๆ`),
+  dropdown สถานะ, dropdown รายวิชา (หน้า `/stream` ใช้แท็บชุดเดียวกัน ผ่าน `matchesPlatform` ใน `tasks.js`)
+  - งานที่เพิ่มเอง (`platform_source IS NULL`) อยู่ในแท็บ `อื่นๆ` — ไม่มีแท็บ `เพิ่มเอง` แยกแล้ว
+- **เมนู `⋮` ท้ายแถว** (`AssignmentActionsMenu`) รวมการจัดการงานไว้ที่เดียว ใช้คีย์บอร์ดได้ (ลูกศร / Home / End / Esc)
+  - `ซ่อน` / `แสดงบน Dashboard อีกครั้ง` — **ใช้ได้ทุกงาน รวมงานที่ซิงก์มา** ดู [ซ่อนจาก Dashboard](#ซ่อนจาก-dashboard)
+  - `แก้ไข` / `ลบ` — ขึ้นเฉพาะงานที่เพิ่มเอง เปิด `EditTaskModal` (`PATCH /api/assignments/:id`)
+    หรือลบทิ้ง (`DELETE /api/assignments/:id`) งานที่ซิงก์มาจาก Classroom แก้/ลบไม่ได้ ให้แพลตฟอร์มเป็นเจ้าของข้อมูล
+  - ลบไม่สำเร็จ ข้อความ error จะขึ้นเหนือตาราง (`deleteError`) โดยหน้าไม่หาย
 
 โค้ดที่สองหน้าใช้ร่วมกันแยกไว้ที่ [`src/tasks.js`](frontend/src/tasks.js) (ชุดสถานะ, ตัวกรอง, ตัวจัดรูปแบบวันที่,
 กติกาว่างานแบบไหนนับว่า "เสร็จ") และ [`src/useAssignments.js`](frontend/src/useAssignments.js)
@@ -135,15 +142,32 @@ db-1        | ... ready for connections
 
 ### สถานะงาน (UC-5)
 
-ช่องสถานะในตารางเป็น dropdown เลือกได้ 4 ค่า — `ยังไม่เริ่ม` · `กำลังทำ` · `ส่งแล้ว` · `เสร็จสมบูรณ์`
+ช่องสถานะในตารางเป็น dropdown เลือกได้ 4 ค่า เรียงตามลำดับการทำงาน — `ยังไม่เริ่ม` · `กำลังทำ` · `เสร็จ` (ทำเสร็จแล้ว ยังไม่ส่ง) · `ส่งแล้ว`
 เลือกแล้วยิง `PATCH /api/assignments/:id/status` ทันที **ใช้ได้กับงานที่ซิงก์มาด้วย** เพราะสถานะถือเป็น
 ความคืบหน้าส่วนตัวของนักศึกษา ไม่ใช่ข้อมูลของงานที่แพลตฟอร์มเป็นเจ้าของ
 
 ครั้งแรกที่ตั้งสถานะเอง คอลัมน์ `Assignment_Detail.status_updated_at` จะเปลี่ยนจาก `NULL` เป็นเวลาที่กด
 และตั้งแต่นั้น **ซิงก์จะไม่ทับสถานะนั้นอีก** (ก่อนหน้านั้น Google เป็นคนตั้งให้ — งานที่ `TURNED_IN`/`RETURNED`
-มาเป็น `ส่งแล้ว`) งานที่ `ส่งแล้ว` หรือ `เสร็จสมบูรณ์` จะหลุดออกจากการ์ด "งานด่วน" และ checklist 48 ชม.
+มาเป็น `ส่งแล้ว`) งานที่ `เสร็จ` หรือ `ส่งแล้ว` จะหลุดออกจากการ์ด "งานด่วน" และ checklist 48 ชม. และไม่ถูกจัดตารางอัตโนมัติ
+
+| สถานะ | ค่าใน DB | อีเมลเตือน | งานด่วน | จัดตาราง |
+|---|---|---|---|---|
+| ยังไม่เริ่ม / กำลังทำ | `not_started` / `in_progress` | ส่ง | ขึ้น | จัด |
+| เสร็จ | `completed` | **ยังส่ง** (ยังไม่ได้ส่งงาน) | ไม่ขึ้น | ไม่จัด |
+| ส่งแล้ว | `submitted` | ไม่ส่ง | ไม่ขึ้น | ไม่จัด |
 
 > ถ้ายิงไม่สำเร็จ error จะขึ้นในแถวนั้นแถวเดียว สถานะเดิมค้างไว้ ส่วนที่เหลือของหน้าไม่หาย
+
+### ซ่อนจาก Dashboard
+
+เลือก `ซ่อน` ในเมนู `⋮` แล้วงานนั้นจะหายจาก**การ์ด กราฟ ปฏิทิน กำหนดส่งใกล้ถึง และ checklist** บน `/home`
+แต่ยังอยู่ในหน้า `งานทั้งหมด` ตามปกติ (แถวพื้นจาง + ป้าย `ซ่อนแล้ว`) กดเมนูเดิมเพื่อแสดงกลับ
+
+- เก็บใน `Assignment_Detail.dashboard_hidden` (migration `014`) จึง**คงอยู่ข้ามเครื่องและข้ามการซิงก์** — ซิงก์ไม่แตะคอลัมน์นี้
+- ยิง `PATCH /api/assignments/:id` ด้วย body `{ "dashboard_hidden": true | false }` **อย่างเดียว** (มี key อื่นปนจะได้ `400`)
+  ใช้ได้กับงานที่ซิงก์มาด้วย เพราะเช็กแค่ว่าเป็นงานของผู้ใช้คนนั้น
+- นอกจากงานที่ซ่อน dashboard ยัง**ตัดงานที่เลยกำหนดส่งแล้ว**ออกเอง (`isDashboardVisible` ใน
+  [`dashboardVisibility.mjs`](frontend/src/dashboardVisibility.mjs)) และคำนวณใหม่ทุก 1 นาที
 
 ## การแจ้งเตือน (หน้าตั้งค่า)
 
@@ -179,7 +203,7 @@ db-1        | ... ready for connections
 ### ตัวส่งอีเมล (FR-07)
 
 `backend/src/services/notificationSender.js` เดินรอบละ 5 นาที ส่งอีเมลเตือนล่วงหน้าตาม lead time
-ที่ตั้งไว้ ข้ามงานที่ `submitted` / `completed` และไม่ส่งถ้าเลยกำหนดไปแล้ว ปุ่ม `ส่งอีเมลทดสอบ`
+ที่ตั้งไว้ ข้ามเฉพาะงานที่ `submitted` (งานที่ `completed` ยังได้เมลจนกว่าจะเปลี่ยนเป็นส่งแล้ว) และไม่ส่งถ้าเลยกำหนดไปแล้ว ปุ่ม `ส่งอีเมลทดสอบ`
 ใช้งานได้แล้วผ่าน `POST /api/notification-settings/test`
 
 ตั้งค่า SMTP ใน `.env.local` (`SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `MAIL_FROM`)
@@ -219,7 +243,7 @@ Database ชื่อ `assignment_hub` ถูกสร้างอัตโน�
 | `Product_Event` | event การใช้งานแบบ metadata ปลอดภัยสำหรับ business analytics |
 | `Course` | รายวิชา + แพลตฟอร์มต้นทาง (Classroom/Teams) |
 | `Assignment` | งาน: ชื่อ, ประเภท (`task_type`), ลิงก์ต้นทาง, วิชา |
-| `Assignment_Detail` | รายละเอียด: คำอธิบาย, deadline, สถานะ, `status_updated_at`, priority |
+| `Assignment_Detail` | รายละเอียด: คำอธิบาย, deadline, สถานะ, `status_updated_at`, `dashboard_hidden`, priority |
 | `Schedule` | ช่วงเวลาที่ตัวจัดตารางอัตโนมัติวางไว้ (แตกเป็นหลายช่วงได้ใน `segments`) |
 | `Notification` | บันทึกการส่งอีเมลเตือนแต่ละฉบับ — ตัวส่งอีเมลใช้เป็นตัวกันส่งซ้ำและนับ retry |
 | `Notification_Setting` | ตั้งค่าการแจ้งเตือนของนักศึกษา (เปิด/ปิด, ซ้ำรายวัน + เวลา, ค่ากำหนดเองล่าสุด) |
@@ -263,6 +287,7 @@ migrate.bat         # Windows cmd
 | `011_assignment_time_estimate.sql` | `Assignment_Detail.time_estimate` — database ที่สร้างก่อนคอลัมน์นี้จะทำให้ `/api/assignments` ตอบ `ER_BAD_FIELD_ERROR` |
 | `012_rbac.sql` | ยุบ `Student`/`Admin` เหลือ `User_Account` ตารางเดียว + `Role`/`Permission`/`Role_Permission`/`User_Role` และ 2 บทบาท (`admin`, `student`) · รวมหน้า login เป็นหน้าเดียว |
 | `013_notifications.sql` | ตาราง `Notification_Setting` + `Notification_Lead_Time` · unique key กันส่งอีเมลซ้ำ + คอลัมน์ retry บน `Notification` · แจ้งเตือนประกาศใหม่พร้อมสวิตช์เปิด/ปิด |
+| `014_dashboard_hidden.sql` | `Assignment_Detail.dashboard_hidden` — database ที่ยังไม่มีคอลัมน์นี้ `/api/assignments` จะตอบ `ER_BAD_FIELD_ERROR` และ dashboard ขึ้น "รอ database พร้อม..." |
 
 **012 กับ 013 เป็นไฟล์ที่รวมมาจากหลายไฟล์** — เดิม RBAC และการแจ้งเตือนแยกเป็นเรื่องละ 3 ไฟล์
 รันเรียงกันแล้วทำงานทับล้างกันเอง (ไฟล์แรกสร้าง `User_Account` เป็น supertype แล้วไฟล์ถัดมาทิ้งตารางนั้น ·
@@ -275,10 +300,10 @@ role ที่เพิ่งสร้างถูกเปลี่ยนชื
 > database ที่มีอยู่จึงไม่ได้รับผลกระทบ (สคริปต์ไม่ได้จำว่ารันไฟล์ไหนไปแล้ว)
 > เลขเก่า → ใหม่: `005_admin_monitoring` → `004` · `006_announcement` → `005` · `007_score` → `008` ·
 > `008_admin_microsoft_identity` → `009` · `015_notifications` → `013`
-> **migration ถัดไปใช้เลข `014`**
+> **migration ถัดไปใช้เลข `015`**
 
 > **ทุกขั้นใน `012` และ `013` มี guard** เช็ก `information_schema` ก่อนทำ รันซ้ำจึงไม่ error และไม่เปลี่ยนอะไร
-> ต่างจากไฟล์ `001`–`011` ที่เป็น `ALTER TABLE` เปล่า ๆ รันซ้ำแล้วขึ้น `Duplicate column name` (ไม่เป็นอันตราย)
+> ต่างจากไฟล์ `001`–`011` และ `014` ที่เป็น `ALTER TABLE` เปล่า ๆ รันซ้ำแล้วขึ้น `Duplicate column name` (ไม่เป็นอันตราย)
 
 เช็คว่าลงครบ:
 
@@ -341,9 +366,9 @@ An account holding any administrative permission gets an extra "ผู้ดู�
 | POST | `/api/auth/logout` | — | ออกจากระบบ (ลบ session) |
 | GET | `/api/assignments` | ต้อง | งาน**ของผู้ใช้ที่ login อยู่** (JOIN course + detail) |
 | POST | `/api/assignments` | ต้อง | เพิ่มงานเอง คืน `201` พร้อมแถวที่สร้าง |
-| PATCH | `/api/assignments/:id` | ต้อง | แก้งานที่เพิ่มเอง (งานที่ซิงก์มาแก้ไม่ได้ — คืน `404`) |
+| PATCH | `/api/assignments/:id` | ต้อง | แก้งานที่เพิ่มเอง (งานที่ซิงก์มาแก้ไม่ได้ — คืน `404`) · ถ้า body เป็น `{ dashboard_hidden }` อย่างเดียว = ซ่อน/แสดงบน dashboard ได้**ทุกงาน** |
 | PATCH | `/api/assignments/:id/status` | ต้อง | เปลี่ยนสถานะ — **ใช้ได้กับงานที่ซิงก์มาด้วย** |
-| DELETE | `/api/assignments/:id` | ต้อง | ลบงานที่เพิ่มเอง คืน `204` (งานที่ซิงก์มาลบไม่ได้ — คืน `404`) |
+| DELETE | `/api/assignments/:id` | ต้อง | ลบงานที่เพิ่มเอง พร้อมแถว `Schedule` / `Notification` ของงานนั้น คืน `204` (งานที่ซิงก์มาลบไม่ได้ — คืน `404`) |
 | GET | `/api/announcements` | ต้อง | ประกาศ Classroom ของผู้ใช้ เรียงใหม่สุดก่อน |
 | POST | `/api/classroom/sync` | ต้อง | ดึงงาน**และประกาศ**จาก Google Classroom มาลง DB |
 | GET | `/api/notification-settings` | ต้อง | ค่าตั้งการแจ้งเตือน (ยังไม่เคยบันทึก → คืนค่า default) |
@@ -354,7 +379,7 @@ An account holding any administrative permission gets an extra "ผู้ดู�
 | GET · PUT | `/api/user/settings` | ต้อง | เวลาพักเที่ยง (GET ครั้งแรก**สร้างแถว default ให้**) |
 | PATCH | `/api/tasks/:id/duration` | ต้อง* | ตั้งเวลาที่คาดว่าใช้ `time_estimate` 1–1440 นาที |
 | GET | `/api/schedule/weekly` | ต้อง | งานที่ถูกจัดหรือครบกำหนดในสัปดาห์ (`?week_start=`) |
-| POST | `/api/schedule/generate` | ต้อง | ลบตารางเดิมแล้วจัดงานที่ยังไม่เสร็จลงเวลาว่างใหม่ทั้งหมด |
+| POST | `/api/schedule/generate` | ต้อง | ลบตารางเดิมแล้วจัดงานที่ยังไม่เสร็จลงเวลาว่างใหม่ทั้งหมด · คืน `lateTasks` = งานที่จัดแล้วแต่จบหลังกำหนดส่ง |
 
 `ต้อง` = ต้องมี session ไม่งั้นได้ `401` — และทุก query ผูกกับ `student_id` จาก session
 ไม่ได้รับ id มาจาก client ผู้ใช้จึงเห็นเฉพาะข้อมูลของตัวเอง
@@ -397,7 +422,11 @@ An account holding any administrative permission gets an extra "ผู้ดู�
 > — ซิงก์สำเร็จแต่งานไม่ขึ้น และ**จะไม่มีวันเจอบั๊กนี้ตอน dev คนเดียว**
 > รายละเอียดที่ [PROJECT_SETUP.md](PROJECT_SETUP.md#both-upsert-keys-must-include-the-owner)
 
-> Microsoft ยังเป็นแค่ login — ยังไม่มี sync ของ Teams
+> Microsoft ยังเป็นแค่ login — ยังไม่มี sync ของ Teams (ขอ scope `EduAssignments.ReadBasic` / `EduRoster.ReadBasic` ไว้ล่วงหน้าแล้ว แต่ยังไม่มีโค้ดเรียก Graph)
+
+`POST /api/schedule/generate` คืน `{ message, updated, lateTasks, total, scheduled, failed }` — แต่ละแถวใน `updated`
+มี `due_date`, `late` และ `lateByMinutes` ถ้ามีงานส่งไม่ทัน `message` จะเป็น "จัดตารางสำเร็จ แต่มี N งานที่จะส่งไม่ทัน"
+และหน้า `/schedule` เปิด modal รายการงานนั้นให้ดู
 
 ## Project Structure (ย่อ)
 
@@ -406,7 +435,7 @@ assignment-hub/
 ├── docker-compose.yml   # 3 services: frontend + backend + db
 ├── .env.local           # secret OAuth (git-ignored — สร้างเอง)
 ├── init.sql             # schema เปล่า ไม่มีข้อมูลตัวอย่าง (รันครั้งแรก)
-├── migrations/          # ALTER สำหรับ database ที่สร้างไปแล้ว (001–013)
+├── migrations/          # ALTER สำหรับ database ที่สร้างไปแล้ว (001–014)
 ├── migrate.sh           # รัน migration ทั้งหมดเรียงตามลำดับ (มี .bat สำหรับ Windows)
 ├── backend/             # Express API + mysql2 + OAuth + Classroom sync
 │   ├── server.js        # entry บาง ๆ — ตั้ง session แล้ว mount router
@@ -421,16 +450,21 @@ assignment-hub/
 │       ├── utils/       # dueDate — แปลง datetime-local เป็น DATETIME ตามเวลาที่ผู้ใช้พิมพ์
 │       └── middleware/  # requireAuth, requireAdmin, permissions, errorHandler, metrics
 └── frontend/            # React + Vite + react-router
+    ├── Dockerfile           # npm install → npm run build → vite preview :4173
+    ├── test/                # node:test (dashboardVisibility)
+    ├── public/images/       # รูปโฆษณาใน AdPopup
     └── src/
         ├── App.jsx          # router: /login, /home, /assignments, /stream, /schedule,
         │                    # /weekly, /settings, /admin/*
         ├── theme.js         # design token (สี, ฟอนต์, radius, ชื่อวัน/เดือนไทย)
         ├── tasks.js         # สถานะงาน, ตัวกรอง, ตัวจัดรูปแบบวันที่ — ใช้ร่วมทุกหน้า
-        ├── useAssignments.js # hook: ดึงงาน + handler เปลี่ยนสถานะ/ลบ/แก้ไข
+        ├── useAssignments.js # hook: ดึงงาน + handler เปลี่ยนสถานะ/ซ่อน/ลบ/แก้ไข
+        ├── dashboardVisibility.mjs # งานไหนขึ้น dashboard (ไม่ซ่อน + ยังไม่เลยกำหนด)
+        ├── studentProfile.js # cache ข้อมูล /api/me ข้ามหน้า (ล้างตอน logout / 401)
         ├── GlobalStyles.jsx # โหลดฟอนต์ Maitree + base CSS
         ├── pages/           # LoginPage, HomePage, AssignmentsPage, AssignmentDetailPage,
         │                    # StreamPage, Schedule, WeeklyView, SettingsPage, admin/
-        ├── components/      # Sidebar, StatCard, AssignmentTable, TaskRow, BarChart,
+        ├── components/      # Sidebar, StatCard, AssignmentTable, AssignmentActionsMenu, TaskRow, BarChart,
         │                    # DonutChart, Calendar, DeadlineList, UrgentChecklist,
         │                    # AddTaskModal, EditTaskModal, NotificationSettings,
         │                    # Toggle, ProviderButton, BrandMark, AutoScheduleButton,
@@ -482,10 +516,15 @@ FRONTEND_PORT=4174
 ทุก service ตั้ง `restart: unless-stopped` ไว้ ถ้า backend ล้มหรือ VM reboot ระบบจะกลับขึ้นมาเอง
 (ต้อง `sudo systemctl enable docker` ครั้งเดียว และอย่า `docker compose stop` ก่อนปิดเครื่อง)
 
-### 2. เพิ่มโดเมนใน `allowedHosts`
+### 2. เพิ่มโดเมนใน `preview.allowedHosts`
 
 ที่ [`frontend/vite.config.js`](frontend/vite.config.js) ไม่งั้น Vite ตอบ `403 Blocked request`
-(ตอนนี้มี `assignment-hub.cskmitl.com` อยู่แล้ว)
+(ตอนนี้มี `assignment-hub.cskmitl.com` อยู่แล้ว) — container รัน `vite preview` จึงต้องเป็นบล็อก **`preview`**
+ไม่ใช่ `server` (`server.allowedHosts` มีผลเฉพาะ `npm run dev`)
+
+> ในบล็อก `preview` ยังมี `'161.246.xx.xx'` ค้างอยู่ — เป็น placeholder ให้แทนด้วย IP จริงของ VM ถ้าจะเข้าผ่าน IP ตรง ๆ หรือลบทิ้ง
+
+`vite.config.js` ถูก copy เข้า image ตอน build แก้แล้วต้อง `--build` ใหม่ ไม่ใช่แค่ restart
 
 ### 3. รันด้วย profile `tls`
 
@@ -517,18 +556,25 @@ sudo tcpdump -ni eth0 'tcp[tcpflags] & tcp-syn != 0 and not port 22' -c 5
 
 ### อัปเดตโค้ดหลัง deploy แล้ว
 
-ซอร์สถูก mount เข้า container อยู่ (`./frontend:/app`, `./backend:/app`) แต่สองฝั่งโหลดใหม่ไม่เหมือนกัน:
-backend ใช้ `node --watch` ส่วน frontend รัน **`vite preview`** ที่เสิร์ฟ `frontend/dist` ซึ่ง build ไว้แล้ว
-**ไม่มี HMR** — แก้ `.jsx` แล้วต้อง `npm run build` และ commit `dist/` ไปด้วย ไม่งั้นเซิร์ฟเวอร์ยังเสิร์ฟของเก่า
+สองฝั่งโหลดโค้ดใหม่ไม่เหมือนกัน:
+
+- **backend** — mount ซอร์สเข้า container (`./backend:/app`) และรัน `node --watch`
+- **frontend** — **ไม่ได้ mount ซอร์สแล้ว** `frontend/Dockerfile` รัน `npm run build` ตอน build image
+  แล้วเสิร์ฟ `dist` ที่อยู่ใน image ด้วย `vite preview` (`.dockerignore` ตัด `dist/` ในเครื่องทิ้ง)
+  **ไม่มี HMR** — แก้ `.jsx` แล้วต้อง build image ใหม่ ไม่งั้นเซิร์ฟเวอร์ยังเสิร์ฟของเก่า
 
 | แก้อะไร | ต้องทำ |
 |---|---|
-| โค้ด frontend (`.jsx`, `.css`) | `cd frontend && npm run build` แล้ว commit `dist/` — บนเซิร์ฟเวอร์แค่ `git pull` |
+| โค้ด frontend (`.jsx`, `.css`, `vite.config.js`, `public/`) | `git pull` แล้ว `docker compose --profile tls up -d --build frontend` |
 | โค้ด backend (`.js`, `server.js`) | ปกติไม่ต้องทำอะไร แต่ `node --watch` มักไม่เห็นไฟล์ที่มาทาง bind mount → `docker compose restart backend` |
 | `.env` / `docker-compose.yml` | `docker compose --profile tls up -d --force-recreate` |
-| `vite.config.js` | `docker compose restart frontend` |
 | `Caddyfile` | `docker compose restart caddy` |
-| เพิ่ม npm package | `docker compose rm -fsv <service>` แล้ว `docker compose --profile tls up -d --build` |
+| เพิ่ม npm package ฝั่ง backend | `docker compose rm -fsv backend` แล้ว `docker compose --profile tls up -d --build backend` |
+| เพิ่ม npm package ฝั่ง frontend | `docker compose --profile tls up -d --build frontend` (ไม่มี anonymous volume ให้ลบแล้ว) |
+| migration ใหม่ใน `migrations/` | `./migrate.sh` |
+
+> `frontend/dist/` ยังถูก commit อยู่ใน git แต่ Docker ไม่ได้ใช้แล้ว — ไม่ต้อง build แล้ว commit ตามทุกครั้ง
+> (ไฟล์ใน git อาจเก่ากว่าซอร์ส อย่าใช้อ้างอิง)
 
 แถวสุดท้ายสำคัญ — package ใหม่ต้องลบ anonymous volume ของ `node_modules` ทิ้งก่อน ไม่งั้น container
 ยังใช้ของเก่าแล้วพังด้วย `Cannot find module` (`--force-recreate` เฉย ๆ ไม่ช่วย)
@@ -545,8 +591,12 @@ backend ใช้ `node --watch` ส่วน frontend รัน **`vite preview
 | `docker compose down` | หยุดทั้งหมด |
 | `docker compose down -v` | หยุด + ลบข้อมูล DB (ใช้เมื่อแก้ `init.sql`) — **บนเซิร์ฟเวอร์ข้อมูลผู้ใช้หายหมด** |
 | `docker compose rm -fsv <service>` | ลบ service + anonymous volume (ใช้ตอนเพิ่ม npm package) |
+| `docker compose up -d --build frontend` | build frontend ใหม่หลังแก้โค้ด (ไม่มี hot reload) |
+| `cd frontend && npm run dev` | dev server นอก Docker ที่ http://localhost:5173 มี HMR (ต้อง `npm install` ก่อน) |
 | `docker compose logs -f backend` | ดู log backend |
 | `./migrate.sh` · `migrate.bat` | รัน migration ทั้งหมดกับ database ที่มีอยู่แล้ว |
+| `docker compose exec backend npm test` | รันเทสต์ backend (`node:test`, ไม่ต้องใช้ DB) |
+| `node --test "frontend/test/*.test.mjs"` | รันเทสต์ frontend (ต้องมี Node 22 ขึ้นไปในเครื่อง — glob ใน `--test` ไม่มีใน Node 20) |
 
 > `init.sql` รันเฉพาะตอนสร้าง database ครั้งแรก ถ้าแก้ไฟล์แล้ว table ไม่เปลี่ยน ให้ `docker compose down -v` ก่อนแล้ว `up` ใหม่
 > — **บนเซิร์ฟเวอร์อย่าทำ** ข้อมูลผู้ใช้ทั้งหมดจะหาย ให้เขียน migration แทน
@@ -555,7 +605,10 @@ backend ใช้ `node --watch` ส่วน frontend รัน **`vite preview
 
 | อาการ | สาเหตุ |
 |---|---|
-| `403 Blocked request. This host is not allowed` | โดเมนไม่อยู่ใน `allowedHosts` ของ [vite.config.js](frontend/vite.config.js) — เพิ่มแล้วต้อง restart frontend |
+| `403 Blocked request. This host is not allowed` | โดเมนไม่อยู่ใน `preview.allowedHosts` ของ [vite.config.js](frontend/vite.config.js) — เพิ่มแล้วต้อง `up -d --build frontend` |
+| แก้ `.jsx` แล้วหน้าเว็บไม่เปลี่ยน | frontend เสิร์ฟ `dist` ที่ build ไว้ใน image → `docker compose up -d --build frontend` (หรือใช้ `npm run dev` ตอนพัฒนา) |
+| Microsoft login ขึ้น "Need admin approval" | tenant บังคับ admin consent สำหรับ scope `EduAssignments.ReadBasic` / `EduRoster.ReadBasic` — ให้ admin ของ tenant อนุญาต |
+| `Unknown column 'dashboard_hidden'` | database สร้างก่อน migration `014` → `./migrate.sh` |
 | `ERR_CONNECTION_REFUSED` | ไม่มีอะไรฟังพอร์ตนั้น เช็ค `docker compose ps` · **refused = firewall ผ่านแต่ไม่มีคนฟัง / timeout = โดน firewall บล็อก** |
 | `/api/*` เป็น `500` ทุกเส้น | request ไปไม่ถึง Express — `/api/health` คืนได้แค่ `200`/`503` ถ้าได้ `500` แปลว่า Vite proxy ต่อ `backend:3000` ไม่ติด ดู `docker compose logs backend` |
 | `Cannot find module '<pkg>'` | anonymous volume บัง `node_modules` ใหม่ → `docker compose rm -fsv backend` แล้ว `up -d --build` |

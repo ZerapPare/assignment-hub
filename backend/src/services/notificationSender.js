@@ -16,8 +16,10 @@ const MAX_ATTEMPTS = RETRY_MINUTES.length + 1; // the first send, plus one per r
 // unfinished tasks are not thirty mails. Overdue work stays in range.
 const DAILY_WINDOW_DAYS = 7;
 
-// Finished, for FR-07.4. Keep in step with DONE in frontend/src/tasks.js.
-const DONE_STATUSES = ['submitted', 'completed'];
+// Handed in, for FR-07.4. Deliberately narrower than DONE in frontend/src/tasks.js:
+// a task marked 'completed' (done, not yet handed in) still gets reminders.
+const SENT_STATUSES = ['submitted'];
+const SENT_IN = SENT_STATUSES.map(() => '?').join(', ');
 
 // For a student who never saved settings. Must match DEFAULTS.lead_times in
 // routes/notifications.js, or the panel promises a reminder nobody sends.
@@ -114,8 +116,8 @@ function buildDailySubject({ title, dueDate }, now = new Date()) {
 function buildDailyBody({ studentName, title, courseName, dueDate, assignmentId, originLink }, now = new Date()) {
   const minutes = Math.abs(minutesUntil(dueDate, now));
   const headline = isOverdue(dueDate, now)
-    ? `งานนี้เลยกำหนดส่งมาแล้ว ${humanizeGap(minutes)} และยังไม่ถูกทำเครื่องหมายว่าเสร็จ`
-    : `งานนี้ยังไม่เสร็จ เหลืออีก ${humanizeGap(minutes)} จะถึงกำหนดส่ง`;
+    ? `งานนี้เลยกำหนดส่งมาแล้ว ${humanizeGap(minutes)} และยังไม่ถูกทำเครื่องหมายว่าส่งแล้ว`
+    : `งานนี้ยังไม่ส่ง เหลืออีก ${humanizeGap(minutes)} จะถึงกำหนดส่ง`;
 
   const lines = [
     `สวัสดี ${studentName || 'นักศึกษา'}`,
@@ -221,7 +223,7 @@ const LEAD_REMINDER_SQL = `
   WHERE COALESCE(ns.enabled, TRUE) = TRUE
     AND s.account_status = 'active'
     AND d.due_date IS NOT NULL
-    AND (d.status IS NULL OR d.status NOT IN (?, ?))
+    AND (d.status IS NULL OR d.status NOT IN (${SENT_IN}))
     AND NOW() >= DATE_SUB(d.due_date, INTERVAL lt.minutes MINUTE)
     AND NOW() <  d.due_date
   ORDER BY d.due_date
@@ -246,7 +248,7 @@ const DAILY_REPEAT_SQL = `
     AND CURTIME() >= ns.daily_repeat_time
     AND s.account_status = 'active'
     AND d.due_date IS NOT NULL
-    AND (d.status IS NULL OR d.status NOT IN (?, ?))
+    AND (d.status IS NULL OR d.status NOT IN (${SENT_IN}))
     AND d.due_date BETWEEN DATE_SUB(NOW(), INTERVAL ? DAY) AND DATE_ADD(NOW(), INTERVAL ? DAY)
   ORDER BY d.due_date
 `;
@@ -322,7 +324,7 @@ const RETRY_SWEEP_SQL = `
     AND n.next_attempt_at <= NOW()
     AND COALESCE(ns.enabled, TRUE) = TRUE
     AND s.account_status = 'active'
-    AND (d.status IS NULL OR d.status NOT IN (?, ?))
+    AND (d.status IS NULL OR d.status NOT IN (${SENT_IN}))
   ORDER BY n.next_attempt_at
 `;
 
@@ -350,11 +352,11 @@ const ANNOUNCEMENT_RETRY_SWEEP_SQL = `
   ORDER BY n.next_attempt_at
 `;
 
-// UC-8 5a.2 — drop unsent reminders for finished tasks; sent history stays.
+// UC-8 5a.2 — drop unsent reminders for handed-in tasks; sent history stays.
 const CANCEL_COMPLETED_SQL = `
   DELETE n FROM Notification n
   JOIN Assignment_Detail d ON n.assignment_id = d.assignment_id
-  WHERE n.sent_at IS NULL AND d.status IN (?, ?)
+  WHERE n.sent_at IS NULL AND d.status IN (${SENT_IN})
 `;
 
 async function defaultLogFailure(err, context) {
@@ -446,7 +448,7 @@ async function runNotificationPass({
   sendMail = mailerSendMail,
   logFailure = defaultLogFailure,
 } = {}) {
-  const [cancelled] = await db.query(CANCEL_COMPLETED_SQL, DONE_STATUSES);
+  const [cancelled] = await db.query(CANCEL_COMPLETED_SQL, SENT_STATUSES);
 
   const tally = { sent: 0, failed: 0, retrying: 0, skipped: 0 };
   const count = (outcome) => { tally[outcome] += 1; };
@@ -466,7 +468,7 @@ async function runNotificationPass({
     }
   };
 
-  const [retries] = await db.query(RETRY_SWEEP_SQL, [MAX_ATTEMPTS, ...DONE_STATUSES]);
+  const [retries] = await db.query(RETRY_SWEEP_SQL, [MAX_ATTEMPTS, ...SENT_STATUSES]);
   await sweep(retries);
 
   const [announcementRetries] = await db.query(ANNOUNCEMENT_RETRY_SWEEP_SQL, [MAX_ATTEMPTS]);
@@ -492,13 +494,13 @@ async function runNotificationPass({
   };
 
   // Default lead time binds first: its placeholder is in the FROM clause.
-  const [rows] = await db.query(LEAD_REMINDER_SQL, [DEFAULT_LEAD_MINUTES, ...DONE_STATUSES]);
+  const [rows] = await db.query(LEAD_REMINDER_SQL, [DEFAULT_LEAD_MINUTES, ...SENT_STATUSES]);
   for (const row of rows) {
     await claimAndSend(row, leadTriggerType(row.minutes, row.due_date));
   }
 
   const [daily] = await db.query(DAILY_REPEAT_SQL, [
-    ...DONE_STATUSES,
+    ...SENT_STATUSES,
     DAILY_WINDOW_DAYS,
     DAILY_WINDOW_DAYS,
   ]);
@@ -564,7 +566,7 @@ module.exports = {
   announcementTriggerType,
   leadMinutesFromTrigger,
   isAnnouncementTrigger,
-  DONE_STATUSES,
+  SENT_STATUSES,
   RETRY_MINUTES,
   MAX_ATTEMPTS,
   DAILY_WINDOW_DAYS,

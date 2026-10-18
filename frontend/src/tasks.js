@@ -14,8 +14,8 @@ export const fmtTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 export const STATUS = {
   not_started: { label: 'ยังไม่เริ่ม', color: C.muted, bg: C.lineSoft },
   in_progress: { label: 'กำลังทำ', color: C.blueText, bg: C.blueBg },
+  completed: { label: 'เสร็จ', color: C.green, bg: C.greenBg },
   submitted: { label: 'ส่งแล้ว', color: C.amber, bg: C.amberBg },
-  completed: { label: 'เสร็จสมบูรณ์', color: C.green, bg: C.greenBg },
 };
 
 // Anything the backend hasn't heard of falls back rather than rendering blank.
@@ -31,6 +31,10 @@ export const STATUS_OPTIONS = Object.entries(STATUS).map(([value, s]) => ({
 // student, so both drop out of the urgent surfaces.
 export const DONE = ['submitted', 'completed'];
 export const isDone = (a) => DONE.includes(a.status);
+
+// Reminders stop only once a task is handed in: 'completed' means done but not
+// yet submitted, so it still gets mail. Matches SENT_STATUSES in the sender.
+export const isSubmitted = (a) => a.status === 'submitted';
 
 export const PLATFORM_FILTERS = [
   { key: 'all', label: 'ทุกแพลตฟอร์ม' },

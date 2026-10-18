@@ -6,8 +6,8 @@ const TRACK = '#eef2ff';
 
 function DonutChart({ completed = 0, submitted = 0, inProgress = 0, notStarted = 0, total = 0 }) {
   const segments = [
-    { key: 'completed', label: 'เสร็จสมบูรณ์', value: completed, color: C.navy },
     { key: 'submitted', label: 'ส่งแล้ว', value: submitted, color: C.amber },
+    { key: 'completed', label: 'เสร็จ', value: completed, color: C.navy },
     { key: 'in_progress', label: 'กำลังทำ', value: inProgress, color: C.pink },
     { key: 'not_started', label: 'ยังไม่เริ่ม', value: notStarted, color: C.blueMid },
   ];

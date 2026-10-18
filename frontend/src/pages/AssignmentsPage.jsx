@@ -5,7 +5,7 @@ import AddTaskModal from '../components/AddTaskModal';
 import EditTaskModal from '../components/EditTaskModal';
 import useAssignments from '../useAssignments';
 import { trackClientEvent } from '../analytics';
-import { matchesPlatform, PLATFORM_FILTERS, withDerived } from '../tasks';
+import { matchesPlatform, PLATFORM_FILTERS, STATUS_OPTIONS, withDerived } from '../tasks';
 import { C, FONT, R, SHADOW } from '../theme';
 
 function AssignmentsPage() {
@@ -116,10 +116,9 @@ function AssignmentsPage() {
             }}
           >
             <option value="all">ทุกสถานะ</option>
-            <option value="not_started">ยังไม่เริ่ม</option>
-            <option value="in_progress">กำลังทำ</option>
-            <option value="submitted">ส่งแล้ว</option>
-            <option value="completed">เสร็จสิ้น</option>
+            {STATUS_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
           </select>
 
           <select

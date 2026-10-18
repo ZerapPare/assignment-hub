@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Toggle from './Toggle';
 import { BellIcon, DocIcon, MegaphoneIcon } from '../icons';
-import { fmtDate, fmtTime, isDone, withDerived } from '../tasks';
+import { fmtDate, fmtTime, isSubmitted, withDerived } from '../tasks';
 import { C, FONT, R, TH_MONTHS_SHORT } from '../theme';
 
 // Minutes, as the API stores them, so nothing has to carry a unit around.
@@ -118,7 +118,7 @@ function NotificationSettings({ email }) {
   // The same shape the sender picks from, so this previews what gets mailed.
   const upcoming = useMemo(
     () => withDerived(tasks)
-      .filter((t) => t.due && !isDone(t))
+      .filter((t) => t.due && !isSubmitted(t))
       .sort((a, b) => a.due - b.due),
     [tasks]
   );

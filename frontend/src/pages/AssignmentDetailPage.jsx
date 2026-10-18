@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import useAssignments from '../useAssignments';
 import { C, FONT, R, SHADOW } from '../theme';
+import { STATUS_OPTIONS } from '../tasks';
 
 function AssignmentDetailPage() {
   const { id } = useParams();
@@ -84,10 +85,9 @@ function AssignmentDetailPage() {
                   onChange={(e) => changeStatus(assignment.assignment_id, e.target.value)}
                   style={styles.selectStatus}
                 >
-                  <option value="not_started">ยังไม่เริ่ม</option>
-                  <option value="in_progress">กำลังทำ</option>
-                  <option value="submitted">ส่งแล้ว</option>
-                  <option value="completed">เสร็จสิ้น</option>
+                  {STATUS_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
                 </select>
               </div>
 
