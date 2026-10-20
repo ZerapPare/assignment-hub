@@ -68,7 +68,7 @@ router.delete('/:id', async (req, res) => {
 	res.json({ success: true });
 });
 
-// PATCH /api/tasks/:id/duration — ตั้งระยะเวลาที่คาดว่าจะใช้ (นาที)
+// บันทึกเวลาประมาณการเป็นนาที และตรวจว่า ID กับระยะเวลาอยู่ในช่วงที่รองรับ
 router.patch('/:id/duration', async (req, res, next) => {
 	const id = Number(req.params.id);
 	const duration = Number(req.body?.time_estimate);
@@ -76,29 +76,29 @@ router.patch('/:id/duration', async (req, res, next) => {
 	if (!Number.isInteger(id) || id <= 0) {
 		return res.status(400).json({ error: 'invalid id' });
 	}
-	if (!Number.isInteger(duration) || duration <= 0 || duration > 1440) {
-		return res.status(400).json({ error: 'time_estimate ต้องเป็น 1-1440 นาที' });
+	if (!Number.isInteger(duration) || duration <= 0 || duration > 10080) {
+		return res.status(400).json({ error: 'time_estimate ต้องเป็น 1-10080 นาที' });
 	}
 
 	try {
-		// ตรวจว่าเป็นงานของผู้ใช้คนนี้
+		// ยืนยันความเป็นเจ้าของงานก่อนแก้ข้อมูล เพื่อไม่ให้เปลี่ยนงานของผู้ใช้อื่น
 		const [owned] = await pool.query(
 			`SELECT a.assignment_id FROM Assignment a
-       JOIN Course c ON a.course_id = c.course_id
-       WHERE a.assignment_id = ? AND c.student_id = ?`,
+			JOIN Course c ON a.course_id = c.course_id
+			WHERE a.assignment_id = ? AND c.student_id = ?`,
 			[id, req.session.userId]
 		);
 		if (!owned.length) return res.status(404).json({ error: 'not found' });
 
-		// UPSERT ใน Assignment_Detail
+		// สร้างรายละเอียดงานหากยังไม่มี หรืออัปเดตเวลาประมาณการหากมีแล้ว
 		await pool.query(
 			`INSERT INTO Assignment_Detail (assignment_id, time_estimate)
-       VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE time_estimate = VALUES(time_estimate)`,
+			VALUES (?, ?)
+			ON DUPLICATE KEY UPDATE time_estimate = VALUES(time_estimate)`,
 			[id, duration]
 		);
 
-		// ถ้ามี Schedule อยู่แล้ว → อัปเดต time_estimate ด้วย
+		// ให้ระยะเวลาในตารางเดิมตรงกับค่าประมาณการล่าสุด
 		await pool.query(
 			`UPDATE Schedule SET time_estimate = ? WHERE assignment_id = ?`,
 			[duration, id]

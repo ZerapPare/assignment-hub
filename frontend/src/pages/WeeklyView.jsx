@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import WeeklyCalendar from '../components/WeeklyCalendar';
 
+// ปรับวันที่ให้อยู่วันจันทร์เวลา 00:00 เพื่อใช้เป็นจุดเริ่มต้นของสัปดาห์
 function getStartOfWeek(date) {
 	const d = new Date(date);
 	const day = d.getDay();
@@ -19,21 +20,26 @@ export default function WeeklyView() {
 	const [loading, setLoading] = useState(false);
 
 	useEffect(() => {
+		// โหลดข้อมูลของสัปดาห์ที่เลือก และยกเลิกคำขอเก่าเมื่อเปลี่ยนสัปดาห์
 		const load = async () => {
 			setLoading(true);
 			try {
 				const { data } = await axios.get('/api/schedule/weekly', {
 					params: { week_start: weekStart.toISOString() },
+					signal: controller.signal,
 				});
 				setTasks(Array.isArray(data) ? data : []);
 			} catch (err) {
+				if (controller.signal.aborted) return;
 				console.error('Load weekly failed:', err);
 				setTasks([]);
 			} finally {
-				setLoading(false);
+				if (!controller.signal.aborted) setLoading(false);
 			}
 		};
+		const controller = new AbortController();
 		load();
+		return () => controller.abort();
 	}, [weekStart]);
 
 	const prevWeek = () => {
@@ -94,9 +100,16 @@ export default function WeeklyView() {
 				</div>
 			</div>
 
-			{loading && <p>กำลังโหลด...</p>}
-
-			<div style={{ background: '#fff', borderRadius: 12, padding: 16, border: '1px solid #e5e7eb' }}>
+			<div
+				style={{
+					position: 'relative',
+					background: '#fff',
+					borderRadius: 12,
+					padding: 16,
+					border: '1px solid #e5e7eb',
+				}}
+				aria-busy={loading}
+			>
 				<WeeklyCalendar tasks={tasks} weekStart={weekStart} />
 			</div>
 		</div>

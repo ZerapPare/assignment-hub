@@ -12,7 +12,7 @@
 }
 
 /* =========================
-   HEADER
+   HEADER: แถบวันที่และหัวเวลา ซึ่งตรึงไว้ขณะเลื่อนดูปฏิทิน
 ========================= */
 
 .cal-header {
@@ -74,7 +74,7 @@
 }
 
 /* =========================
-   BODY
+   BODY: โครงแถวของแต่ละวันในปฏิทิน
 ========================= */
 
 .cal-body {
@@ -94,7 +94,7 @@
 }
 
 /* =========================
-   DAY
+   DAY: ป้ายชื่อวันและวันที่ ซึ่งตรึงด้านซ้ายของแถว
 ========================= */
 
 .cal-day {
@@ -130,7 +130,7 @@
 }
 
 /* =========================
-   TIMELINE
+   TIMELINE: พื้นที่เวลาและเส้นกริดที่ใช้เทียบตำแหน่งงาน
 ========================= */
 
 .cal-timeline {
@@ -138,52 +138,45 @@
 
 	height: 100%;
 
-	background: #ffffff;
-}
-
-.timeline-line {
-	position: absolute;
-
-	top: 0;
-	bottom: 0;
-
-	width: 1px;
-
-	background: #f3f4f6;
-
-	pointer-events: none;
-}
-
-/* เส้นเต็มชั่วโมงเข้มกว่า */
-.timeline-line:nth-child(2n + 1) {
-	background: #e5e7eb;
+	background-color: #ffffff;
+	background-image:
+		linear-gradient(to right, #e5e7eb 1px, transparent 1px),
+		linear-gradient(to right, #f3f4f6 1px, transparent 1px);
+	background-position: 0 0, 55px 0;
+	background-size: 110px 100%, 110px 100%;
+	background-repeat: repeat-x;
 }
 
 /* =========================
-   TASK
+   TASK: บล็อกงานและพื้นที่คลิก/hover ตามช่วงเวลาของงาน
 ========================= */
 
 .task-block {
 	position: absolute;
 
-	top: 0;
-	bottom: 0;
+	top: 5px;
+	bottom: 5px;
 
 	box-sizing: border-box;
 
-	padding: 7px 9px;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 3px;
+	padding: 7px 10px;
 
 	min-width: 35px;
 
 	overflow: hidden;
 
 	white-space: nowrap;
-	text-overflow: ellipsis;
 
-	border-radius: 8px;
+	border: 1px solid #dbe4ff;
+	border-left: 4px solid #6366f1;
+	border-radius: 9px;
 
-	background: #eef2ff;
-	border-left: 3px solid #6366f1;
+	background: linear-gradient(135deg, #f4f6ff 0%, #e9edff 100%);
+	box-shadow: 0 2px 5px rgba(53, 70, 145, 0.09);
 
 	color: #3730a3;
 
@@ -195,25 +188,60 @@
 
 	z-index: 2;
 
-	transition:
-		transform 0.15s ease,
-		box-shadow 0.15s ease;
+	transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
 .task-block:hover {
-	transform: translateY(-1px);
-
-	box-shadow: 0 4px 10px rgba(99, 102, 241, 0.15);
+	transform: translateY(-2px);
+	box-shadow: 0 5px 12px rgba(53, 70, 145, 0.18);
+	filter: saturate(1.08);
 
 	z-index: 5;
 }
 
-.task-block.high {
-	background: #fff1f2;
+.task-block-title,
+.task-block-time {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
 
+.task-block-title {
+	line-height: 1.3;
+}
+
+.task-block-time {
+	color: #6366a6;
+	font-size: 10px;
+	font-weight: 500;
+}
+
+.task-block.high {
+	border-color: #ffe0e5;
 	border-left-color: #f43f5e;
+	background: linear-gradient(135deg, #fff7f8 0%, #ffeaee 100%);
 
 	color: #be123c;
+}
+
+.task-block.high .task-block-time {
+	color: #c2415b;
+}
+
+.task-block.compact {
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 2px;
+	box-shadow: none;
+}
+
+.task-block.compact:hover {
+	transform: none;
+	box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+
+.task-block.high.compact:hover {
+	box-shadow: 0 0 0 2px rgba(244, 63, 94, 0.3);
 }
 
 .task-wrapper {
@@ -231,15 +259,14 @@
 .task-wrapper .task-block {
 	position: absolute;
 
-	top: 0;
-	bottom: 0;
+	top: 5px;
+	bottom: 5px;
 	left: 0;
-
 	width: 100%;
 }
 
 /* =========================
-   TOOLTIP
+   TOOLTIP: รายละเอียดงานที่แสดงเมื่อชี้เมาส์
 ========================= */
 
 .task-tooltip {
@@ -354,6 +381,33 @@
     color: #333;
 }
 
+.deadline-modal-navigation {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin: -4px 0 16px;
+    color: #6b7280;
+    font-size: 13px;
+}
+
+.deadline-modal-navigation button {
+    width: 30px;
+    height: 30px;
+    border: 1px solid #d1d5db;
+    border-radius: 50%;
+    background: #fff;
+    color: #374151;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.deadline-modal-navigation button:disabled {
+    color: #cbd5e1;
+    cursor: not-allowed;
+}
+
 .modal-close-btn {
     background: transparent;
     border: none;
@@ -369,14 +423,28 @@
 }
 
 .detail-row {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    align-items: start;
+    column-gap: 16px;
     font-size: 0.95rem;
     color: #444;
 }
 
+.detail-row > strong {
+    white-space: nowrap;
+}
+
+.detail-row > span {
+    min-width: 0;
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
 .detail-row.description {
     flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
     gap: 6px;
     margin-top: 8px;
 }

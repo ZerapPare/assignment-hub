@@ -1,5 +1,5 @@
 /* ============================================================
-   DESIGN TOKENS
+   DESIGN TOKENS: ตัวแปรสี ระยะห่าง มุมโค้ง และเงาที่ใช้ร่วมกัน
    ============================================================ */
 :root {
 	/* Surface */
@@ -64,7 +64,7 @@
 }
 
 /* ============================================================
-   PAGE
+   PAGE: โครงร่างและพื้นหลังของหน้าจัดตาราง
    ============================================================ */
 .schedule-page {
 	display: flex;
@@ -82,7 +82,7 @@
 }
 
 /* ============================================================
-   HEADER
+   HEADER: ส่วนหัวและกลุ่มปุ่มนำทางของหน้า
    ============================================================ */
 .schedule-header {
 	display: flex;
@@ -117,7 +117,7 @@
 }
 
 /* ============================================================
-   BUTTONS
+   BUTTONS: รูปแบบปุ่มจัดตารางอัตโนมัติและปุ่มไปหน้ารายสัปดาห์
    ============================================================ */
 .auto-schedule-button,
 .weekly-button {
@@ -177,7 +177,7 @@
 }
 
 /* ============================================================
-   CARD & SECTION
+   CARD & SECTION: กรอบการ์ดและหัวข้อของแต่ละส่วน
    ============================================================ */
 .schedule-card {
 	background: var(--color-surface);
@@ -212,7 +212,7 @@
 }
 
 /* ============================================================
-   WORKING DAYS
+   WORKING DAYS: แถวเลือกวันทำงานและเวลาเริ่มงาน
    ============================================================ */
 .working-days {
 	border: 1px solid #e8ebf1;
@@ -254,7 +254,7 @@
 }
 
 /* ============================================================
-   SWITCH
+   SWITCH: รูปลักษณ์สวิตช์เปิด/ปิด
    ============================================================ */
 .switch {
 	position: relative;
@@ -300,7 +300,7 @@
 }
 
 /* ============================================================
-   TIME INPUT
+   TIME INPUT: ช่องกรอกเวลาและสถานะเมื่อปิดหรือข้อมูลไม่ถูกต้อง
    ============================================================ */
 .time-input {
 	width: 115px;
@@ -317,53 +317,139 @@
 }
 
 .time-input:focus {
-	border-color: #2563eb;
-	box-shadow: 0 0 0 3px var(--color-primary-focus);
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px var(--color-primary-focus);
+}
+
+.lunch-inputs input:disabled {
+    background: var(--color-surface-disabled);
+    color: var(--color-text-disabled);
+}
+
+.lunch-inputs input[aria-invalid="true"] {
+    border: 2px solid #ef4444;
+    background: #fef2f2;
+    outline: none;
 }
 
 .time-input:disabled {
-	background: var(--color-surface-disabled);
-	color: var(--color-text-disabled);
+    background: var(--color-surface-disabled);
+    color: var(--color-text-disabled);
 }
 
 /* ============================================================
-   LUNCH
+   LUNCH: การจัดวางส่วนตั้งค่าเวลาพัก
    ============================================================ */
 .lunch-setting {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: var(--space-2xl);
-	margin-top: var(--space-xl);
-	padding: 18px;
-	background: var(--color-surface-muted);
-	border: 1px solid var(--color-border-soft);
-	border-radius: var(--radius-xl);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-2xl);
+    margin-top: var(--space-xl);
+    padding: 18px;
+    background: var(--color-surface-muted);
+    border: 1px solid var(--color-border-soft);
+    border-radius: var(--radius-xl);
+}
+
+.lunch-controls {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+}
+
+/* ครอบส่วนอินพุตและตัวแจ้งเตือนไว้ในแนวตั้งเดียวกัน */
+.lunch-inputs-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.lunch-inputs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.lunch-inputs label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+}
+
+.lunch-inputs input {
+    padding: 7px 9px;
+    border: 1px solid var(--color-border-input);
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+}
+
+.lunch-inputs input:focus {
+    border-color: #2563eb;
+}
+
+.time-arrow {
+    color: #a0a8b6;
+}
+/* กลุ่ม Toggle เปิด/ปิด */
+.lunch-toggle-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+/* กลุ่ม Input เวลา */
+.lunch-inputs-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.lunch-feedback {
+    min-height: 16px;
+    margin-top: 4px;
+    color: #ef4444;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.lunch-midnight-feedback {
+    color: var(--color-text-muted);
 }
 
 .lunch-title {
-	font-size: 14px;
-	font-weight: 700;
+    font-size: 14px;
+    font-weight: 700;
 }
 
 .lunch-title span {
-	display: block;
-	margin-top: 3px;
-	color: var(--color-text-placeholder);
-	font-size: 12px;
-	font-weight: 400;
+    display: block;
+    margin-top: 3px;
+    color: var(--color-text-placeholder);
+    font-size: 12px;
+    font-weight: 400;
 }
+
 
 .lunch-inputs {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
 }
 
 .lunch-inputs label {
 	display: flex;
 	align-items: center;
-	gap: 7px;
+	gap: 5px;
 	color: var(--color-text-secondary);
 	font-size: 12px;
 }
@@ -386,7 +472,7 @@
 }
 
 /* ============================================================
-   TASK LIST
+   TASK LIST: รายการงานและข้อมูลกำหนดส่ง
    ============================================================ */
 .task-header {
 	display: flex;
@@ -493,7 +579,7 @@
 }
 
 /* ============================================================
-   DURATION
+   DURATION: ช่องกรอกระยะเวลาและข้อความแจ้งเตือน
    ============================================================ */
 .duration-control {
 	display: flex;
@@ -547,7 +633,7 @@
 }
 
 /* ============================================================
-   TASK COUNT
+   TASK COUNT: ป้ายแสดงจำนวนงาน
    ============================================================ */
 .task-count {
 	display: inline-flex;
@@ -563,7 +649,7 @@
 }
 
 /* ============================================================
-   EMPTY STATE
+   EMPTY STATE: หน้าตาเมื่อไม่มีงานให้จัดตาราง
    ============================================================ */
 .empty-task {
 	display: flex;
@@ -583,7 +669,7 @@
 }
 
 /* ============================================================
-   AUTO SCHEDULE WRAPPER
+   AUTO SCHEDULE WRAPPER: ตำแหน่งปุ่มจัดตารางและพื้นที่ข้อความสถานะ
    ============================================================ */
 .auto-schedule-wrapper {
 	display: flex;
@@ -602,7 +688,7 @@
 }
 
 /* ============================================================
-   TOAST
+   TOAST: ข้อความแจ้งผลการบันทึกหรือจัดตาราง
    ============================================================ */
 .schedule-toast {
 	position: fixed;
@@ -640,7 +726,7 @@
 }
 
 /* ============================================================
-   LOADING
+   LOADING: สถานะระหว่างรอข้อมูล
    ============================================================ */
 .setting-loading {
 	padding: var(--space-2xl);
@@ -649,7 +735,7 @@
 }
 
 /* ============================================================
-   RESPONSIVE
+   RESPONSIVE: ปรับการจัดวางให้เหมาะกับหน้าจอขนาดเล็ก
    ============================================================ */
 
 /* Tablet-landscape / small desktop */
@@ -753,7 +839,7 @@
 	}
 }
 
-/* ============ MODAL STYLING ============ */
+/* หน้าต่าง Modal สำหรับแสดงผลการจัดตาราง */
 .modal-overlay {
   position: fixed;
   inset: 0;

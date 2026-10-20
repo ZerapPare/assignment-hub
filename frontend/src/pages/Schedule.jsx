@@ -4,7 +4,9 @@ import axios from "axios";
 
 import Sidebar from "../components/Sidebar";
 import TaskList from "../components/TaskList";
-import LunchTimeSetting from "../components/LunchTimeSetting";
+import LunchTimeSetting, {
+  isValidLunchTimeRange,
+} from "../components/LunchTimeSetting";
 import AutoScheduleButton from "../components/AutoScheduleButton";
 import AdPopup from "../components/AdPopup";
 import { fetchRandomAdvertisement } from "../ads";
@@ -17,6 +19,7 @@ export default function Schedule() {
   const navigate = useNavigate();
   const { student, logout } = useAssignments();
 
+  // เก็บรายการงาน ค่าตั้งเวลา และสถานะการตรวจสอบที่ส่งต่อให้ component ลูก
   const [assignments, setAssignments] = useState([]);
   const [scheduleSettings, setScheduleSettings] = useState(null);
   const [taskDurations, setTaskDurations] = useState({});
@@ -37,6 +40,8 @@ export default function Schedule() {
   const [taskValidity, setTaskValidity] = useState({
     hasInvalid: false,
     invalidTasks: [],
+    hasOverLimit: false,
+    overLimitTasks: [],
   });
 
   // State สำหรับควบคุม Problem Tasks Modal
@@ -117,7 +122,20 @@ export default function Schedule() {
     setTaskValidity(validity);
   }, []);
 
+  const hasInvalidLunchRange = Boolean(
+    scheduleSettings?.lunch?.enabled &&
+    !isValidLunchTimeRange(
+      scheduleSettings.lunch.lunch_start,
+      scheduleSettings.lunch.lunch_end,
+    ),
+  );
+
   const saveAll = async () => {
+    if (taskValidity.hasOverLimit) {
+      showToast("ระยะเวลางานต้องไม่เกิน 168 ชั่วโมง", "error");
+      return false;
+    }
+
     // ตรวจสอบงานที่ระยะเวลาเป็น 0 นาที
     if (taskValidity.hasInvalid) {
       showInvalidTasksModal(taskValidity.invalidTasks);
@@ -129,8 +147,20 @@ export default function Schedule() {
 
       if (scheduleSettings) {
         const { workingHours, lunch } = scheduleSettings;
+        if (
+          lunch.enabled &&
+          !isValidLunchTimeRange(lunch.lunch_start, lunch.lunch_end)
+        ) {
+          showToast(
+            "ช่วงเวลาพักไม่ถูกต้อง: เวลาเริ่มพักต้องก่อนเวลาสิ้นสุด",
+            "error",
+          );
+          return false;
+        }
+
         const workingHoursPayload = {};
 
+        // บันทึกเฉพาะวันที่เปิดทำงาน และเก็บเวลาพักเป็น null เมื่อปิดสวิตช์
         for (let d = 0; d < 7; d++) {
           if (workingHours[d]) {
             workingHoursPayload[String(d)] = `${workingHours[d]}:00`;
@@ -143,8 +173,8 @@ export default function Schedule() {
 
         requests.push(
           axios.put("/api/user/settings", {
-            lunch_start: `${lunch.lunch_start}:00`,
-            lunch_end: `${lunch.lunch_end}:00`,
+            lunch_start: lunch.enabled ? `${lunch.lunch_start}:00` : null,
+            lunch_end: lunch.enabled ? `${lunch.lunch_end}:00` : null,
           }),
         );
       }
@@ -187,7 +217,11 @@ export default function Schedule() {
 
           <div className="schedule-header-actions">
             <AutoScheduleButton
-              disabled={taskValidity.hasInvalid}
+              disabled={
+                taskValidity.hasInvalid ||
+                taskValidity.hasOverLimit ||
+                hasInvalidLunchRange
+              }
               onActionStart={showRandomAd}
               onBeforeGenerate={saveAll}
               onGenerated={handleGenerated}
@@ -203,10 +237,12 @@ export default function Schedule() {
           </div>
         </header>
 
+        {/* ตั้งวัน/เวลาเริ่มทำงานและช่วงพัก */}
         <section className="schedule-card">
           <LunchTimeSetting onChange={handleSettingsChange} />
         </section>
 
+        {/* กรอกระยะเวลาที่คาดว่าจะใช้ของแต่ละงาน */}
         <section className="schedule-card">
           <TaskList
             assignments={assignments}

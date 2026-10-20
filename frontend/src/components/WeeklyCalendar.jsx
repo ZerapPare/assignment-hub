@@ -1,7 +1,7 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { memo, useMemo, useState, useEffect, useCallback } from 'react';
 import './WeeklyCalendar.css';
 
-// Constants
+// ค่าคงที่กำหนดสเกลเวลา ความกว้างเป้าหมายคลิก และตำแหน่ง Tooltip
 const DAY_NAMES = ['จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.', 'อา.'];
 
 const HOURS_PER_DAY = 24;
@@ -10,19 +10,25 @@ const DAYS_PER_WEEK = 7;
 const NOW_REFRESH_MS = 60_000;
 
 const HOUR_WIDTH = 110;
-const HALF_HOUR_WIDTH = HOUR_WIDTH / 2;
 const DAY_WIDTH = HOURS_PER_DAY * HOUR_WIDTH;
-const MIN_TASK_WIDTH = 35;
+const TASK_HIT_TARGET_WIDTH = 14;
+const TASK_LABEL_MIN_WIDTH = 70;
 
 const TOOLTIP_WIDTH = 280;
 const TOOLTIP_HEIGHT = 180;
 const TOOLTIP_GAP = 10;
 const VIEWPORT_MARGIN = 10;
 
-const SENT_STATUSES = new Set(['submitted']);
+const HIDDEN_DEADLINE_STATUSES = new Set(['submitted', 'completed']);
+const STATUS_LABELS = {
+  not_started: 'ยังไม่เริ่ม',
+  in_progress: 'กำลังทำ',
+  completed: 'เสร็จแล้ว',
+  submitted: 'ส่งแล้ว',
+};
 const DEFAULT_DURATION_MINUTES = 60;
 
-// Date / Time utilities
+// ตัวแปลงวันและเวลาที่บังคับใช้เขตเวลาไทย เพื่อให้ตำแหน่งงานตรงกับปฏิทิน
 const THAILAND_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeZone: 'Asia/Bangkok',
   year: 'numeric',
@@ -74,7 +80,7 @@ function buildWeek(startDate) {
   return Array.from({ length: DAYS_PER_WEEK }, (_, i) => addDays(start, i));
 }
 
-// Formatting utilities
+// จัดรูปแบบข้อมูลสำหรับ Tooltip และ Modal
 function formatThaiDateTime(isoString) {
   if (!isoString) return '-';
   return (
@@ -90,7 +96,10 @@ function formatThaiDateTime(isoString) {
 }
 
 function formatDuration(minutes) {
-  const total = Math.round(minutes);
+  const numericMinutes = Number(minutes);
+  if (!Number.isFinite(numericMinutes)) return '-';
+
+  const total = Math.round(numericMinutes);
   if (total <= 0) return '-';
   if (total < 60) return `${total} นาที`;
 
@@ -99,7 +108,44 @@ function formatDuration(minutes) {
   return remainder > 0 ? `${hours} ชม. ${remainder} นาที` : `${hours} ชม.`;
 }
 
-// Task processing
+function getTaskDuration(task) {
+  const segmentDuration = Number(task.duration);
+  if (Number.isFinite(segmentDuration) && segmentDuration > 0) return segmentDuration;
+
+  const savedDuration = Number(task.duration_minutes);
+  if (Number.isFinite(savedDuration) && savedDuration > 0) return savedDuration;
+
+  if (Array.isArray(task.segments)) {
+    const total = task.segments.reduce((sum, segment) => {
+      const duration = (new Date(segment.end) - new Date(segment.start)) / 60_000;
+      return sum + (Number.isFinite(duration) && duration > 0 ? duration : 0);
+    }, 0);
+    if (total > 0) return total;
+  }
+
+  return DEFAULT_DURATION_MINUTES;
+}
+
+function getTaskStartTime(task) {
+  if (Number.isFinite(task.startHour) && Number.isFinite(task.startMinute)) {
+    return formatTime(task.startHour, task.startMinute);
+  }
+  if (task.start_time) {
+    const start = getThailandParts(new Date(task.start_time));
+    return formatTime(start.hour, start.minute);
+  }
+  if (task.due_date) {
+    const due = getThailandParts(new Date(task.due_date));
+    return formatTime(due.hour, due.minute);
+  }
+  return '-';
+}
+
+function formatStatus(status) {
+  return STATUS_LABELS[status] ?? status ?? '-';
+}
+
+// แปลงงานและกำหนดส่งจาก API เป็นช่วงเวลาที่วาดลงแต่ละวัน
 function getTaskId(task) {
   return task.assignment_id ?? task.id;
 }
@@ -161,7 +207,7 @@ function splitTaskByDay(task) {
 }
 
 function createDeadlineSegment(task) {
-  if (!task?.due_date || SENT_STATUSES.has(task.status)) return null;
+  if (!task?.due_date || HIDDEN_DEADLINE_STATUSES.has(task.status)) return null;
 
   const due = new Date(task.due_date);
   const parts = getThailandParts(due);
@@ -181,6 +227,7 @@ function createDeadlineSegment(task) {
 
 function groupTasksByDay(tasks, days) {
   const map = {};
+  const deadlineGroups = new Map();
   days.forEach((day) => {
     map[getDateKey(day)] = [];
   });
@@ -191,13 +238,22 @@ function groupTasksByDay(tasks, days) {
     });
 
     const deadline = createDeadlineSegment(task);
-    if (deadline && map[deadline.dayKey]) map[deadline.dayKey].push(deadline);
+    if (deadline && map[deadline.dayKey]) {
+      const groupKey = `${deadline.dayKey}-${formatTime(deadline.startHour, deadline.startMinute)}`;
+      const existingGroup = deadlineGroups.get(groupKey);
+      if (existingGroup) {
+        existingGroup.deadlineTasks.push(task);
+      } else {
+        deadlineGroups.set(groupKey, { ...deadline, deadlineTasks: [task] });
+      }
+    }
   });
 
+  deadlineGroups.forEach((deadline) => map[deadline.dayKey].push(deadline));
   return map;
 }
 
-// Tooltip positioning
+// วาง Tooltip ให้อยู่ในหน้าจอ โดยสลับด้านเมื่อพื้นที่ด้านที่เลือกไม่พอ
 function computeTooltipPosition(rect, preferBelow) {
   // จัดให้อยู่กึ่งกลางแนวตั้งของ element แล้ว clamp ให้อยู่ใน viewport
   let left = rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2;
@@ -220,8 +276,8 @@ function computeTooltipPosition(rect, preferBelow) {
   return { top, left };
 }
 
-// Sub-components
-function CalendarHeader() {
+// ส่วนย่อยของปฏิทิน: หัวเวลา บล็อกงาน ตัวชี้ Deadline และแถวของแต่ละวัน
+const CalendarHeader = memo(function CalendarHeader() {
   return (
     <div className="cal-header">
       <div className="cal-corner">วัน / เวลา</div>
@@ -238,26 +294,43 @@ function CalendarHeader() {
       </div>
     </div>
   );
-}
+});
 
 function TaskBlock({ task, onSelect, onHover, onLeave }) {
   const startMinutes = task.startHour * 60 + task.startMinute;
   const left = minutesToPixels(startMinutes);
-  const width = Math.max(minutesToPixels(task.duration), MIN_TASK_WIDTH);
+  const width = minutesToPixels(task.duration);
+  const hitTargetWidth = Math.max(width, TASK_HIT_TARGET_WIDTH);
+  const isCompact = width < TASK_LABEL_MIN_WIDTH;
   const isHighPriority = Number(task.priority_score) > 0;
 
   return (
     <div
       className="task-wrapper"
-      style={{ left, width }}
+      style={{
+        left: left - (hitTargetWidth - width) / 2,
+        width: hitTargetWidth,
+      }}
       onClick={() => onSelect(task)}
       onMouseEnter={(e) =>
         onHover(task, e.currentTarget.getBoundingClientRect(), false)
       }
       onMouseLeave={onLeave}
     >
-      <div className={`task-block${isHighPriority ? ' high' : ''}`}>
-        {task.title}
+      <div
+        className={`task-block${isHighPriority ? ' high' : ''}${isCompact ? ' compact' : ''}`}
+        style={{
+          left: (hitTargetWidth - width) / 2,
+          width,
+        }}
+        title={task.title}
+      >
+        {!isCompact && <span className="task-block-title">{task.title}</span>}
+        {!isCompact && task.duration >= 60 && (
+          <span className="task-block-time">
+            {formatTime(task.startHour, task.startMinute)} · {formatDuration(task.duration)}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -271,7 +344,10 @@ function DeadlineMarker({ task, onSelect, onHover, onLeave }) {
     <div
       className="deadline-marker"
       style={{ left }}
-      onClick={() => onSelect(task)}
+      onClick={() => onSelect({ ...task, deadlineTasks: task.deadlineTasks })}
+      title={task.deadlineTasks?.length > 1
+        ? `${task.deadlineTasks.length} งานมีกำหนดส่งเวลาเดียวกัน`
+        : task.title}
       onMouseEnter={(e) =>
         onHover(task, e.currentTarget.getBoundingClientRect(), true)
       }
@@ -280,12 +356,13 @@ function DeadlineMarker({ task, onSelect, onHover, onLeave }) {
       <div className="deadline-line" />
       <div className="deadline-badge">
         {formatTime(task.startHour, task.startMinute)}
+        {task.deadlineTasks?.length > 1 && ` (${task.deadlineTasks.length})`}
       </div>
     </div>
   );
 }
 
-function DayRow({ day, dayIndex, tasks, nowInfo, onSelect, onHover, onLeave }) {
+const DayRow = memo(function DayRow({ day, dayIndex, tasks, nowInfo, onSelect, onHover, onLeave }) {
   const dayKey = getDateKey(day);
   const isToday = dayKey === nowInfo.dayKey;
 
@@ -299,14 +376,6 @@ function DayRow({ day, dayIndex, tasks, nowInfo, onSelect, onHover, onLeave }) {
       </div>
 
       <div className="cal-timeline" style={{ width: DAY_WIDTH }}>
-        {Array.from({ length: HOURS_PER_DAY * 2 }, (_, i) => (
-          <div
-            key={i}
-            className="timeline-line"
-            style={{ left: i * HALF_HOUR_WIDTH }}
-          />
-        ))}
-
         {isToday && (
           <div
             className="now-line"
@@ -335,7 +404,7 @@ function DayRow({ day, dayIndex, tasks, nowInfo, onSelect, onHover, onLeave }) {
       </div>
     </div>
   );
-}
+});
 
 function TooltipRow({ label, value }) {
   return (
@@ -364,11 +433,11 @@ function TaskTooltip({ task, position }) {
 
       <TooltipRow
         label="เวลาเริ่มต้น"
-        value={formatTime(task.startHour, task.startMinute)}
+        value={getTaskStartTime(task)}
       />
-      <TooltipRow label="ระยะเวลา" value={formatDuration(task.duration)} />
+      <TooltipRow label="ระยะเวลา" value={formatDuration(getTaskDuration(task))} />
       <TooltipRow label="กำหนดส่ง" value={formatThaiDateTime(task.due_date)} />
-      <TooltipRow label="สถานะ" value={task.status} />
+      <TooltipRow label="สถานะ" value={formatStatus(task.status)} />
     </div>
   );
 }
@@ -382,7 +451,9 @@ function DetailRow({ label, value }) {
   );
 }
 
-function TaskDetailModal({ task, onClose }) {
+function TaskDetailModal({ task, onClose, groupIndex, groupSize, onNavigate }) {
+  const startTime = getTaskStartTime(task);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -393,16 +464,41 @@ function TaskDetailModal({ task, onClose }) {
           </button>
         </div>
 
+        {groupSize > 1 && (
+          <div className="deadline-modal-navigation">
+            <button
+              type="button"
+              onClick={() => onNavigate(groupIndex - 1)}
+              disabled={groupIndex === 0}
+              aria-label="ดูงานก่อนหน้า"
+            >
+              ‹
+            </button>
+            <span>{groupIndex + 1} / {groupSize}</span>
+            <button
+              type="button"
+              onClick={() => onNavigate(groupIndex + 1)}
+              disabled={groupIndex === groupSize - 1}
+              aria-label="ดูงานถัดไป"
+            >
+              ›
+            </button>
+          </div>
+        )}
+
         <div className="modal-body">
           <DetailRow label="คอร์สเรียน" value={task.course_name || '-'} />
           <DetailRow
             label="เวลาเริ่มต้น"
-            value={`${formatTime(task.startHour, task.startMinute)} น.`}
+            value={startTime === '-' ? startTime : `${startTime} น.`}
           />
-          <DetailRow label="ระยะเวลา" value={formatDuration(task.duration)} />
+          <DetailRow
+            label="ระยะเวลา"
+            value={formatDuration(getTaskDuration(task))}
+          />
           <DetailRow label="กำหนดส่ง" value={formatThaiDateTime(task.due_date)} />
           <DetailRow label="แหล่งที่มา" value={task.platform_source || '-'} />
-          <DetailRow label="สถานะ" value={task.status || '-'} />
+          <DetailRow label="สถานะ" value={formatStatus(task.status)} />
 
           {task.description && (
             <div className="detail-row description">
@@ -429,11 +525,11 @@ function TaskDetailModal({ task, onClose }) {
   );
 }
 
-// Main component
+// รวมข้อมูลรายสัปดาห์ จัดการ hover/รายละเอียด และรีเฟรชเส้นเวลาปัจจุบันเป็นระยะ
 export default function WeeklyCalendar({ tasks = [], weekStart = new Date() }) {
   const [hoveredTask, setHoveredTask] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
-  const [selectedTask, setSelectedTask] = useState(null);
+  const [selectedDeadline, setSelectedDeadline] = useState(null);
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -467,7 +563,19 @@ export default function WeeklyCalendar({ tasks = [], weekStart = new Date() }) {
   }, []);
 
   const hideTooltip = useCallback(() => setHoveredTask(null), []);
-  const closeModal = useCallback(() => setSelectedTask(null), []);
+  const openTaskDetails = useCallback((task) => {
+    // Deadline เวลาเดียวกันอาจมีหลายงาน จึงเปิดรายการแรกและให้เลื่อนดูรายการอื่นได้
+    const deadlineTasks = task.deadlineTasks ?? [task];
+    setSelectedDeadline({ tasks: deadlineTasks, index: 0 });
+  }, []);
+  const closeModal = useCallback(() => setSelectedDeadline(null), []);
+  const navigateDeadline = useCallback((index) => {
+    setSelectedDeadline((current) => (
+      current && index >= 0 && index < current.tasks.length
+        ? { ...current, index }
+        : current
+    ));
+  }, []);
 
   return (
     <div className="weekly-calendar">
@@ -481,7 +589,7 @@ export default function WeeklyCalendar({ tasks = [], weekStart = new Date() }) {
             dayIndex={dayIndex}
             tasks={tasksByDay[getDateKey(day)] || []}
             nowInfo={nowInfo}
-            onSelect={setSelectedTask}
+            onSelect={openTaskDetails}
             onHover={showTooltip}
             onLeave={hideTooltip}
           />
@@ -492,8 +600,14 @@ export default function WeeklyCalendar({ tasks = [], weekStart = new Date() }) {
         <TaskTooltip task={hoveredTask} position={tooltipPosition} />
       )}
 
-      {selectedTask && (
-        <TaskDetailModal task={selectedTask} onClose={closeModal} />
+      {selectedDeadline && (
+        <TaskDetailModal
+          task={selectedDeadline.tasks[selectedDeadline.index]}
+          groupIndex={selectedDeadline.index}
+          groupSize={selectedDeadline.tasks.length}
+          onNavigate={navigateDeadline}
+          onClose={closeModal}
+        />
       )}
     </div>
   );

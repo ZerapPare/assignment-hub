@@ -9,6 +9,7 @@ export default function AutoScheduleButton({
 }) {
   const [loading, setLoading] = useState(false);
 
+  // บันทึกค่าที่ผู้ใช้ตั้งไว้ก่อน แล้วจึงขอให้ backend สร้างตาราง
   const handleClick = async () => {
     if (disabled || loading) return;
 
@@ -17,6 +18,7 @@ export default function AutoScheduleButton({
     try {
       if (onBeforeGenerate) {
         const saved = await onBeforeGenerate();
+        // หากบันทึกไม่ผ่าน ให้หยุดก่อนส่งคำขอจัดตาราง
         if (saved === false) {
           setLoading(false);
           return;
@@ -32,6 +34,7 @@ export default function AutoScheduleButton({
         message: err.response?.data?.error || err.message,
       });
     } finally {
+      // คืนสถานะปุ่มให้กดได้หลังคำขอจบไม่ว่าผลจะสำเร็จหรือไม่
       setLoading(false);
     }
   };
@@ -43,7 +46,7 @@ export default function AutoScheduleButton({
       disabled={disabled || loading}
       title={
         disabled
-          ? "มีงานที่ระยะเวลาเป็น 0 — กรุณาแก้ไขก่อนจัดตาราง"
+          ? "กรุณาแก้ไขระยะเวลางานที่ไม่ถูกต้องก่อนจัดตาราง"
           : "จัดตารางอัตโนมัติ"
       }
       style={disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}

@@ -5,11 +5,11 @@ import { CalendarIcon } from "../icons";
 const DEFAULT_DURATION_MINUTES = 60;
 const DEFAULT_DURATION = { hours: 1, minutes: 0 };
 const MINUTES_PER_HOUR = 60;
-const HOURS_MAX = 23;
-const MINUTES_MAX = 59;
-const MINUTES_STEP = 5;
+const MAX_DURATION_HOURS = 168;
+const MAX_DURATION_MINUTES = MAX_DURATION_HOURS * MINUTES_PER_HOUR;
 
 // Pure helpers
+// งานบางแหล่งใช้ assignment_id ขณะที่ข้อมูลเดิมอาจใช้ id
 function getTaskId(task) {
   return task.assignment_id ?? task.id;
 }
@@ -41,19 +41,21 @@ function formatDateTime(isoString) {
   return new Date(isoString).toLocaleString("th-TH");
 }
 
-function TimeInput({ value, onChange, min, max, step, unit, invalid }) {
+function TimeInput({ value, onChange, unit, invalid }) {
   const handleChange = (e) => {
-    const num = Math.max(0, parseInt(e.target.value, 10) || 0);
+    // รับเฉพาะตัวเลขและตัดศูนย์นำหน้า ก่อนเก็บค่าเป็นจำนวนเต็ม
+    const digitsOnly = e.target.value.replace(/\D/g, "");
+    const normalizedValue = digitsOnly.replace(/^0+(?=\d)/, "");
+    const num = Math.max(0, parseInt(normalizedValue, 10) || 0);
     onChange(num);
   };
 
   return (
     <div className="time-input-group">
       <input
-        type="number"
-        min={min}
-        max={max}
-        step={step}
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
         value={value}
         onChange={handleChange}
         style={
@@ -102,6 +104,10 @@ function TaskItem({ task, duration, onTimeChange }) {
 
   const totalMinutes = durationToMinutes(duration);
   const isInvalid = totalMinutes <= 0;
+  const isOverLimit = totalMinutes > MAX_DURATION_MINUTES;
+  const hoursOverLimit = duration.hours > MAX_DURATION_HOURS;
+  const minutesOverLimit =
+    duration.hours === MAX_DURATION_HOURS && duration.minutes > 0;
 
   return (
     <div className="task-item">
@@ -127,19 +133,14 @@ function TaskItem({ task, duration, onTimeChange }) {
           <TimeInput
             value={duration.hours}
             onChange={(v) => onTimeChange(taskId, "hours", v)}
-            min={0}
-            max={HOURS_MAX}
             unit="ชม."
-            invalid={isInvalid}
+            invalid={isInvalid || hoursOverLimit}
           />
           <TimeInput
             value={duration.minutes}
             onChange={(v) => onTimeChange(taskId, "minutes", v)}
-            min={0}
-            max={MINUTES_MAX}
-            step={MINUTES_STEP}
             unit="นาที"
-            invalid={isInvalid}
+            invalid={isInvalid || minutesOverLimit}
           />
         </div>
 
@@ -152,10 +153,14 @@ function TaskItem({ task, duration, onTimeChange }) {
             marginTop: 4,
             textAlign: "right",
             minHeight: 14,
-            visibility: isInvalid ? "visible" : "hidden",
+            visibility: isInvalid || isOverLimit ? "visible" : "hidden",
           }}
         >
-          {isInvalid ? "ระยะเวลาต้องมากกว่า 0 นาที" : "\u00A0"}
+          {isInvalid
+            ? "ระยะเวลาต้องมากกว่า 0 นาที"
+            : isOverLimit
+              ? "ระยะเวลางานต้องไม่เกิน 168 ชั่วโมง"
+              : "\u00A0"}
         </div>
       </div>
     </div>
@@ -188,26 +193,33 @@ export default function TaskList({
 
   // แจ้ง parent ทุกครั้งที่ durations เปลี่ยน
   useEffect(() => {
+    // ส่งค่าชั่วโมง/นาทีให้หน้าหลัก เพื่อใช้บันทึกก่อนเริ่มจัดตาราง
     onDurationsChangeRef.current?.(durations);
   }, [durations]);
 
   useEffect(() => {
-    const invalidTasks = safeTasks
-      .filter((t) => {
-        const d = durations[getTaskId(t)];
-        if (!d) return false;
-        return durationToMinutes(d) <= 0;
-      })
-      .map((t) => t.title);
+    // รวมรายการที่เวลาเป็นศูนย์หรือเกินเพดาน เพื่อปิดปุ่มจัดตารางและแสดงคำเตือน
+    const invalidTasks = [];
+    const overLimitTasks = [];
+    safeTasks.forEach((t) => {
+      const d = durations[getTaskId(t)];
+      if (!d) return;
+      const totalMinutes = durationToMinutes(d);
+      if (totalMinutes <= 0) invalidTasks.push(t.title);
+      if (totalMinutes > MAX_DURATION_MINUTES) overLimitTasks.push(t.title);
+    });
 
     onValidityChangeRef.current?.({
       hasInvalid: invalidTasks.length > 0,
       invalidTasks,
+      hasOverLimit: overLimitTasks.length > 0,
+      overLimitTasks,
     });
   }, [durations, safeTasks]);
 
   // Reset durations เมื่อ assignments เปลี่ยน
   useEffect(() => {
+    // แปลงค่าจากฐานข้อมูลเป็นชั่วโมง/นาที; งานใหม่ที่ไม่มีค่าจะเริ่มที่ 1 ชั่วโมง
     const initial = {};
     safeTasks.forEach((task) => {
       const total = task.time_estimate ?? DEFAULT_DURATION_MINUTES;
