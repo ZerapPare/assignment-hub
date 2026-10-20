@@ -75,7 +75,7 @@ async function completeLogin({ req, provider, email, name, tokens, linkMode = Bo
       );
       userId = ins.insertId;
 
-      // Signing in makes an ordinary account; admin needs a role granted after.
+      // Signing in makes an ordinary account as student; admin needs a role granted after.
       await tryGrantRole(userId, ROLES.STUDENT);
     }
 

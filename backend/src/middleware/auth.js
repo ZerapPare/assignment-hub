@@ -18,7 +18,7 @@ function updateLastSeen(userId) {
 
 // One session shape for everybody: req.session.userId and nothing else, with
 // the roles on it deciding the rest. Read every request, not cached, so a
-// revocation takes effect immediately.
+// find role and permission
 async function loadAccount(userId) {
   const [[rows], [grants]] = await Promise.all([
     pool.query(
@@ -44,6 +44,7 @@ async function loadAccount(userId) {
   return account;
 }
 
+// Checks session for a userId, loads the account, and attaches it to req.account.
 async function requireAuth(req, res, next) {
   const userId = Number(req.session?.userId);
   if (!Number.isSafeInteger(userId) || userId <= 0) {
