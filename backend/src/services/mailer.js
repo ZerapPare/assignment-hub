@@ -1,3 +1,4 @@
+// notiSender -> mailer -> SMTP server -> Gmail box
 const nodemailer = require('nodemailer');
 const {
   SMTP_HOST,
@@ -32,7 +33,6 @@ async function sendMail({ to, subject, text }) {
   if (!configured) {
     // Same stance config.js takes on missing OAuth credentials: warn and keep
     // running, so the whole pipeline is exercisable without an SMTP account.
-    // The row is marked sent, so a dev database does not fill with failures.
     console.log(`[mailer] (not configured) would send to ${to}: ${subject}`);
     return { delivered: false, skipped: true };
   }
