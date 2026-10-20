@@ -8,11 +8,9 @@ const TICK_MS = 5 * 60 * 1000;
 // How long a claim counts as in-flight, so a dead pass gets swept up later.
 const CLAIM_LEASE_MINUTES = 5;
 
-// Retry delays in minutes (UC-8 7a.2), indexed by attempts already failed.
 const RETRY_MINUTES = [5, 30, 120];
 const MAX_ATTEMPTS = RETRY_MINUTES.length + 1; // the first send, plus one per retry slot
 
-// How far either side of today the daily repeat looks (FR-07.2), so thirty
 // unfinished tasks are not thirty mails. Overdue work stays in range.
 const DAILY_WINDOW_DAYS = 7;
 
@@ -21,7 +19,6 @@ const SENT_STATUSES = ['submitted'];
 const SENT_IN = SENT_STATUSES.map(() => '?').join(', ');
 
 // For a student who never saved settings. Must match DEFAULTS.lead_times in
-// routes/notifications.js, or the panel promises a reminder nobody sends.
 const DEFAULT_LEAD_MINUTES = 1440;
 
 // How fresh an announcement must be to count as news. See ANNOUNCEMENT_SQL.
@@ -100,7 +97,7 @@ function isOverdue(dueDate, now = new Date()) {
   return new Date(dueDate).getTime() < now.getTime();
 }
 
-// FR-07.6 — actionable from the subject alone, without opening the mail.
+// actionable from the subject alone, without opening the mail.
 function buildSubject({ title, dueDate }) {
   return `[ใกล้ครบกำหนด] ${title} — ส่ง ${formatThaiDateTime(dueDate)}`;
 }
@@ -138,7 +135,7 @@ function buildDailyBody({ studentName, title, courseName, dueDate, assignmentId,
   return lines.join('\n');
 }
 
-// FR-07.3 — task, course and due date must all be present. The countdown comes
+// task, course and due date must all be present. The countdown comes
 // from the due date, not the lead time, so a late retry does not still say "1 day".
 function buildBody({ studentName, title, courseName, dueDate, assignmentId, originLink }, now = new Date()) {
   const lines = [
@@ -195,11 +192,11 @@ function buildAnnouncementBody({
 }
 
 // Time conditions run in MySQL so there is one clock. due_date is wall-clock
-// (utils/dueDate.js), so backend and db must share TZ — docker-compose.yml sets it.
 //
 // From User_Account, not Notification_Setting: GET never inserts a row, so an
 // inner join made the panel promise reminders the sender could not see.
 const LEAD_REMINDER_SQL = `
+-- ดึงงานที่ใกล้ครบกำหนดส่งและยังไม่ส่ง title, origin_link, course_name, due_date, email, full_name, lead time
   SELECT a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
          s.email, s.full_name,
@@ -219,6 +216,7 @@ const LEAD_REMINDER_SQL = `
   JOIN Course c            ON c.student_id = s.user_id
   JOIN Assignment a        ON a.course_id = c.course_id
   JOIN Assignment_Detail d ON d.assignment_id = a.assignment_id
+  -- Checking enabled here, active acc, have due date, not already sent, and lead time window
   WHERE COALESCE(ns.enabled, TRUE) = TRUE
     AND s.account_status = 'active'
     AND d.due_date IS NOT NULL
@@ -228,9 +226,8 @@ const LEAD_REMINDER_SQL = `
   ORDER BY d.due_date
 `;
 
-// FR-07.2 — one mail per unfinished task, keyed daily:<date>. CURDATE() rides
+// one mail per unfinished task, keyed daily:<date>. CURDATE() rides
 // along so a pass crossing midnight cannot straddle two dates.
-// Inner join on purpose: daily_repeat defaults false, so no row means no repeat.
 const DAILY_REPEAT_SQL = `
   SELECT a.assignment_id, a.title, a.origin_link,
          c.course_name, d.due_date,
@@ -351,7 +348,7 @@ const ANNOUNCEMENT_RETRY_SWEEP_SQL = `
   ORDER BY n.next_attempt_at
 `;
 
-// UC-8 5a.2 — drop unsent reminders for handed-in tasks; sent history stays.
+// drop unsent reminders for handed-in tasks; sent history stays.
 const CANCEL_COMPLETED_SQL = `
   DELETE n FROM Notification n
   JOIN Assignment_Detail d ON n.assignment_id = d.assignment_id
@@ -420,7 +417,7 @@ async function deliver({ db, sendMail, logFailure, row, triggerType, notificatio
     await db.query(MARK_SENT_SQL, [notificationId]);
     return 'sent';
   } catch (err) {
-    // FR-07.7 — one bad address must not stop the pass.
+
     const delayMinutes = RETRY_MINUTES[attemptsSoFar];
     const outcome = delayMinutes === undefined ? 'failed' : 'retrying';
 
